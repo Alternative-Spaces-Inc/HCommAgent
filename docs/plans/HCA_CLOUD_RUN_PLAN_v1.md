@@ -29,13 +29,13 @@ The draft plan was reconciled against repo canon (docs/HCA_CHARTER_v1.md and api
 
 | Item | Draft Says | Repo Says | Action |
 | --- | --- | --- | --- |
-| `/v1/asks` | `/v1/asks` | `/v1/requests` | CHANGED |
-| `/v1/asks/{id}` | `/v1/asks/{id}` | `/v1/requests/{request_id}` | CHANGED |
-| `/v1/asks/{id}/answer` | `/v1/asks/{id}/answer` | `/v1/requests/{request_id}/answer` | CHANGED |
-| `/v1/asks/{id}/cancel` | `/v1/asks/{id}/cancel` | Absent | PROPOSED |
-| `/v1/inbox` | `/v1/inbox` | Absent | PROPOSED |
-| `/v1/inbox/stream` | `/v1/inbox/stream` | Absent | PROPOSED |
-| `/v1/audit` | `/v1/audit` | Absent | PROPOSED |
+| `/v1/requests` | `/v1/requests` | `/v1/requests` | CHANGED |
+| `/v1/requests/{request_id}` | `/v1/requests/{request_id}` | `/v1/requests/{request_id}` | CHANGED |
+| `/v1/requests/{request_id}/answer` | `/v1/requests/{request_id}/answer` | `/v1/requests/{request_id}/answer` | CHANGED |
+| `/v1/requests/{request_id}/cancel` | `/v1/requests/{request_id}/cancel` | Absent | DECIDED 2026-09-29 |
+| `/v1/inbox` | `/v1/inbox` | Absent | DECIDED 2026-09-29 |
+| `/v1/inbox/stream` | `/v1/inbox/stream` | Absent | DECIDED 2026-09-29 |
+| `/v1/audit` | `/v1/audit` | Absent | DECIDED 2026-09-29 |
 | `/v1/controls` | Absent | `/v1/controls` | RECONCILED |
 | `CollectionRequest` | Ask creation payload | `CollectionRequest` | CHANGED |
 | `Option` | Option object | `Option` | RECONCILED |
@@ -77,7 +77,7 @@ The draft plan was reconciled against repo canon (docs/HCA_CHARTER_v1.md and api
 | Workflows  |       | (Cloud Run) |       | (ServiceWkr) |       | (Slack/SMS)      |
 +------------+       +-------------+       +--------------+       +------------------+
       |                     |                     |                        |
-      | 1. POST /v1/asks    |                     |                        |
+      | 1. POST /v1/requests    |                     |                        |
       |-------------------->|                     |                        |
       |                     | 2. Persist Ask      |                        |
       |                     |    & Audit Row      |                        |
@@ -140,10 +140,10 @@ The API contract enforces strict typing, explicit recommendation contexts, and s
 
 | HTTP Method | Path | Summary | Key Request Fields / Parameters | Primary Response Fields |
 | :--- | :--- | :--- | :--- | :--- |
-| `POST` | `/v1/asks` | Create new ask | `kind` (enum: approve, choose_one, choose_many, value, acknowledge), `title` (str), `context` (str), `options` (array of Option objects), `default_option_id` (str), `timeout_seconds` (int), `escalation` (object), `callback_url` (str) | `id` (uuid), `status` (pending), `created_at` (iso8601), `expires_at` (iso8601) |
-| `GET` | `/v1/asks/{id}` | Fetch ask state | Path param: `id` (uuid) | Full ask payload, `status` (pending, answered, expired, cancelled), `answer` (object if answered) |
-| `POST` | `/v1/asks/{id}/answer` | Submit human decision | Path param: `id` (uuid); Body: `selected_option_ids` (array), `custom_value` (str), `device_id` (str), `signature` (base64 string) | `status` (accepted), `audit_id` (uuid), `recorded_at` (iso8601) |
-| `POST` | `/v1/asks/{id}/cancel` | Cancel active ask | Path param: `id` (uuid); Body: `reason` (str) | `id` (uuid), `status` (cancelled), `cancelled_at` (iso8601) |
+| `POST` | `/v1/requests` | Create new ask | `kind` (enum: approve, choose_one, choose_many, value, acknowledge), `title` (str), `context` (str), `options` (array of Option objects), `default_option_id` (str), `timeout_seconds` (int), `escalation` (object), `callback_url` (str) | `id` (uuid), `status` (pending), `created_at` (iso8601), `expires_at` (iso8601) |
+| `GET` | `/v1/requests/{request_id}` | Fetch ask state | Path param: `id` (uuid) | Full ask payload, `status` (pending, answered, expired, cancelled), `answer` (object if answered) |
+| `POST` | `/v1/requests/{request_id}/answer` | Submit human decision | Path param: `id` (uuid); Body: `selected_option_ids` (array), `custom_value` (str), `device_id` (str), `signature` (base64 string) | `status` (accepted), `audit_id` (uuid), `recorded_at` (iso8601) |
+| `POST` | `/v1/requests/{request_id}/cancel` | Cancel active ask | Path param: `id` (uuid); Body: `reason` (str) | `id` (uuid), `status` (cancelled), `cancelled_at` (iso8601) |
 | `GET` | `/v1/inbox` | List pending asks | Query params: `status` (default: pending), `limit` (int), `offset` (int) | `items` (array of ask objects), `total` (int) |
 | `GET` | `/v1/inbox/stream` | Real-time SSE channel | Headers: `Authorization: Bearer <user_token>`, `Last-Event-ID` | Text/event-stream pushing `ask.created`, `ask.cancelled`, `ask.expired` |
 | `GET` | `/v1/audit` | Query audit trail | Query params: `integration_id`, `user_id`, `from_date`, `to_date`, `limit` | `audit_rows` (array of audit records with cryptographic proofs) |
@@ -263,6 +263,7 @@ gcloud run deploy hca-api-service     --image=<REGION>-docker.pkg.dev/<PROJECT_I
 | **Prompt Injection** | High | Automation puts malicious script or text into ask context. | Strict UI widget constraints; sanitize all plain text; ban HTML rendering in popup interface. |
 | **Extension Impersonation** | Medium | Rogue extension attempts to connect to HCA API. | Validate Google OAuth ID tokens and check Chrome Extension ID in token claims and headers. |
 | **API Key Leakage** | Medium | Automation API keys exposed in logs or source code. | Store SHA256 hashed keys at rest; validate using constant-time checks; mount runtime secrets via Secret Manager. |
+| **Unanswered Red-Gate Expiry** | High | Red-gate request remains unanswered at deadline_at. | Automatic deny: system generates an explicit Deny answer record to caller at deadline_at (expiry_policy default auto_deny). |
 
 ---
 
@@ -290,7 +291,7 @@ All logs emitted to Cloud Logging follow structured JSON format:
 ### Dashboard Specification
 Single Cloud Monitoring dashboard tracking:
 1. **Ask Volume & Status**: Line chart tracking Created, Answered, Expired, and Cancelled asks per minute.
-2. **Endpoint Latencies**: P50, P95, and P99 response times for `/v1/asks` and `/v1/asks/{id}/answer`.
+2. **Endpoint Latencies**: P50, P95, and P99 response times for `/v1/requests` and `/v1/requests/{request_id}/answer`.
 3. **Active Real-Time Streams**: Gauge showing active SSE client connection counts.
 4. **Signature Failures**: Counter tracking rejected answers due to cryptographic signature mismatch.
 
@@ -325,7 +326,7 @@ echo "[1/4] Testing Health Check..."
 curl -sSf "${API_URL}/healthz" | grep -q "ok"
 
 echo "[2/4] Submitting Test Ask..."
-ASK_RESPONSE=$(curl -sSf -X POST "${API_URL}/v1/asks"   -H "Content-Type: application/json"   -H "X-HCA-API-Key: hca_live_test_prefix_secret"   -d '{
+ASK_RESPONSE=$(curl -sSf -X POST "${API_URL}/v1/requests"   -H "Content-Type: application/json"   -H "X-HCA-API-Key: hca_live_test_prefix_secret"   -d '{
     "kind": "approve",
     "title": "Smoke Test Ask",
     "context": "Verifying basic pipeline integrity",
@@ -349,7 +350,7 @@ ASK_ID=$(echo "${ASK_RESPONSE}" | python3 -c "import sys, json; print(json.load(
 echo "Ask created with ID: ${ASK_ID}"
 
 echo "[3/4] Submitting Signed Answer..."
-curl -sSf -X POST "${API_URL}/v1/asks/${ASK_ID}/answer"   -H "Content-Type: application/json"   -H "Authorization: Bearer mock_test_jwt"   -d '{
+curl -sSf -X POST "${API_URL}/v1/requests/${ASK_ID}/answer"   -H "Content-Type: application/json"   -H "Authorization: Bearer mock_test_jwt"   -d '{
     "selected_option_ids": ["opt_yes"],
     "device_id": "smoke_device_01",
     "signature": "mock_signature_data"
@@ -369,7 +370,7 @@ echo "=== Golden Path Smoke Test Passed Successfully ==="
 | :--- | :--- | :--- |
 | **Day 1** | Walking Skeleton on Cloud Run with FastAPI health check and Cloud SQL Postgres connection. | `curl -f https://<SERVICE_URL>/healthz` returns status 200 OK with database ping response under 10ms. |
 | **Day 2** | Database schema migrations and ORM models for Asks, Options, API Keys, and Audit Logs. | Pytest passes full CRUD and constraint validation suite against test database. |
-| **Day 3** | Asks API endpoints (`POST /v1/asks`, `GET /v1/asks/{id}`, `POST /v1/asks/{id}/answer`) and Webhook worker. | Automated test creates ask, posts answer, and receives webhook callback payload at receiver. |
+| **Day 3** | Asks API endpoints (`POST /v1/requests`, `GET /v1/requests/{request_id}`, `POST /v1/requests/{request_id}/answer`) and Webhook worker. | Automated test creates ask, posts answer, and receives webhook callback payload at receiver. |
 | **Day 4** | Surface Auth & Cryptography (Google OAuth token validation and ECDSA signature middleware). | Unsigned answer posts return HTTP 401/422; valid ECDSA signed answers return HTTP 200. |
 | **Day 5** | Real-Time SSE Engine (`GET /v1/inbox/stream`) with heartbeat management and reconnection logic. | EventSource client connects, receives `ask.created` within 100ms of POST, and reconnects on disconnect. |
 | **Day 6** | Chrome Extension MV3 skeleton, Service Worker SSE listener, badge counter, and storage manager. | Unpacked extension in Chrome connects background SSE and updates badge count when ask arrives. |
@@ -382,7 +383,8 @@ echo "=== Golden Path Smoke Test Passed Successfully ==="
 
 ## 11. Future Enhancement Backlog
 
-1. **macOS Native Surface App**: Native Swift/SwiftUI application in macOS menu bar listening to `/v1/inbox/stream` and displaying native notifications and decision widgets.
+1. **macOS notification client**: Client surface for macOS desktop notifications as step 2 in the surface ladder, receiving `/v1/inbox/stream` events and triggering native OS notifications.
+2. **macOS app**: Native Swift/SwiftUI application in macOS menu bar listening to `/v1/inbox/stream` and displaying native notifications and decision widgets.
 2. **Slack Surface Integration**: Slack Bot mapping asks to interactive Block Kit message cards with button actions translating to signed answers.
 3. **iMessage Surface Bridge**: Apple Messages integration pushing concise decision prompts to registered mobile devices for high priority approvals.
 4. **Model Context Protocol (MCP) Server**: MCP server exposing HCA capabilities directly as tools (`hca_create_ask`, `hca_check_status`) for LLM agents (e.g. Claude Desktop).
