@@ -1,7 +1,8 @@
 openapi: 3.1.0
 info:
   title: Human Collections Agent (HCA) API
-  version: 0.1.0-skeleton
+  version: 0.2.0
+  x-decisions: docs/decisions/DECISIONS_20260929.md
   description: >
     Collects what a human must decide or supply. A host UI or an AI system posts a
     collection request; HCA renders it front and center over the host page (or on a
@@ -43,8 +44,95 @@ paths:
   /v1/requests/{request_id}/answer:
     post:
       summary: Record the human's answer (called by the HCA surface, not by hosts)
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema: { type: string }
       responses:
         '201': { description: Answer recorded and delivered to the caller }
+  /v1/requests/{request_id}/cancel:
+    post:
+      summary: Cancel a request with a reason
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason: { type: string, description: Reason for cancelling the request }
+      responses:
+        '200':
+          description: Request cancelled
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReceipt'
+  /v1/inbox:
+    get:
+      summary: List pending requests sorted by deadline and impact
+      responses:
+        '200':
+          description: Array of pending collection requests sorted by deadline and impact
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/CollectionRequest'
+  /v1/inbox/stream:
+    get:
+      summary: Stream inbox events via Server-Sent Events (SSE)
+      description: >
+        Server-Sent Events (SSE) stream pushing request.created, request.answered,
+        request.cancelled, and request.expired events to connected surfaces.
+      responses:
+        '200':
+          description: SSE event stream
+          content:
+            text/event-stream:
+              schema:
+                $ref: '#/components/schemas/InboxStreamEvent'
+  /v1/audit:
+    get:
+      summary: Query audit history with filters
+      parameters:
+        - in: query
+          name: agent
+          schema: { type: string }
+          description: Filter by agent ID
+        - in: query
+          name: from
+          schema: { type: string, format: date-time }
+          description: Filter by start timestamp
+        - in: query
+          name: to
+          schema: { type: string, format: date-time }
+          description: Filter by end timestamp
+        - in: query
+          name: surface
+          schema: { $ref: '#/components/schemas/Surface' }
+          description: Filter by delivery or answer surface
+        - in: query
+          name: outcome
+          schema: { type: string }
+          description: Filter by decision or answer outcome
+      responses:
+        '200':
+          description: List of historical answer records with surface and device information
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/AnswerRecord'
   /v1/controls:
     get:
       summary: The control library, machine readable, for AI systems
@@ -58,6 +146,10 @@ paths:
                 items: { $ref: '#/components/schemas/ControlSpec' }
 components:
   schemas:
+    Surface:
+      type: string
+      enum: [browser_overlay, browser_notification, macos_notification, macos_app, web]
+      description: The surface on which a request is delivered or answered.
     CollectionRequest:
       type: object
       required: [caller, audience, title, control, options_or_fields, suggested, deliver_to]
@@ -97,6 +189,21 @@ components:
             read_aloud: { type: boolean, default: false }
             accept_speech: { type: boolean, default: false }
         deadline_at: { type: string, format: date-time }
+        expiry_policy:
+          type: string
+          enum: [auto_deny, expire, hold]
+          default: auto_deny
+          description: Policy when unanswered at deadline_at (defaults to auto_deny for red gates)
+        deliveries:
+          type: array
+          description: List of delivery attempts across surfaces
+          items:
+            type: object
+            required: [surface, delivered_at, state]
+            properties:
+              surface: { $ref: '#/components/schemas/Surface' }
+              delivered_at: { type: string, format: date-time }
+              state: { type: string }
         deliver_to:
           type: object
           description: Where the answer goes back
@@ -121,9 +228,10 @@ components:
       type: object
       properties:
         request_id: { type: string }
-        state: { type: string, enum: [queued, shown, answered, expired, withdrawn] }
+        state: { type: string, enum: [queued, shown, answered, expired, withdrawn, cancelled] }
     AnswerRecord:
       type: object
+      required: [request_id, control, surface]
       properties:
         request_id: { type: string }
         control: { type: string }
@@ -131,11 +239,25 @@ components:
         answered_by: { type: string }
         answered_role: { type: string }
         answered_at: { type: string, format: date-time }
-        surface: { type: string, enum: [web_overlay, standalone, phone, chat] }
+        surface: { $ref: '#/components/schemas/Surface' }
+        device: { type: string, description: Device identifier or cryptographic proof for the responding device }
         path_taken: { type: array, items: { type: string } }
         duration_ms: { type: integer }
         voice_used: { type: boolean }
         passthrough: { type: object }
+    InboxStreamEvent:
+      type: object
+      required: [event, data, timestamp]
+      properties:
+        event:
+          type: string
+          enum: [request.created, request.answered, request.cancelled, request.expired]
+        data:
+          type: object
+          description: Event payload (such as CollectionRequest, AnswerRecord, or RequestReceipt)
+        timestamp:
+          type: string
+          format: date-time
     ControlSpec:
       type: object
       properties:
