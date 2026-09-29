@@ -1,0 +1,49 @@
+seat: hca
+repo: Alternative-Spaces-Inc/human-collections-agent
+skills:
+- name: approved_run.py
+  path: bootstrap/skills/approved_run.py
+  sha256: 7fdd3d83f7abdc7fa154c46d51258867c58d0b5ded1a29712f56fef709ba3794
+  purpose: Approved-command execution lane for terminal bridge
+- name: mac_bridge.py
+  path: bootstrap/skills/mac_bridge.py
+  sha256: d481973e59edec058e05c90def5417c210ff26de71ee2bcf021d67a57b976fda
+  purpose: Client for Mac terminal bridge over HTTPS
+- name: sandbox_recovery.sh
+  path: bootstrap/skills/sandbox_recovery.sh
+  sha256: ffaa436916f63fde431b1891735a3091ea512656741ea1b06972f99e43c394b0
+  purpose: Sandbox recovery stub
+- name: agent_selfrecover.sh
+  path: bootstrap/skills/agent_selfrecover.sh
+  sha256: f48becb079fff9abe9ded6ba3730b5305ff81d179543efcae6c316339ea34e69
+  purpose: Agent self-recovery orchestrator
+- name: typed_facts.py
+  path: bootstrap/skills/typed_facts.py
+  sha256: f14029732dd0695215e07ef4fa3683f7ff00f3a3b0a80df5bb63e4b28ad64068
+  purpose: Typed operational-fact store reader
+- name: task-journal.sh
+  path: bootstrap/skills/task-journal.sh
+  sha256: ec5dd8ca8c57b9ff528473e1a9db8fa7544ddf63f64b5cda224b59dd70ee3e40
+  purpose: Interruption-recovery task journal
+- name: boot_heartbeat.sh
+  path: bootstrap/skills/boot_heartbeat.sh
+  sha256: 791eb1c28d032afdf646f2a08df37091251c2a8264659ce91745852c455db8e4
+  purpose: Self-reboot heartbeat automation
+- name: gh_safe_commit.py
+  path: bootstrap/skills/gh_safe_commit.py
+  sha256: 0998cb219d965706537e2f3f81f572fb8c32d86f6a0306517e1c070856bdadf8
+  purpose: Concurrency-safe GitHub commit client
+- name: skill_restore.py
+  path: bootstrap/skills/skill_restore.py
+  sha256: 60ffeafc29a806a072007e1e30acb3aba5113b578971da54a84c10060c004ff1
+  purpose: Skill auto-restore installer
+- name: secret-parity-check.sh
+  path: bootstrap/skills/secret-parity-check.sh
+  sha256: c85e89d15c5100a8a58b503f9925bf5cc053bdb89c597026940e32abdfbc5345
+  purpose: Agent secret parity verification
+rules:
+- bootstrap/agents-surface/rules/sub_agent_prompts_opus55.md
+- bootstrap/agents-surface/rules/repo_first_results.md
+- bootstrap/agents-surface/rules/path_first_owner_instructions.md
+surface_files:
+- bootstrap/agents-surface/BOOTSTRAP.md
