@@ -12,3 +12,6 @@
 - api/openapi.yaml: add POST /v1/requests/{id}/cancel, GET /v1/inbox, GET /v1/inbox/stream (text/event-stream), GET /v1/audit; add a surface field (browser_overlay, browser_notification, macos_notification, macos_app, web) on delivery records and on AnswerRecord.
 - docs/HCA_CHARTER_v1.md: surfaces section rewritten as the ladder (overlay, then browser notification, then macOS notification, then macOS app), same API, OS-fitted look and actions.
 - docs/plans/HCA_CLOUD_RUN_PLAN_v1.md: mark the four proposed endpoints as decided; add macOS notification client and macOS app as later build items.
+
+## Creation shape (Al, 14:00 PT)
+The HCA agent is created by cloning the Andy Superagent in the Base44 editor, then re-fitted to the HCA seat (soul, About you, settings through the workspace API; vault rows by Al). Declined: fresh Superagent, Base44 builder app.
