@@ -11,11 +11,11 @@ order, emit the bootstrap receipt, report GATE/STATUS/EVIDENCE/Next. The words r
 or bootstrap alone: assume the sandbox container was reset without your noticing; the
 procedure is not a file in your sandbox, it is this paragraph, so do not search for it. In
 bash, from your conversation workspace, run the following one command as written; it updates
-the canon clone, restores, then checks. Quote its final RESULT lines and every line that says
+the HCA repo checkout, restores, then checks. Quote its final RESULT lines and every line that says
 MISSING, DRIFT or RED back verbatim. Each such line is a real gap, never an expected flag:
-[ -d fpcore-canon ] || git clone -q https://x-access-token:${GITHUB_READONLY_TOKEN}@github.com/Alternative-Spaces-Inc/fpcore-migration-agent.git fpcore-canon; git -C fpcore-canon pull -q --ff-only; GITHUB_TOKEN="$GITHUB_READONLY_TOKEN" bash fpcore-canon/factory-bootstrap/_skills/seat_sandbox_bootstrap.sh; GITHUB_TOKEN="$GITHUB_READONLY_TOKEN" bash fpcore-canon/factory-bootstrap/_skills/seat_sandbox_bootstrap.sh --check
-Never print a secret value, never touch the seat lock, origin/main or any PR. Seat contract
-clause C12 in canon carries the long form.
+[ -d hca-repo ] || git clone -q https://x-access-token:${GITHUB_CLASSIC_TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git hca-repo; git -C hca-repo pull -q --ff-only; bash hca-repo/bootstrap/sandbox-bootstrap.sh; SANDBOX_BOOTSTRAP_DRY=1 bash hca-repo/bootstrap/seat_sandbox_bootstrap.sh
+Never print a secret value, never touch the seat lock, origin/main or any PR. The long form is
+agents/hca/HCA_BOOTSTRAP.md in the HCA repo.
 RULE 0: never write the em-dash character.
 
-Soul version: 224c95af
+Soul version: b1fe2ea3
