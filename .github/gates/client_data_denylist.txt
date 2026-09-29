@@ -1,0 +1,2 @@
+# Client data denylist terms.
+# One term or pattern per line. Add terms to fail check_client_data.py scan.

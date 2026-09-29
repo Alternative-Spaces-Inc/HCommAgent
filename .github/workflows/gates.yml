@@ -1,0 +1,63 @@
+name: HCA Quality Gates
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  dashes:
+    name: Check No Dash Characters
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run dash gate
+        run: python3 .github/gates/check_no_dashes.py
+
+  client-data:
+    name: Check Client Data Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Run client data gate
+        run: python3 .github/gates/check_client_data.py
+
+  manifest:
+    name: Check Bootstrap Manifest Integrity
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install PyYAML
+        run: pip install pyyaml
+      - name: Run manifest gate
+        run: python3 .github/gates/check_manifest.py
+
+  openapi:
+    name: Validate OpenAPI Specification
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install openapi-spec-validator
+        run: pip install openapi-spec-validator
+      - name: Validate OpenAPI spec
+        run: openapi-spec-validator api/openapi.yaml
