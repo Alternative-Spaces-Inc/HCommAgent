@@ -1,0 +1,145 @@
+openapi: 3.1.0
+info:
+  title: Human Collections Agent (HCA) API
+  version: 0.1.0-skeleton
+  description: >
+    Collects what a human must decide or supply. A host UI or an AI system posts a
+    collection request; HCA renders it front and center over the host page (or on a
+    standalone surface), collects the answer with the requested control, and returns a
+    typed answer record. Skeleton for Maya's plan; every control gets a full schema,
+    validation rules and a worked example in v0.2.
+paths:
+  /v1/requests:
+    post:
+      summary: Create a collection request
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CollectionRequest'
+      responses:
+        '201':
+          description: Request accepted; rendered when the target human arrives
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/RequestReceipt'
+  /v1/requests/{request_id}:
+    get:
+      summary: Read a request and its answer if any
+      parameters:
+        - in: path
+          name: request_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The request with its current state and answer record
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerRecord'
+  /v1/requests/{request_id}/answer:
+    post:
+      summary: Record the human's answer (called by the HCA surface, not by hosts)
+      responses:
+        '201': { description: Answer recorded and delivered to the caller }
+  /v1/controls:
+    get:
+      summary: The control library, machine readable, for AI systems
+      responses:
+        '200':
+          description: Every control with request schema, answer schema and example
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/ControlSpec' }
+components:
+  schemas:
+    CollectionRequest:
+      type: object
+      required: [caller, audience, title, control, options_or_fields, suggested, deliver_to]
+      properties:
+        caller: { type: string, description: Agent or system id making the request }
+        audience: { type: string, description: Human identity or role that must answer }
+        title: { type: string }
+        why: { type: string, description: Plain reason the answer is needed now }
+        path_hint: { $ref: '#/components/schemas/PathHint' }
+        zoom:
+          type: object
+          description: The underlying data the decision is about (a row, a diff, an image url)
+        control:
+          type: string
+          enum: [radio, checkbox, approve_deny, dropdown, chat, confirm_rows]
+        options_or_fields:
+          type: array
+          items: { $ref: '#/components/schemas/Option' }
+        suggested:
+          type: object
+          description: The suggested option and why; always present for selections
+          properties:
+            option_id: { type: string }
+            why: { type: string }
+        red_gate:
+          type: object
+          description: Present when the decision is a red gate
+          properties:
+            resource: { type: string }
+            change: { type: string }
+            impact: { type: string }
+            exact_command: { type: string }
+            rollback: { type: string }
+        voice:
+          type: object
+          properties:
+            read_aloud: { type: boolean, default: false }
+            accept_speech: { type: boolean, default: false }
+        deadline_at: { type: string, format: date-time }
+        deliver_to:
+          type: object
+          description: Where the answer goes back
+          properties:
+            mode: { type: string, enum: [webhook, poll, websocket] }
+            url: { type: string }
+    Option:
+      type: object
+      required: [id, label]
+      properties:
+        id: { type: string }
+        label: { type: string }
+        description: { type: string, description: Value of this option and when it is the right pick }
+    PathHint:
+      type: object
+      properties:
+        route: { type: string }
+        screen: { type: string }
+        control_label: { type: string }
+        button_label: { type: string }
+    RequestReceipt:
+      type: object
+      properties:
+        request_id: { type: string }
+        state: { type: string, enum: [queued, shown, answered, expired, withdrawn] }
+    AnswerRecord:
+      type: object
+      properties:
+        request_id: { type: string }
+        control: { type: string }
+        value: { description: Option id, list of ids, boolean, or text }
+        answered_by: { type: string }
+        answered_role: { type: string }
+        answered_at: { type: string, format: date-time }
+        surface: { type: string, enum: [web_overlay, standalone, phone, chat] }
+        path_taken: { type: array, items: { type: string } }
+        duration_ms: { type: integer }
+        voice_used: { type: boolean }
+        passthrough: { type: object }
+    ControlSpec:
+      type: object
+      properties:
+        control: { type: string }
+        request_schema: { type: object }
+        answer_schema: { type: object }
+        example: { type: object }
