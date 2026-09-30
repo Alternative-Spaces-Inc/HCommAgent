@@ -323,7 +323,7 @@ API_URL="${1:-http://localhost:8080}"
 echo "=== Starting HCA Golden Path Smoke Test against ${API_URL} ==="
 
 echo "[1/4] Testing Health Check..."
-curl -sSf "${API_URL}/healthz" | grep -q "ok"
+curl -sSf "${API_URL}/health" | grep -q "ok"   # /health from outside; the Cloud Run frontend swallows exactly /healthz
 
 echo "[2/4] Submitting Test Ask..."
 ASK_RESPONSE=$(curl -sSf -X POST "${API_URL}/v1/requests"   -H "Content-Type: application/json"   -H "X-HCA-API-Key: hca_live_test_prefix_secret"   -d '{

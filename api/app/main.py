@@ -15,11 +15,18 @@ app.include_router(sweep_router)
 
 
 @app.get("/healthz")
+@app.get("/health")
 def healthz():
     """200 {"status": "ok", "db": "ok"} when the database answers SELECT 1;
     503 {"status": "degraded", "db": "down"} when it does not. Cloud Run's
     startup probe and the plan's Day 1 acceptance both read this route, so a
-    dead database must be a clean 503, not an unhandled 500."""
+    dead database must be a clean 503, not an unhandled 500.
+
+    Two paths on purpose. /healthz is what the container probe hits from
+    inside Cloud Run. From the public URL the Google frontend answers exactly
+    /healthz itself with an HTML 404 and never forwards it (seen on the first
+    deploy, 2026-09-30: /healthz gave Google's 404 page while /healthzz and
+    /healthz/ reached FastAPI). /health is the path external checks use."""
     try:
         ok = db_ping()
     except Exception:
