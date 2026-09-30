@@ -14,6 +14,7 @@ from app.db import Base, engine, SessionLocal
 from app.expiry import run_expiry_sweep
 from app import models
 from authhelper import agent_auth
+from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -59,7 +60,7 @@ def test_default_auto_deny_writes_a_deny_answer_record_and_expires():
     assert body["answer"]["value"]["decision"] == "deny"
     assert body["answer"]["answered_by"] == "system:expiry_sweep"
 
-    resp = client.get("/v1/audit", params={"agent": "agent-default", "outcome": "deny"})
+    resp = human_get(client, "/v1/audit", params={"agent": "agent-default", "outcome": "deny"})
     assert any(r["request_id"] == request_id for r in resp.json())
 
 
@@ -141,7 +142,7 @@ def test_no_deadline_never_swept():
 def test_terminal_states_are_never_reswept():
     past = datetime.now(timezone.utc) - timedelta(hours=1)
     request_id = _create("agent-answered", past)
-    client.post(f"/v1/requests/{request_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
+    human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
 
     db = SessionLocal()
     try:

@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine
 from authhelper import agent_auth, ADMIN_AUTH
+from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -54,33 +55,33 @@ def test_cancelled_request_drops_out_of_inbox():
     request_id = resp.json()["request_id"]
     client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "y"}, headers=agent_auth("agent-a"))
 
-    resp = client.get("/v1/inbox")
+    resp = human_get(client, "/v1/inbox")
     ids = [item.get("title") for item in resp.json()]
     assert request_id not in [i for i in ids]  # sanity: no crash; cancelled asks aren't pending
-    resp2 = client.get("/v1/inbox")
+    resp2 = human_get(client, "/v1/inbox")
     assert all(True for _ in resp2.json())
 
 
 def test_audit_filters_by_agent_surface_and_outcome():
     resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-1"), headers=agent_auth("agent-audit-1"))
     rid1 = resp.json()["request_id"]
-    client.post(f"/v1/requests/{rid1}/answer", json={"control": "radio", "value": "red", "surface": "browser_overlay"})
+    human_post(client, f"/v1/requests/{rid1}/answer", json={"control": "radio", "value": "red", "surface": "browser_overlay"})
 
     resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-2"), headers=agent_auth("agent-audit-2"))
     rid2 = resp.json()["request_id"]
     client.post(f"/v1/requests/{rid2}/cancel", json={"reason": "test cancel"}, headers=agent_auth("agent-audit-2"))
 
-    resp = client.get("/v1/audit", params={"agent": "agent-audit-1"})
+    resp = human_get(client, "/v1/audit", params={"agent": "agent-audit-1"})
     assert resp.status_code == 200
     records = resp.json()
     assert any(r["request_id"] == rid1 for r in records)
     assert all(r["request_id"] != rid2 for r in records)
 
-    resp = client.get("/v1/audit", params={"surface": "browser_overlay"})
+    resp = human_get(client, "/v1/audit", params={"surface": "browser_overlay"})
     records = resp.json()
     assert any(r["request_id"] == rid1 for r in records)
 
-    resp = client.get("/v1/audit", params={"outcome": "cancel"})
+    resp = human_get(client, "/v1/audit", params={"outcome": "cancel"})
     records = resp.json()
     assert any(r["request_id"] == rid2 for r in records)
     assert all(r["request_id"] != rid1 for r in records)

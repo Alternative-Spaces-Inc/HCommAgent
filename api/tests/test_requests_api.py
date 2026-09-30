@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine
 from authhelper import agent_auth, ADMIN_AUTH
+from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -52,8 +53,7 @@ def test_answer_then_409_on_second_answer():
     resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("test-agent"))
     request_id = resp.json()["request_id"]
 
-    resp = client.post(
-        f"/v1/requests/{request_id}/answer",
+    resp = human_post(client, f"/v1/requests/{request_id}/answer",
         json={"control": "radio", "value": "blue", "surface": "browser_overlay"},
     )
     assert resp.status_code == 201
@@ -65,8 +65,7 @@ def test_answer_then_409_on_second_answer():
     assert resp.json()["state"] == "answered"
     assert resp.json()["answer"]["value"] == "blue"
 
-    resp = client.post(
-        f"/v1/requests/{request_id}/answer",
+    resp = human_post(client, f"/v1/requests/{request_id}/answer",
         json={"control": "radio", "value": "red", "surface": "browser_overlay"},
     )
     assert resp.status_code == 409
@@ -76,8 +75,7 @@ def test_answer_422_on_bad_option_id():
     resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("test-agent"))
     request_id = resp.json()["request_id"]
 
-    resp = client.post(
-        f"/v1/requests/{request_id}/answer",
+    resp = human_post(client, f"/v1/requests/{request_id}/answer",
         json={"control": "radio", "value": "green", "surface": "browser_overlay"},
     )
     assert resp.status_code == 422

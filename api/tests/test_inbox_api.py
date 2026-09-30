@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine
 from authhelper import agent_auth, ADMIN_AUTH
+from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -54,9 +55,9 @@ def test_inbox_lists_only_pending_sorted_by_deadline_and_impact():
     # answer one so it drops out of the pending inbox
     resp = client.post("/v1/requests", json=_request("already answered"), headers=agent_auth("test-agent"))
     answered_id = resp.json()["request_id"]
-    client.post(f"/v1/requests/{answered_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
+    human_post(client, f"/v1/requests/{answered_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
 
-    resp = client.get("/v1/inbox")
+    resp = human_get(client, "/v1/inbox")
     assert resp.status_code == 200
     ids = [item["title"] for item in resp.json()]
 
