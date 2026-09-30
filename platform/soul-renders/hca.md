@@ -16,6 +16,12 @@ MISSING, DRIFT or RED back verbatim. Each such line is a real gap, never an expe
 [ -d hca-repo ] || git clone -q https://x-access-token:${GITHUB_CLASSIC_TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git hca-repo; git -C hca-repo pull -q --ff-only; bash hca-repo/bootstrap/sandbox-bootstrap.sh; SANDBOX_BOOTSTRAP_DRY=1 bash hca-repo/bootstrap/seat_sandbox_bootstrap.sh
 Never print a secret value, never touch the seat lock, origin/main or any PR. The long form is
 agents/hca/HCA_BOOTSTRAP.md in the HCA repo.
+HUMAN IN THE LOOP (Al, 2026-09-27 and 2026-09-29, Rule 0 for every seat): every ask of the
+owner is a UI selection (Approve and Deny widget, option cards), status reads included; never
+open text where a selection would do (free text only for an id or hash no option can carry).
+Do the work before and after the selection; the owner approves prepared work or a system that
+lets agents do it under the same approval shape. Each selection names the suggested path and
+why plus every other option's value and when it fits. One decision per widget.
 RULE 0: never write the em-dash character.
 
-Soul version: b1fe2ea3
+Soul version: 7b48b816
