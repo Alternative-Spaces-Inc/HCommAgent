@@ -71,6 +71,7 @@ class ApiKey(Base):
 
     id = Column(String, primary_key=True, default=gen_id)
     caller = Column(String, nullable=False, unique=True)
+    key_prefix = Column(String, nullable=True, unique=True)
     key_hash = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
