@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option
+from .events import publish
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -85,7 +86,9 @@ def create_request(body: CollectionRequest, db: Session = Depends(get_db)):
         db.add(models.AskDelivery(ask_id=ask.id, surface=d.surface, delivered_at=d.delivered_at, state=d.state))
 
     db.commit()
-    return {"request_id": ask.id, "state": ask.state}
+    receipt = {"request_id": ask.id, "state": ask.state}
+    publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id})
+    return receipt
 
 
 @router.get("/{request_id}", response_model=RequestView)
@@ -150,4 +153,6 @@ def answer_request(request_id: str, body: AnswerSubmission, db: Session = Depend
     ask.state = "answered"
     db.commit()
 
-    return _audit_to_answer_record(row)
+    record = _audit_to_answer_record(row)
+    publish("request.answered", record)
+    return record
