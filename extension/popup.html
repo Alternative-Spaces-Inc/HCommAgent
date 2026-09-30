@@ -1,0 +1,30 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Human Collections Agent</title>
+  <style>
+    body { font: 13px system-ui, sans-serif; width: 360px; margin: 0; padding: 10px; color: #111; }
+    h1 { font-size: 14px; margin: 0 0 8px; }
+    .empty { color: #666; padding: 12px 0; }
+    .card { border: 1px solid #ddd; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+    .card.red-gate { border-color: #c0392b; background: #fdf0ee; }
+    .title { font-weight: 600; margin-bottom: 4px; }
+    .why { color: #555; margin-bottom: 8px; }
+    .suggested { font-size: 12px; color: #2a7a2a; margin-bottom: 6px; }
+    .options label { display: block; padding: 4px 0; }
+    .options input { margin-right: 6px; }
+    .actions { margin-top: 8px; display: flex; gap: 8px; }
+    button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid #bbb; background: #f5f5f5; cursor: pointer; }
+    button.primary { background: #2a6fdb; color: #fff; border-color: #2a6fdb; }
+    button.deny { background: #c0392b; color: #fff; border-color: #c0392b; }
+    .unsupported { color: #a05a00; font-size: 12px; }
+    .error { color: #c0392b; font-size: 12px; margin-top: 6px; }
+  </style>
+</head>
+<body>
+  <h1>Pending decisions</h1>
+  <div id="cards"></div>
+  <script type="module" src="popup.js"></script>
+</body>
+</html>
