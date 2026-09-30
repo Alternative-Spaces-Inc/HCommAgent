@@ -34,6 +34,23 @@ MISSING=0
 SKILLS_PRESENT=0
 SKILLS_TOTAL=0
 RULES_INSTALLED=0
+DRIFT=0
+BACKUP_DIR="$AGENTS_DIR/.drift-backup/$(date -u +%Y%m%dT%H%M%SZ)"
+
+# The HCA repo is canon for this seat. A live file that differs from canon is a real gap: the
+# seat was cloned from another agent and inherited that agent's surface. Canon wins: the live
+# copy is backed up under .agents/.drift-backup and replaced; --check only reports it.
+replace_drift() {  # $1 canon $2 live $3 label
+  DRIFT=$((DRIFT + 1))
+  if [ $DRY_RUN -eq 1 ]; then
+    echo "DRIFT: $3 differs from canon (would back up and replace)"
+  else
+    mkdir -p "$BACKUP_DIR"
+    cp "$2" "$BACKUP_DIR/$(basename "$2")"
+    cp "$1" "$2"
+    echo "$3: drift from canon, live backed up to $BACKUP_DIR, canon installed"
+  fi
+}
 
 # 1. Surface BOOTSTRAP.md
 CANON_BOOT="$REPO_DIR/bootstrap/agents-surface/BOOTSTRAP.md"
@@ -50,7 +67,7 @@ if [ -f "$CANON_BOOT" ]; then
   elif cmp -s "$CANON_BOOT" "$LIVE_BOOT"; then
     echo "seat bootstrap: BOOTSTRAP.md present and current"
   else
-    echo "seat bootstrap: BOOTSTRAP.md present, drift from canon (live kept)"
+    replace_drift "$CANON_BOOT" "$LIVE_BOOT" "seat bootstrap: BOOTSTRAP.md"
   fi
 else
   echo "MISSING: surface BOOTSTRAP.md"
@@ -76,7 +93,7 @@ if [ -d "$RULES_SRC" ]; then
     elif cmp -s "$r" "$RULES_DST/$b"; then
       echo "rule: $b present and current"
     else
-      echo "rule: $b present, drift from canon (live kept)"
+      replace_drift "$r" "$RULES_DST/$b" "rule: $b"
     fi
   done
 fi
@@ -122,7 +139,8 @@ for sname in $SKILL_NAMES; do
       echo "skill: $sname present and current"
       SKILLS_PRESENT=$((SKILLS_PRESENT + 1))
     else
-      echo "skill: $sname present, drift from canon"
+      replace_drift "$SSRC" "$SDST" "skill: $sname"
+      chmod +x "$SDST"
       SKILLS_PRESENT=$((SKILLS_PRESENT + 1))
     fi
   else
@@ -131,8 +149,11 @@ for sname in $SKILL_NAMES; do
   fi
 done
 
-if [ $MISSING -eq 0 ]; then
-  echo "RESULT: GREEN - skills $SKILLS_PRESENT/$SKILLS_TOTAL present, surface surface files verified"
+if [ $MISSING -eq 0 ] && [ $DRIFT -gt 0 ] && [ $DRY_RUN -eq 1 ]; then
+  echo "RESULT: DRIFT - skills $SKILLS_PRESENT/$SKILLS_TOTAL present, $DRIFT live files differ from canon; run without --check to install canon"
+  exit 2
+elif [ $MISSING -eq 0 ]; then
+  echo "RESULT: GREEN - skills $SKILLS_PRESENT/$SKILLS_TOTAL present, surface files verified, $DRIFT drifted files replaced from canon"
   exit 0
 else
   echo "RESULT: RED - $MISSING items missing or failed"
