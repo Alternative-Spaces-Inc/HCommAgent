@@ -7,6 +7,8 @@
 // reconciliation table at the top of that same plan document for the list
 // of fields it changed).
 
+import { signedFetch } from "./devicekey.js";
+
 export const SURFACE = "browser_overlay";
 
 // Controls this client version renders. The full control library
@@ -46,7 +48,9 @@ export function buildAnswerPayload({ control, selection, answeredBy, deviceId })
 }
 
 export async function postAnswer(apiBase, requestId, body) {
-  const resp = await fetch(`${apiBase}/v1/requests/${encodeURIComponent(requestId)}/answer`, {
+  // Signed per device (HCA-P6, lib/devicekey.js): the server records the
+  // verified device id on the answer, whatever body.device says.
+  const resp = await signedFetch(`${apiBase}/v1/requests/${encodeURIComponent(requestId)}/answer`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
@@ -59,7 +63,7 @@ export async function postAnswer(apiBase, requestId, body) {
 }
 
 export async function fetchInbox(apiBase) {
-  const resp = await fetch(`${apiBase}/v1/inbox`);
+  const resp = await signedFetch(`${apiBase}/v1/inbox`);
   if (!resp.ok) {
     throw new Error(`GET /v1/inbox failed: ${resp.status}`);
   }

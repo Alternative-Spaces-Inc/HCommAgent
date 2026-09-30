@@ -5,6 +5,6 @@
   "type": "module",
   "description": "Human Collections Agent browser overlay client (Chrome MV3): SSE inbox stream with an alarm fallback, native radio, checkbox, and approve/deny controls.",
   "scripts": {
-    "test": "node --test tests/"
+    "test": "node --test tests/*.test.js"
   }
 }

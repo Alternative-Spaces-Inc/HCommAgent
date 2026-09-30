@@ -4,12 +4,15 @@
   <meta charset="utf-8" />
   <title>Human Collections Agent: Options</title>
   <style>
-    body { font: 13px system-ui, sans-serif; max-width: 420px; margin: 24px auto; }
+    body { font: 13px system-ui, sans-serif; max-width: 520px; margin: 24px auto; }
     label { display: block; margin-bottom: 4px; font-weight: 600; }
-    input { width: 100%; padding: 6px; box-sizing: border-box; margin-bottom: 10px; }
+    input, textarea { width: 100%; padding: 6px; box-sizing: border-box; margin-bottom: 10px; font-family: ui-monospace, monospace; }
+    textarea { height: 120px; resize: vertical; }
     button { padding: 6px 14px; }
     .saved { color: #2a7a2a; margin-left: 8px; }
     p.note { color: #666; font-size: 12px; }
+    code { font-family: ui-monospace, monospace; }
+    h2 { font-size: 14px; margin-top: 28px; }
   </style>
 </head>
 <body>
@@ -19,11 +22,24 @@
   <button id="save">Save</button>
   <span id="saved" class="saved" hidden>Saved</span>
   <p class="note">
-    No Cloud Run URL is deployed yet; this is left blank until one exists.
-    Once deployed, this origin should also be added to manifest.json's
-    host_permissions so extension fetches are not subject to page CORS
-    rules.
+    The Cloud Run service URL from the deploy runbook, no trailing slash.
+    Add the same origin to manifest.json host_permissions when packaging.
   </p>
+
+  <h2>This device</h2>
+  <p class="note">
+    Every inbox read and every answer from this browser profile is signed
+    with a P-256 key generated here and kept in extension storage. The
+    server accepts it only after the owner registers the public key below
+    (POST /v1/devices with the admin token). Clearing extension storage
+    makes a new key, which must be registered again.
+  </p>
+  <label>Device id</label>
+  <p><code id="device-id"></code> <span class="note">created <span id="device-created"></span></span></p>
+  <label for="device-pem">Public key (PEM)</label>
+  <textarea id="device-pem" readonly></textarea>
+  <button id="copy-pem">Copy public key</button>
+  <span id="copied" class="saved" hidden>Copied</span>
   <script type="module" src="options.js"></script>
 </body>
 </html>

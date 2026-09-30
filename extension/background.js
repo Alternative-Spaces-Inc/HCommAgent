@@ -7,6 +7,7 @@
 // stream mid-connection.
 
 import { fetchInbox, parseSSEChunk, unwrapStreamEnvelope, SURFACE } from "./lib/api.js";
+import { signedFetch } from "./lib/devicekey.js";
 
 const POLL_ALARM_NAME = "hca-inbox-poll";
 const POLL_INTERVAL_MINUTES = 1;
@@ -90,7 +91,7 @@ async function connectStream() {
   streamAbortController = new AbortController();
 
   try {
-    const resp = await fetch(`${apiBase}/v1/inbox/stream`, { signal: streamAbortController.signal });
+    const resp = await signedFetch(`${apiBase}/v1/inbox/stream`, { signal: streamAbortController.signal });
     if (!resp.ok || !resp.body) {
       throw new Error(`stream connect failed: ${resp.status}`);
     }
