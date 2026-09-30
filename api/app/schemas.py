@@ -108,3 +108,7 @@ class RequestView(BaseModel):
     expires_at: Optional[datetime] = None
     request: CollectionRequest
     answer: Optional[AnswerRecord] = None
+
+
+class CancelRequestBody(BaseModel):
+    reason: str

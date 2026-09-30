@@ -1,11 +1,15 @@
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException
+from typing import Optional
+
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from . import models
 from .db import get_db
-from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option
+from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
+from .events import publish
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -85,7 +89,9 @@ def create_request(body: CollectionRequest, db: Session = Depends(get_db)):
         db.add(models.AskDelivery(ask_id=ask.id, surface=d.surface, delivered_at=d.delivered_at, state=d.state))
 
     db.commit()
-    return {"request_id": ask.id, "state": ask.state}
+    receipt = {"request_id": ask.id, "state": ask.state}
+    publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id})
+    return receipt
 
 
 @router.get("/{request_id}", response_model=RequestView)
@@ -150,4 +156,79 @@ def answer_request(request_id: str, body: AnswerSubmission, db: Session = Depend
     ask.state = "answered"
     db.commit()
 
-    return _audit_to_answer_record(row)
+    record = _audit_to_answer_record(row)
+    publish("request.answered", record)
+    return record
+
+
+def _outcome_of(value) -> Optional[str]:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        return value.get("decision")
+    return None
+
+
+@router.post("/{request_id}/cancel", response_model=RequestReceipt)
+def cancel_request(request_id: str, body: CancelRequestBody, db: Session = Depends(get_db)):
+    ask = db.get(models.Ask, request_id)
+    if ask is None:
+        raise HTTPException(status_code=404, detail="request not found")
+
+    if ask.state in TERMINAL_STATES:
+        raise HTTPException(status_code=409, detail=f"request already {ask.state}")
+
+    now = datetime.now(timezone.utc)
+    row = models.AuditRow(
+        ask_id=ask.id,
+        control=ask.control,
+        value={"decision": "cancel", "reason": body.reason},
+        answered_by=None,
+        answered_role=None,
+        answered_at=now,
+        surface="web",
+        device=None,
+        path_taken=None,
+        duration_ms=None,
+        voice_used=None,
+        passthrough={"reason": body.reason},
+    )
+    db.add(row)
+    ask.state = "cancelled"
+    db.commit()
+
+    publish("request.cancelled", _audit_to_answer_record(row))
+    return {"request_id": ask.id, "state": ask.state}
+
+
+audit_router = APIRouter(prefix="/v1/audit", tags=["audit"])
+
+
+@audit_router.get("", response_model=list[AnswerRecord])
+def query_audit(
+    agent: Optional[str] = Query(default=None, description="Filter by agent ID"),
+    from_: Optional[datetime] = Query(default=None, alias="from", description="Filter by start timestamp"),
+    to: Optional[datetime] = Query(default=None, description="Filter by end timestamp"),
+    surface: Optional[str] = Query(default=None, description="Filter by delivery or answer surface"),
+    outcome: Optional[str] = Query(default=None, description="Filter by decision or answer outcome"),
+    db: Session = Depends(get_db),
+):
+    stmt = select(models.AuditRow, models.Ask).join(models.Ask, models.AuditRow.ask_id == models.Ask.id)
+
+    if agent:
+        stmt = stmt.where(models.Ask.caller == agent)
+    if surface:
+        stmt = stmt.where(models.AuditRow.surface == surface)
+    if from_:
+        stmt = stmt.where(models.AuditRow.answered_at >= from_)
+    if to:
+        stmt = stmt.where(models.AuditRow.answered_at <= to)
+
+    rows = db.execute(stmt).all()
+
+    records = []
+    for row, _ask in rows:
+        if outcome and _outcome_of(row.value) != outcome:
+            continue
+        records.append(_audit_to_answer_record(row))
+    return records
