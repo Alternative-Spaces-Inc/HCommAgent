@@ -61,3 +61,39 @@ jobs:
         run: pip install openapi-spec-validator
       - name: Validate OpenAPI spec
         run: openapi-spec-validator api/openapi.yaml
+
+  pytest:
+    name: API Tests (Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: hca
+          POSTGRES_PASSWORD: hca
+          POSTGRES_DB: hca_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgresql+psycopg2://hca:hca@localhost:5432/hca_test
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        working-directory: api
+        run: pip install -r requirements.txt psycopg2-binary
+      - name: Run migrations
+        working-directory: api
+        run: alembic upgrade head
+      - name: Run pytest
+        working-directory: api
+        run: pytest -v
