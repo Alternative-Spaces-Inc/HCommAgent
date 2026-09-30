@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "Human Collections Agent",
+  "version": "0.1.0",
+  "description": "Browser overlay surface for HCA: SSE inbox stream with a Chrome alarm fallback, native radio, checkbox, and approve/deny controls.",
+  "permissions": ["storage", "notifications", "alarms"],
+  "host_permissions": [],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Human Collections Agent"
+  },
+  "options_page": "options.html"
+}

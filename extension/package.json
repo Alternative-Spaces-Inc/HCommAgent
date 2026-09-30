@@ -1,0 +1,10 @@
+{
+  "name": "hca-browser-overlay-extension",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Human Collections Agent browser overlay client (Chrome MV3): SSE inbox stream with an alarm fallback, native radio, checkbox, and approve/deny controls.",
+  "scripts": {
+    "test": "node --test tests/"
+  }
+}

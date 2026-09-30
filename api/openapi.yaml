@@ -157,8 +157,51 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ControlSpec' }
+  /v1/api-keys:
+    post:
+      summary: Issue an API key for an automation caller (PROPOSED, not yet in the 2026-09-29 decisions log)
+      description: >
+        Added in dispatch hca-p3-20260929, not one of the endpoints the
+        2026-09-29 decisions log reconciled (see docs/decisions/DECISIONS_20260929.md);
+        this path awaits the same review cancel, inbox, inbox/stream, and audit
+        already got before it is treated as settled canon.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [caller]
+              properties:
+                caller:
+                  type: string
+                  description: Agent or system id this key authenticates as
+      responses:
+        '201':
+          description: The plaintext key, shown once; only its hash is stored
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyIssueResponse'
+
 components:
   schemas:
+    ApiKeyIssueResponse:
+      type: object
+      required: [api_key, prefix, caller, created_at]
+      properties:
+        api_key:
+          type: string
+          description: The plaintext key, formatted hca_live_<prefix>_<secret>; shown once
+        prefix:
+          type: string
+          description: The non-secret lookup prefix, stored in the clear
+        caller:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
     Surface:
       type: string
       enum: [browser_overlay, browser_notification, macos_notification, macos_app, web]
