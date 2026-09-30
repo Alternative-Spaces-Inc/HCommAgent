@@ -8,7 +8,7 @@ What this runbook stands up, matching `docs/plans/HCA_CLOUD_RUN_PLAN_v1.md` sect
 | :--- | :--- | :--- |
 | Artifact Registry repo | `hca-services` | image storage |
 | Runtime service account | `sa-hca-api` | identity of the service and the migrate job |
-| Cloud SQL instance | `hca-pg` (Postgres 16, `db-f1-micro`) | the database; resize later, the tier is not a code fact |
+| Cloud SQL instance | `hca-pg` (Postgres 16, Enterprise edition, `db-f1-micro`) | the database; resize later, the tier is not a code fact |
 | Database and user | `hca` / `hca` | the app's schema |
 | Secrets | `hca-database-url`, `hca-sweep-trigger-token`, `hca-admin-token` | mounted as env vars, never in code |
 | Cloud Run job | `hca-migrate` | `alembic upgrade head` before each deploy |
@@ -49,17 +49,17 @@ Expected: `Created repository [hca-services].` (or `ALREADY_EXISTS`, which is fi
 ## Step 3: runtime service account and its four roles
 
 ```bash
-P=<PROJECT_ID> && SA="sa-hca-api@${P}.iam.gserviceaccount.com" && gcloud iam service-accounts create sa-hca-api --project="$P" --display-name="HCA Cloud Run runtime" ; for R in roles/cloudsql.client roles/secretmanager.secretAccessor roles/logging.logWriter roles/monitoring.metricWriter; do gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:${SA}" --role="$R" --condition=None --quiet >/dev/null && echo "granted $R"; done
+P=<PROJECT_ID> && SA="sa-hca-api@${P}.iam.gserviceaccount.com" && gcloud iam service-accounts create sa-hca-api --project="$P" --display-name="HCA Cloud Run runtime" && sleep 20 && for R in roles/cloudsql.client roles/secretmanager.secretAccessor roles/logging.logWriter roles/monitoring.metricWriter; do gcloud projects add-iam-policy-binding "$P" --member="serviceAccount:${SA}" --role="$R" --condition=None --quiet >/dev/null && echo "granted $R"; done
 ```
 
-Expected: four `granted roles/...` lines.
+Expected: four `granted roles/...` lines. The 20 second pause is not optional: IAM takes a few seconds to see a new service account, and without it every grant fails with "service account does not exist" (seen on the first run, 2026-09-30).
 
 ## Step 4: Cloud SQL Postgres, database, user, and the DATABASE_URL secret in one go
 
-The password is generated inside the block and written straight into Secret Manager; it is never printed and never pasted anywhere. This block takes several minutes (instance creation).
+The password is generated inside the block and written straight into Secret Manager; it is never printed and never pasted anywhere. This block takes several minutes (instance creation; the first instance in a new project has taken over 20). `--edition=enterprise` is required: gcloud now defaults to Enterprise Plus, which rejects the shared-core tier (seen on the first run, 2026-09-30).
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && gcloud sql instances create hca-pg --project="$P" --database-version=POSTGRES_16 --tier=db-f1-micro --region="$R" --storage-size=10GB --storage-auto-increase --backup-start-time=03:00 --quiet && gcloud sql databases create hca --instance=hca-pg --project="$P" && PW="$(openssl rand -base64 30 | tr -d '/+=' | cut -c1-32)" && gcloud sql users create hca --instance=hca-pg --project="$P" --password="$PW" && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && printf 'postgresql+psycopg2://hca:%s@/hca?host=/cloudsql/%s' "$PW" "$CONN" | gcloud secrets create hca-database-url --project="$P" --replication-policy=automatic --data-file=- && echo "CONNECTION_NAME=$CONN"
+P=<PROJECT_ID> && R=<REGION> && gcloud sql instances create hca-pg --project="$P" --database-version=POSTGRES_16 --edition=enterprise --tier=db-f1-micro --region="$R" --storage-size=10GB --storage-auto-increase --backup-start-time=03:00 --quiet && gcloud sql databases create hca --instance=hca-pg --project="$P" && PW="$(openssl rand -base64 30 | tr -d '/+=' | cut -c1-32)" && gcloud sql users create hca --instance=hca-pg --project="$P" --password="$PW" && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && printf 'postgresql+psycopg2://hca:%s@/hca?host=/cloudsql/%s' "$PW" "$CONN" | gcloud secrets create hca-database-url --project="$P" --replication-policy=automatic --data-file=- && echo "CONNECTION_NAME=$CONN"
 ```
 
 Expected: the last line `CONNECTION_NAME=<PROJECT_ID>:<REGION>:hca-pg`. Keep that value; steps 8 and 10 use it as `_CLOUDSQL_INSTANCE`.
