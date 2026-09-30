@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .apikeys import issue_api_key
+from .auth import require_admin_bearer
 
 router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
 
@@ -22,6 +23,6 @@ class ApiKeyIssueResponse(BaseModel):
 
 
 @router.post("", response_model=ApiKeyIssueResponse, status_code=201)
-def issue_key(body: ApiKeyIssueRequest, db: Session = Depends(get_db)):
+def issue_key(body: ApiKeyIssueRequest, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
     result = issue_api_key(db, body.caller)
     return result

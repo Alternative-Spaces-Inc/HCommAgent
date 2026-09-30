@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import Base, engine
+from authhelper import agent_auth, ADMIN_AUTH
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -29,29 +30,29 @@ def _sample_request(caller="agent-a"):
 
 
 def test_cancel_sets_state_and_then_409_on_second_cancel():
-    resp = client.post("/v1/requests", json=_sample_request())
+    resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("agent-a"))
     request_id = resp.json()["request_id"]
 
-    resp = client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "no longer needed"})
+    resp = client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "no longer needed"}, headers=agent_auth("agent-a"))
     assert resp.status_code == 200
     assert resp.json() == {"request_id": request_id, "state": "cancelled"}
 
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-a"))
     assert resp.json()["state"] == "cancelled"
 
-    resp = client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "again"})
+    resp = client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "again"}, headers=agent_auth("agent-a"))
     assert resp.status_code == 409
 
 
 def test_cancel_404_on_missing_request():
-    resp = client.post("/v1/requests/does-not-exist/cancel", json={"reason": "x"})
+    resp = client.post("/v1/requests/does-not-exist/cancel", json={"reason": "x"}, headers=agent_auth("agent-a"))
     assert resp.status_code == 404
 
 
 def test_cancelled_request_drops_out_of_inbox():
-    resp = client.post("/v1/requests", json=_sample_request())
+    resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("agent-a"))
     request_id = resp.json()["request_id"]
-    client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "y"})
+    client.post(f"/v1/requests/{request_id}/cancel", json={"reason": "y"}, headers=agent_auth("agent-a"))
 
     resp = client.get("/v1/inbox")
     ids = [item.get("title") for item in resp.json()]
@@ -61,13 +62,13 @@ def test_cancelled_request_drops_out_of_inbox():
 
 
 def test_audit_filters_by_agent_surface_and_outcome():
-    resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-1"))
+    resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-1"), headers=agent_auth("agent-audit-1"))
     rid1 = resp.json()["request_id"]
     client.post(f"/v1/requests/{rid1}/answer", json={"control": "radio", "value": "red", "surface": "browser_overlay"})
 
-    resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-2"))
+    resp = client.post("/v1/requests", json=_sample_request(caller="agent-audit-2"), headers=agent_auth("agent-audit-2"))
     rid2 = resp.json()["request_id"]
-    client.post(f"/v1/requests/{rid2}/cancel", json={"reason": "test cancel"})
+    client.post(f"/v1/requests/{rid2}/cancel", json={"reason": "test cancel"}, headers=agent_auth("agent-audit-2"))
 
     resp = client.get("/v1/audit", params={"agent": "agent-audit-1"})
     assert resp.status_code == 200

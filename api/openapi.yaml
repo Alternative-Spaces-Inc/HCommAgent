@@ -13,6 +13,8 @@ paths:
   /v1/requests:
     post:
       summary: Create a collection request
+      security:
+        - AgentKey: []
       requestBody:
         required: true
         content:
@@ -26,9 +28,15 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/RequestReceipt'
+        '401':
+          description: Missing bearer token
+        '403':
+          description: Invalid or revoked api key, or body.caller does not match the key's caller
   /v1/requests/{request_id}:
     get:
       summary: Read a request and its answer if any
+      security:
+        - AgentKey: []
       parameters:
         - in: path
           name: request_id
@@ -67,6 +75,8 @@ paths:
   /v1/requests/{request_id}/cancel:
     post:
       summary: Cancel a request with a reason
+      security:
+        - AgentKey: []
       parameters:
         - in: path
           name: request_id
@@ -160,6 +170,8 @@ paths:
   /v1/api-keys:
     post:
       summary: Issue an API key for an automation caller (PROPOSED, not yet in the 2026-09-29 decisions log)
+      security:
+        - AdminToken: []
       description: >
         Added in dispatch hca-p3-20260929, not one of the endpoints the
         2026-09-29 decisions log reconciled (see docs/decisions/DECISIONS_20260929.md);
@@ -185,6 +197,24 @@ paths:
                 $ref: '#/components/schemas/ApiKeyIssueResponse'
 
 components:
+  securitySchemes:
+    AgentKey:
+      type: http
+      scheme: bearer
+      description: >
+        Automation caller credential, hca_live_<prefix>_<secret>, issued by
+        POST /v1/api-keys and hashed at rest. Required on the agent-facing
+        routes (create, read, cancel). A key acts only as its own caller:
+        creating as another caller is 403, another caller's request reads
+        and cancels as 404. Human surface routes (inbox, inbox/stream,
+        answer) and audit are not guarded by this scheme; they take the
+        plan's Google OAuth sign-in and ECDSA device signing in a later packet.
+    AdminToken:
+      type: http
+      scheme: bearer
+      description: >
+        Owner-held token (HCA_ADMIN_TOKEN, Secret Manager at deploy time)
+        for minting agent keys. Missing configuration fails closed (403).
   schemas:
     ApiKeyIssueResponse:
       type: object

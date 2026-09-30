@@ -12,6 +12,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import Base, engine
+from authhelper import agent_auth, ADMIN_AUTH
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -30,7 +31,7 @@ def _overdue_request():
         "suggested": {"option_id": "a", "why": "only option"},
         "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
         "deadline_at": past.isoformat(),
-    })
+    }, headers=agent_auth("agent-sweep-trigger"))
     return resp.json()["request_id"]
 
 
@@ -52,7 +53,7 @@ def test_correct_bearer_runs_the_sweep():
     assert body["swept"] >= 1
     assert any(r["request_id"] == request_id for r in body["results"])
 
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-sweep-trigger"))
     assert resp.json()["state"] == "expired"
 
 

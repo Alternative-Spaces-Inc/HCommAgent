@@ -42,6 +42,8 @@ def live_server(tmp_path):
     port = _free_port()
     env = dict(os.environ)
     env["DATABASE_URL"] = f"sqlite:///{db_path}"
+    env.setdefault("HCA_ADMIN_TOKEN", "test-admin-token")
+    env.setdefault("WEBHOOK_RETRY_DELAYS", "0,0")
 
     migrate = subprocess.run(
         [sys.executable, "-m", "alembic", "upgrade", "head"],
@@ -157,7 +159,18 @@ async def _sse_e2e(base_url):
             # when it is called).
             await reader.wait_for(lambda name, data: name == "__connected__", HARD_TIMEOUT_SECONDS)
 
-            create_resp = await client.post("/v1/requests", json=request_body)
+            # Mint the caller's key through the live admin endpoint (HCA_ADMIN_TOKEN
+            # is inherited by the uvicorn subprocess from the test env), then
+            # create the ask as that caller.
+            admin_token = os.environ.get("HCA_ADMIN_TOKEN", "test-admin-token")
+            key_resp = await client.post(
+                "/v1/api-keys", json={"caller": request_body["caller"]},
+                headers={"Authorization": f"Bearer {admin_token}"},
+            )
+            assert key_resp.status_code == 201, key_resp.text
+            agent_headers = {"Authorization": f"Bearer {key_resp.json()['api_key']}"}
+
+            create_resp = await client.post("/v1/requests", json=request_body, headers=agent_headers)
             assert create_resp.status_code == 201
             request_id = create_resp.json()["request_id"]
 

@@ -13,6 +13,7 @@ from app.main import app
 from app.db import Base, engine, SessionLocal
 from app.expiry import run_expiry_sweep
 from app import models
+from authhelper import agent_auth
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -33,7 +34,7 @@ def _create(caller, deadline_at, expiry_policy=None):
     }
     if expiry_policy:
         body["expiry_policy"] = expiry_policy
-    resp = client.post("/v1/requests", json=body)
+    resp = client.post("/v1/requests", json=body, headers=agent_auth(caller))
     assert resp.status_code == 201
     return resp.json()["request_id"]
 
@@ -51,7 +52,7 @@ def test_default_auto_deny_writes_a_deny_answer_record_and_expires():
     matching = [r for r in results if r["request_id"] == request_id]
     assert matching == [{"request_id": request_id, "expiry_policy": "auto_deny", "action": "auto_denied"}]
 
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-default"))
     body = resp.json()
     assert body["state"] == "expired"
     assert body["answer"] is not None
@@ -75,7 +76,7 @@ def test_expire_policy_expires_with_no_answer_recorded():
     matching = [r for r in results if r["request_id"] == request_id]
     assert matching == [{"request_id": request_id, "expiry_policy": "expire", "action": "expired"}]
 
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-expire"))
     body = resp.json()
     assert body["state"] == "expired"
     assert body["answer"] is None
@@ -94,7 +95,7 @@ def test_hold_policy_leaves_the_ask_untouched():
     matching = [r for r in results if r["request_id"] == request_id]
     assert matching == [{"request_id": request_id, "expiry_policy": "hold", "action": "held"}]
 
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-hold"))
     body = resp.json()
     assert body["state"] == "queued"
 
@@ -110,7 +111,7 @@ def test_future_deadline_is_not_swept():
         db.close()
 
     assert all(r["request_id"] != request_id for r in results)
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-future"))
     assert resp.json()["state"] == "queued"
 
 
@@ -123,7 +124,7 @@ def test_no_deadline_never_swept():
         "options_or_fields": [{"id": "a", "label": "A"}],
         "suggested": {"option_id": "a", "why": "only option"},
         "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
-    })
+    }, headers=agent_auth("agent-no-deadline"))
     request_id = resp.json()["request_id"]
 
     db = SessionLocal()
@@ -133,7 +134,7 @@ def test_no_deadline_never_swept():
         db.close()
 
     assert all(r["request_id"] != request_id for r in results)
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-no-deadline"))
     assert resp.json()["state"] == "queued"
 
 
@@ -149,5 +150,5 @@ def test_terminal_states_are_never_reswept():
         db.close()
 
     assert all(r["request_id"] != request_id for r in results)
-    resp = client.get(f"/v1/requests/{request_id}")
+    resp = client.get(f"/v1/requests/{request_id}", headers=agent_auth("agent-answered"))
     assert resp.json()["state"] == "answered"

@@ -96,3 +96,20 @@ class AuditRow(Base):
     passthrough = Column(JSON, nullable=True)
 
     ask = relationship("Ask", back_populates="answer")
+
+
+class WebhookAttempt(Base):
+    """One HTTP attempt to deliver an outcome to the caller's deliver_to
+    webhook (app/webhooks.py). attempt 0 with ok False records a skip
+    (deliver_to was not a webhook); attempts 1..N record real POSTs."""
+    __tablename__ = "webhook_attempts"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    ask_id = Column(String, ForeignKey("asks.id"), nullable=False, index=True)
+    event = Column(String, nullable=False)
+    url = Column(String, nullable=False)
+    attempt = Column(Integer, nullable=False)
+    status_code = Column(Integer, nullable=True)
+    ok = Column(Boolean, nullable=False, default=False)
+    error = Column(String, nullable=True)
+    attempted_at = Column(DateTime, nullable=False)
