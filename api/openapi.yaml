@@ -40,7 +40,7 @@ paths:
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/AnswerRecord'
+                $ref: '#/components/schemas/RequestView'
   /v1/requests/{request_id}/answer:
     post:
       summary: Record the human's answer (called by the HCA surface, not by hosts)
@@ -49,8 +49,21 @@ paths:
           name: request_id
           required: true
           schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/AnswerSubmission'
       responses:
-        '201': { description: Answer recorded and delivered to the caller }
+        '201':
+          description: Answer recorded and delivered to the caller
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AnswerRecord'
+        '409': { description: "Request already answered, expired, withdrawn or cancelled" }
+        '422': { description: "Value does not fit the control or the option ids" }
   /v1/requests/{request_id}/cancel:
     post:
       summary: Cancel a request with a reason
@@ -229,6 +242,32 @@ components:
       properties:
         request_id: { type: string }
         state: { type: string, enum: [queued, shown, answered, expired, withdrawn, cancelled] }
+    RequestView:
+      type: object
+      description: A request with its current state and, once answered, its answer record
+      required: [request_id, state, request]
+      properties:
+        request_id: { type: string }
+        state: { type: string, enum: [queued, shown, answered, expired, withdrawn, cancelled] }
+        created_at: { type: string, format: date-time }
+        expires_at: { type: string, format: date-time }
+        request: { $ref: '#/components/schemas/CollectionRequest' }
+        answer: { $ref: '#/components/schemas/AnswerRecord' }
+    AnswerSubmission:
+      type: object
+      description: Body of POST /v1/requests/{request_id}/answer, sent by the HCA surface
+      required: [control, value, surface]
+      properties:
+        control: { type: string }
+        value: { description: Option id, list of ids, boolean, or text }
+        answered_by: { type: string }
+        answered_role: { type: string }
+        surface: { $ref: '#/components/schemas/Surface' }
+        device: { type: string, description: Device identifier or cryptographic proof for the responding device }
+        path_taken: { type: array, items: { type: string } }
+        duration_ms: { type: integer }
+        voice_used: { type: boolean }
+        passthrough: { type: object }
     AnswerRecord:
       type: object
       required: [request_id, control, surface]
