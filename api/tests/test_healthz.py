@@ -21,3 +21,15 @@ def test_healthz_ok():
     body = resp.json()
     assert body["status"] == "ok"
     assert body["db"] == "ok"
+
+
+def test_healthz_reports_db_down_as_503(monkeypatch):
+    from app import main as main_module
+
+    def boom():
+        raise RuntimeError("database unreachable")
+
+    monkeypatch.setattr(main_module, "db_ping", boom)
+    resp = client.get("/healthz")
+    assert resp.status_code == 503
+    assert resp.json() == {"status": "degraded", "db": "down"}
