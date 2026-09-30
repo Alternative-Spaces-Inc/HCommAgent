@@ -113,3 +113,18 @@ class WebhookAttempt(Base):
     ok = Column(Boolean, nullable=False, default=False)
     error = Column(String, nullable=True)
     attempted_at = Column(DateTime, nullable=False)
+
+
+class Device(Base):
+    """A registered human surface device (HCA-P6, app/devicesig.py). The id
+    is derived from the public key, so the same key always registers as the
+    same device and a device cannot be registered under two ids."""
+    __tablename__ = "devices"
+
+    id = Column(String, primary_key=True)
+    label = Column(String, nullable=False)
+    surface = Column(String, nullable=False, default="browser_overlay")
+    public_key_pem = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    revoked_at = Column(DateTime, nullable=True)
+    last_seen_at = Column(DateTime, nullable=True)

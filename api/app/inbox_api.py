@@ -9,6 +9,7 @@ from . import models
 from .db import get_db
 from .events import subscribe, unsubscribe, format_sse
 from .requests_api import _ask_to_collection_request
+from .auth import require_device
 
 router = APIRouter(prefix="/v1/inbox", tags=["inbox"])
 
@@ -27,7 +28,7 @@ def _sort_key(ask: models.Ask):
 
 
 @router.get("")
-def list_inbox(db: Session = Depends(get_db)):
+def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_device)):
     asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))).scalars().all()
     ordered = sorted(asks, key=_sort_key)
     return [_ask_to_collection_request(a) for a in ordered]
@@ -53,5 +54,5 @@ async def inbox_event_source(keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS
 
 
 @router.get("/stream")
-async def stream_inbox():
+async def stream_inbox(device: models.Device = Depends(require_device)):
     return StreamingResponse(inbox_event_source(), media_type="text/event-stream")

@@ -21,6 +21,19 @@ import time
 import httpx
 import pytest
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from deviceauth import DEVICE_ID, PUBLIC_PEM, human_headers as _human_headers
+
+
+def sign_only(method, path, body=b""):
+    # The live server has its own database; registration happened over HTTP
+    # above, so skip the helper's local ensure_registered by signing directly.
+    from deviceauth import canonical_string, raw_signature, _private
+    import secrets, time
+    ts = str(int(time.time())); nonce = secrets.token_urlsafe(12)
+    return {"X-HCA-Device": DEVICE_ID, "X-HCA-Timestamp": ts, "X-HCA-Nonce": nonce,
+            "X-HCA-Signature": raw_signature(_private, canonical_string(ts, nonce, method, path, body))}
+
 HARD_TIMEOUT_SECONDS = 20
 
 
@@ -147,7 +160,17 @@ async def _sse_e2e(base_url):
     }
 
     async with httpx.AsyncClient(base_url=base_url, timeout=HARD_TIMEOUT_SECONDS) as client:
-        async with client.stream("GET", "/v1/inbox/stream") as stream_resp:
+        # Register this test's device key through the live admin endpoint
+        # (HCA-P6): the stream and the answer below are both signed with it.
+        admin_token = os.environ.get("HCA_ADMIN_TOKEN", "test-admin-token")
+        dev_resp = await client.post(
+            "/v1/devices", json={"label": "sse e2e device", "public_key_pem": PUBLIC_PEM},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert dev_resp.status_code == 201, dev_resp.text
+        assert dev_resp.json()["device_id"] == DEVICE_ID
+
+        async with client.stream("GET", "/v1/inbox/stream", headers=sign_only("GET", "/v1/inbox/stream")) as stream_resp:
             assert stream_resp.status_code == 200
             assert stream_resp.headers["content-type"].startswith("text/event-stream")
 
@@ -162,7 +185,6 @@ async def _sse_e2e(base_url):
             # Mint the caller's key through the live admin endpoint (HCA_ADMIN_TOKEN
             # is inherited by the uvicorn subprocess from the test env), then
             # create the ask as that caller.
-            admin_token = os.environ.get("HCA_ADMIN_TOKEN", "test-admin-token")
             key_resp = await client.post(
                 "/v1/api-keys", json={"caller": request_body["caller"]},
                 headers={"Authorization": f"Bearer {admin_token}"},
@@ -182,10 +204,10 @@ async def _sse_e2e(base_url):
             assert created_envelope["data"]["request_id"] == request_id
             assert created_envelope["data"]["title"] == request_body["title"]
 
-            answer_resp = await client.post(
-                f"/v1/requests/{request_id}/answer",
-                json={"control": "radio", "value": "a", "surface": "browser_overlay"},
-            )
+            answer_body = json.dumps({"control": "radio", "value": "a", "surface": "browser_overlay"}, separators=(",", ":")).encode()
+            answer_headers = {"Content-Type": "application/json"}
+            answer_headers.update(sign_only("POST", f"/v1/requests/{request_id}/answer", answer_body))
+            answer_resp = await client.post(f"/v1/requests/{request_id}/answer", content=answer_body, headers=answer_headers)
             assert answer_resp.status_code == 201
 
             answered_name, answered_envelope = await reader.wait_for(

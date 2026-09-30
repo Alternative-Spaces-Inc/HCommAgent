@@ -16,6 +16,7 @@ from app.db import Base, engine, SessionLocal
 from authhelper import agent_auth, ADMIN_AUTH
 from app import models, webhooks
 from app.expiry import run_expiry_sweep
+from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -49,7 +50,7 @@ def _attempts(request_id):
 
 def test_answer_posts_request_answered_to_deliver_to(webhook_recorder):
     request_id = client.post("/v1/requests", json=_sample(), headers=agent_auth("loop-agent")).json()["request_id"]
-    resp = client.post(f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "browser_overlay"})
+    resp = human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "browser_overlay"})
     assert resp.status_code == 201
 
     assert len(webhook_recorder.requests) == 1
@@ -114,7 +115,7 @@ def test_non_2xx_retries_up_to_max_and_records_every_attempt(webhook_recorder, m
     monkeypatch.setenv("WEBHOOK_MAX_ATTEMPTS", "3")
     webhook_recorder.status_code = 503
     request_id = client.post("/v1/requests", json=_sample(), headers=agent_auth("loop-agent")).json()["request_id"]
-    client.post(f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "deny", "surface": "web"})
+    human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "deny", "surface": "web"})
 
     assert len(webhook_recorder.requests) == 3
     rows = _attempts(request_id)
@@ -132,7 +133,7 @@ def test_success_on_second_attempt_stops_retrying(webhook_recorder, monkeypatch)
 
     webhooks.set_transport_factory(lambda: httpx.MockTransport(handler))
     request_id = client.post("/v1/requests", json=_sample(), headers=agent_auth("loop-agent")).json()["request_id"]
-    client.post(f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
+    human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
 
     assert calls["n"] == 2
     rows = _attempts(request_id)
@@ -147,7 +148,7 @@ def test_connect_error_is_recorded_not_raised(webhook_recorder, monkeypatch):
 
     webhooks.set_transport_factory(lambda: httpx.MockTransport(handler))
     request_id = client.post("/v1/requests", json=_sample(), headers=agent_auth("loop-agent")).json()["request_id"]
-    resp = client.post(f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
+    resp = human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
     assert resp.status_code == 201, "a dead receiver must never fail the human's answer"
 
     rows = _attempts(request_id)
@@ -157,7 +158,7 @@ def test_connect_error_is_recorded_not_raised(webhook_recorder, monkeypatch):
 
 def test_poll_mode_is_recorded_as_skipped(webhook_recorder):
     request_id = client.post("/v1/requests", json=_sample(mode="poll", url=None), headers=agent_auth("loop-agent")).json()["request_id"]
-    client.post(f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
+    human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "approve_deny", "value": "approve", "surface": "web"})
 
     assert webhook_recorder.requests == []
     rows = _attempts(request_id)

@@ -52,6 +52,8 @@ paths:
   /v1/requests/{request_id}/answer:
     post:
       summary: Record the human's answer (called by the HCA surface, not by hosts)
+      security:
+        - DeviceSignature: []
       parameters:
         - in: path
           name: request_id
@@ -101,6 +103,8 @@ paths:
   /v1/inbox:
     get:
       summary: List pending requests sorted by deadline and impact
+      security:
+        - DeviceSignature: []
       responses:
         '200':
           description: Array of pending collection requests sorted by deadline and impact
@@ -113,6 +117,8 @@ paths:
   /v1/inbox/stream:
     get:
       summary: Stream inbox events via Server-Sent Events (SSE)
+      security:
+        - DeviceSignature: []
       description: >
         Server-Sent Events (SSE) stream pushing request.created, request.answered,
         request.cancelled, and request.expired events to connected surfaces.
@@ -126,6 +132,8 @@ paths:
   /v1/audit:
     get:
       summary: Query audit history with filters
+      security:
+        - DeviceSignature: []
       parameters:
         - in: query
           name: agent
@@ -167,6 +175,59 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ControlSpec' }
+  /v1/devices:
+    post:
+      summary: Register a human surface device by its ECDSA P-256 public key (HCA-P6)
+      security:
+        - AdminToken: []
+      description: >
+        The owner registers the key the extension's options page shows, once
+        per browser profile. Posting the same key again is idempotent (201,
+        label updated); a revoked key is 409 and needs a new key.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DeviceRegistration' }
+      responses:
+        '201':
+          description: The registered device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '401': { description: Missing bearer }
+        '403': { description: Wrong admin token or admin token not configured }
+        '409': { description: Key was revoked }
+        '422': { description: Not an ECDSA P-256 public key in SPKI PEM form }
+    get:
+      summary: List registered devices, revoked included (HCA-P6)
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: All devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/DeviceView' }
+  /v1/devices/{device_id}/revoke:
+    post:
+      summary: Revoke a device so its signatures stop verifying (HCA-P6)
+      security:
+        - AdminToken: []
+      parameters:
+        - in: path
+          name: device_id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The device, now revoked (idempotent)
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '404': { description: Unknown device }
   /v1/api-keys:
     post:
       summary: Issue an API key for an automation caller (PROPOSED, not yet in the 2026-09-29 decisions log)
@@ -207,15 +268,50 @@ components:
         routes (create, read, cancel). A key acts only as its own caller:
         creating as another caller is 403, another caller's request reads
         and cancels as 404. Human surface routes (inbox, inbox/stream,
-        answer) and audit are not guarded by this scheme; they take the
-        plan's Google OAuth sign-in and ECDSA device signing in a later packet.
+        answer) and audit take DeviceSignature instead.
     AdminToken:
       type: http
       scheme: bearer
       description: >
         Owner-held token (HCA_ADMIN_TOKEN, Secret Manager at deploy time)
-        for minting agent keys. Missing configuration fails closed (403).
+        for minting agent keys and registering devices. Missing
+        configuration fails closed (403).
+    DeviceSignature:
+      type: apiKey
+      in: header
+      name: X-HCA-Signature
+      description: >
+        Per-device ECDSA P-256 request signing for the human surface
+        (plan section 4, Proof of Surface; api/app/devicesig.py). Four
+        headers travel together: X-HCA-Device (dev_ plus the first 32 hex
+        chars of SHA-256 over the key's SubjectPublicKeyInfo DER),
+        X-HCA-Timestamp (unix seconds, within 300 s of the server),
+        X-HCA-Nonce (unique per request) and X-HCA-Signature (base64url,
+        no padding, of the raw 64-byte r||s signature) over the string
+        "HCA1" NL timestamp NL nonce NL METHOD NL path_and_query NL
+        sha256hex(body). Missing or failing headers, a stale timestamp or
+        a reused nonce are 401 with WWW-Authenticate: HCA-Device; an
+        unknown or revoked device is 403. The answer route records the
+        verified device id on the AnswerRecord, ignoring any device the
+        body claims. Devices are registered with POST /v1/devices.
   schemas:
+    DeviceRegistration:
+      type: object
+      required: [label, public_key_pem]
+      properties:
+        label: { type: string, description: Human name for the device, recorded as answered_by when the answer body gives none }
+        public_key_pem: { type: string, description: ECDSA P-256 public key, SubjectPublicKeyInfo PEM }
+        surface: { type: string, default: browser_overlay }
+    DeviceView:
+      type: object
+      required: [device_id, label, surface, created_at]
+      properties:
+        device_id: { type: string }
+        label: { type: string }
+        surface: { type: string }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
+        last_seen_at: { type: string, format: date-time, nullable: true }
     ApiKeyIssueResponse:
       type: object
       required: [api_key, prefix, caller, created_at]

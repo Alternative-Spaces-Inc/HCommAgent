@@ -22,23 +22,31 @@ Two guards:
     read from the environment (Secret Manager at deploy time, same pattern
     as SWEEP_TRIGGER_TOKEN). Missing configuration fails closed (403).
 
-Not guarded here, on purpose: the human surface routes (GET /v1/inbox,
-GET /v1/inbox/stream, POST /v1/requests/{id}/answer) and GET /v1/audit.
-Those take the plan's Google OAuth sign-in and ECDSA device signing, a
-later packet, so an unauthenticated overlay keeps working meanwhile.
+  require_device: the human surface routes (GET /v1/inbox,
+    GET /v1/inbox/stream, POST /v1/requests/{id}/answer, GET /v1/audit)
+    carry the X-HCA-Device, X-HCA-Timestamp, X-HCA-Nonce and
+    X-HCA-Signature headers described in app/devicesig.py. 401 when a
+    header is missing, the timestamp is stale, the nonce was already used
+    or the signature does not verify; 403 when the device is unknown or
+    revoked. Returns the Device row so the answer route can record which
+    device answered. HCA-P6 closed these routes; Google sign-in on top of
+    the device key is the next packet.
 """
 
 import hmac
 import os
 from typing import Optional
 
-from fastapi import Depends, HTTPException
-from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from datetime import datetime, timezone
+
+from fastapi import Depends, HTTPException, Request
+from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.orm import Session
 
 from . import models
 from .apikeys import verify_api_key
 from .db import get_db
+from . import devicesig
 
 
 # auto_error=False so a missing header is our own 401 (with WWW-Authenticate)
@@ -46,6 +54,11 @@ from .db import get_db
 # names in api/openapi.yaml so the generated schema and the spec agree.
 _agent_bearer = HTTPBearer(auto_error=False, scheme_name="AgentKey")
 _admin_bearer = HTTPBearer(auto_error=False, scheme_name="AdminToken")
+# Declares the device scheme in the generated OpenAPI (securitySchemes
+# DeviceSignature, matching api/openapi.yaml); the real check reads all four
+# X-HCA-* headers from the request in require_device.
+_device_signature = APIKeyHeader(name="X-HCA-Signature", auto_error=False, scheme_name="DeviceSignature",
+                                 description="See app/devicesig.py: X-HCA-Device, X-HCA-Timestamp, X-HCA-Nonce and X-HCA-Signature over the canonical request string")
 
 
 def _token(creds: Optional[HTTPAuthorizationCredentials]) -> str:
@@ -72,3 +85,37 @@ def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends
     token = _token(creds)
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="invalid admin token")
+
+
+def _device_401(detail: str) -> HTTPException:
+    return HTTPException(status_code=401, detail=detail, headers={"WWW-Authenticate": "HCA-Device"})
+
+
+async def require_device(request: Request, db: Session = Depends(get_db), _sig: Optional[str] = Depends(_device_signature)) -> models.Device:
+    h = request.headers
+    device_id = h.get(devicesig.HEADER_DEVICE, "").strip()
+    timestamp = h.get(devicesig.HEADER_TIMESTAMP, "").strip()
+    nonce = h.get(devicesig.HEADER_NONCE, "").strip()
+    signature = h.get(devicesig.HEADER_SIGNATURE, "").strip()
+    if not (device_id and timestamp and nonce and signature):
+        raise _device_401("missing device signature headers")
+    if not devicesig.timestamp_is_fresh(timestamp):
+        raise _device_401("stale device signature timestamp")
+
+    device = db.get(models.Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=403, detail="unknown device")
+    if device.revoked_at is not None:
+        raise HTTPException(status_code=403, detail="device revoked")
+
+    body = await request.body()
+    path_and_query = request.url.path + (f"?{request.url.query}" if request.url.query else "")
+    canonical = devicesig.canonical_string(timestamp, nonce, request.method, path_and_query, body)
+    if not devicesig.verify_signature(device.public_key_pem, canonical, signature):
+        raise _device_401("device signature does not verify")
+    if not devicesig.replay_guard.check_and_record(device_id, nonce):
+        raise _device_401("device signature replayed")
+
+    device.last_seen_at = datetime.now(timezone.utc)
+    db.commit()
+    return device

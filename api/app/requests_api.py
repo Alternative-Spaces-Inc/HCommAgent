@@ -11,7 +11,7 @@ from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
 from .events import publish
 from .webhooks import deliver_outcome
-from .auth import require_agent_key
+from .auth import require_agent_key, require_device
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -129,7 +129,7 @@ def _value_fits(control: str, value, option_ids: set[str]) -> bool:
 
 
 @router.post("/{request_id}/answer", status_code=201, response_model=AnswerRecord)
-def answer_request(request_id: str, body: AnswerSubmission, background: BackgroundTasks, db: Session = Depends(get_db)):
+def answer_request(request_id: str, body: AnswerSubmission, background: BackgroundTasks, db: Session = Depends(get_db), device: models.Device = Depends(require_device)):
     ask = db.get(models.Ask, request_id)
     if ask is None:
         raise HTTPException(status_code=404, detail="request not found")
@@ -146,11 +146,11 @@ def answer_request(request_id: str, body: AnswerSubmission, background: Backgrou
         ask_id=ask.id,
         control=body.control,
         value=body.value,
-        answered_by=body.answered_by,
+        answered_by=body.answered_by or device.label,
         answered_role=body.answered_role,
         answered_at=now,
         surface=body.surface,
-        device=body.device,
+        device=device.id,
         path_taken=body.path_taken,
         duration_ms=body.duration_ms,
         voice_used=body.voice_used,
@@ -219,6 +219,7 @@ def query_audit(
     surface: Optional[str] = Query(default=None, description="Filter by delivery or answer surface"),
     outcome: Optional[str] = Query(default=None, description="Filter by decision or answer outcome"),
     db: Session = Depends(get_db),
+    device: models.Device = Depends(require_device),
 ):
     stmt = select(models.AuditRow, models.Ask).join(models.Ask, models.AuditRow.ask_id == models.Ask.id)
 
