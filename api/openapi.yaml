@@ -62,8 +62,8 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnswerRecord'
-        '409': { description: Request already answered, expired, withdrawn or cancelled }
-        '422': { description: Value does not fit the control or the option ids }
+        '409': { description: "Request already answered, expired, withdrawn or cancelled" }
+        '422': { description: "Value does not fit the control or the option ids" }
   /v1/requests/{request_id}/cancel:
     post:
       summary: Cancel a request with a reason
