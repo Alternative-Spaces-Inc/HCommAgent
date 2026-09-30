@@ -11,6 +11,7 @@ from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
 from .events import publish
 from .webhooks import deliver_outcome
+from .auth import require_agent_key
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -61,7 +62,9 @@ def _audit_to_answer_record(row: models.AuditRow) -> dict:
 
 
 @router.post("", status_code=201, response_model=RequestReceipt)
-def create_request(body: CollectionRequest, db: Session = Depends(get_db)):
+def create_request(body: CollectionRequest, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+    if body.caller != key.caller:
+        raise HTTPException(status_code=403, detail="caller does not match the api key")
     now = datetime.now(timezone.utc)
     ask = models.Ask(
         caller=body.caller,
@@ -96,9 +99,9 @@ def create_request(body: CollectionRequest, db: Session = Depends(get_db)):
 
 
 @router.get("/{request_id}", response_model=RequestView)
-def get_request(request_id: str, db: Session = Depends(get_db)):
+def get_request(request_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     ask = db.get(models.Ask, request_id)
-    if ask is None:
+    if ask is None or ask.caller != key.caller:
         raise HTTPException(status_code=404, detail="request not found")
 
     answer = None
@@ -172,9 +175,9 @@ def _outcome_of(value) -> Optional[str]:
 
 
 @router.post("/{request_id}/cancel", response_model=RequestReceipt)
-def cancel_request(request_id: str, body: CancelRequestBody, background: BackgroundTasks, db: Session = Depends(get_db)):
+def cancel_request(request_id: str, body: CancelRequestBody, background: BackgroundTasks, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     ask = db.get(models.Ask, request_id)
-    if ask is None:
+    if ask is None or ask.caller != key.caller:
         raise HTTPException(status_code=404, detail="request not found")
 
     if ask.state in TERMINAL_STATES:

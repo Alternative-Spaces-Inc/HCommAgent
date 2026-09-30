@@ -11,6 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import Base, engine
+from authhelper import agent_auth, ADMIN_AUTH
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)
@@ -38,20 +39,20 @@ def _request(title, deadline_at=None, red_gate=False):
 def test_inbox_lists_only_pending_sorted_by_deadline_and_impact():
     now = datetime.now(timezone.utc)
 
-    resp = client.post("/v1/requests", json=_request("no deadline"))
+    resp = client.post("/v1/requests", json=_request("no deadline"), headers=agent_auth("test-agent"))
     no_deadline_id = resp.json()["request_id"]
 
-    resp = client.post("/v1/requests", json=_request("far deadline", deadline_at=now + timedelta(hours=5)))
+    resp = client.post("/v1/requests", json=_request("far deadline", deadline_at=now + timedelta(hours=5)), headers=agent_auth("test-agent"))
     far_id = resp.json()["request_id"]
 
-    resp = client.post("/v1/requests", json=_request("near deadline red gate", deadline_at=now + timedelta(hours=1), red_gate=True))
+    resp = client.post("/v1/requests", json=_request("near deadline red gate", deadline_at=now + timedelta(hours=1), red_gate=True), headers=agent_auth("test-agent"))
     near_red_gate_id = resp.json()["request_id"]
 
-    resp = client.post("/v1/requests", json=_request("near deadline plain", deadline_at=now + timedelta(hours=1)))
+    resp = client.post("/v1/requests", json=_request("near deadline plain", deadline_at=now + timedelta(hours=1)), headers=agent_auth("test-agent"))
     near_plain_id = resp.json()["request_id"]
 
     # answer one so it drops out of the pending inbox
-    resp = client.post("/v1/requests", json=_request("already answered"))
+    resp = client.post("/v1/requests", json=_request("already answered"), headers=agent_auth("test-agent"))
     answered_id = resp.json()["request_id"]
     client.post(f"/v1/requests/{answered_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
 

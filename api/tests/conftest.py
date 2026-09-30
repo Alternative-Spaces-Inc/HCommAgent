@@ -8,6 +8,10 @@ installed for every test by default (recording every outbound request
 and answering 200); tests that need failures swap in their own via
 webhooks.set_transport_factory and the fixture restores the default
 afterwards. Retry delays are zeroed for the whole suite.
+
+HCA_ADMIN_TOKEN is fixed for the suite so POST /v1/api-keys (admin
+bearer since HCA-P4) can mint agent keys; tests/authhelper.py builds the
+agent and admin headers.
 """
 
 import os
@@ -16,6 +20,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("WEBHOOK_RETRY_DELAYS", "0,0")
+os.environ.setdefault("HCA_ADMIN_TOKEN", "test-admin-token")
 
 import httpx
 import pytest
