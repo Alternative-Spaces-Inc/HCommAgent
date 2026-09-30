@@ -1,0 +1,8 @@
+.git
+.gitignore
+**/.venv
+**/__pycache__
+**/*.db
+**/node_modules
+extension
+docs

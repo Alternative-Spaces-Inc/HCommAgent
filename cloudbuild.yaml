@@ -1,0 +1,112 @@
+# HCA API: Cloud Build pipeline (docs/plans/HCA_CLOUD_RUN_PLAN_v1.md section 6).
+#
+# Runs on every merge to main once the trigger exists (runbook step 11), and
+# by hand with the block in runbook step 8. Five steps, in order:
+#   1. pytest against SQLite (fails the build before any image is built)
+#   2. build the api image
+#   3. push it to Artifact Registry
+#   4. run alembic upgrade head as a Cloud Run job against Cloud SQL
+#      (a job, not a startup hook, so migrations never race across instances)
+#   5. deploy the service revision
+#
+# Every value that names your project, region, instance or service account
+# arrives as a substitution; nothing here is specific to one account.
+# $PROJECT_ID, $COMMIT_SHA and $BUILD_ID are Cloud Build built-ins.
+
+substitutions:
+  _REGION: us-west1
+  _AR_REPO: hca-services
+  _IMAGE: hca-api
+  _SERVICE: hca-api-service
+  _MIGRATE_JOB: hca-migrate
+  _RUNTIME_SA: sa-hca-api
+  _CLOUDSQL_INSTANCE: ""            # PROJECT_ID:REGION:INSTANCE, set by the trigger or the block
+  _DB_URL_SECRET: hca-database-url
+  _SWEEP_TOKEN_SECRET: hca-sweep-trigger-token
+  _ADMIN_TOKEN_SECRET: hca-admin-token
+  _MAX_INSTANCES: "1"               # in-process event bus; see api/Dockerfile
+
+options:
+  logging: CLOUD_LOGGING_ONLY
+  dynamicSubstitutions: true
+
+steps:
+  - id: pytest
+    name: python:3.12-slim
+    dir: api
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        pip install --no-cache-dir -q -r requirements.txt
+        export DATABASE_URL=sqlite:////tmp/hca_cloudbuild.db
+        alembic upgrade head
+        pytest -q
+
+  - id: build
+    name: gcr.io/cloud-builders/docker
+    dir: api
+    args:
+      - build
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
+      - -t
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:latest
+      - .
+
+  - id: push
+    name: gcr.io/cloud-builders/docker
+    args:
+      - push
+      - --all-tags
+      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}
+
+  - id: migrate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run jobs deploy ${_MIGRATE_JOB} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA} \
+          --region=${_REGION} \
+          --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
+          --set-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
+          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest \
+          --command=alembic \
+          --args=upgrade,head \
+          --max-retries=0 \
+          --task-timeout=10m \
+          --quiet
+        gcloud run jobs execute ${_MIGRATE_JOB} --region=${_REGION} --wait --quiet
+
+  - id: deploy
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run deploy ${_SERVICE} \
+          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA} \
+          --region=${_REGION} \
+          --platform=managed \
+          --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
+          --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
+          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest \
+          --min-instances=1 \
+          --max-instances=${_MAX_INSTANCES} \
+          --concurrency=80 \
+          --no-cpu-throttling \
+          --timeout=3600 \
+          --allow-unauthenticated \
+          --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
+          --quiet
+
+images:
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
+  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:latest
+
+timeout: 1800s
