@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
@@ -10,6 +10,7 @@ from . import models
 from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
 from .events import publish
+from .webhooks import deliver_outcome
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -125,7 +126,7 @@ def _value_fits(control: str, value, option_ids: set[str]) -> bool:
 
 
 @router.post("/{request_id}/answer", status_code=201, response_model=AnswerRecord)
-def answer_request(request_id: str, body: AnswerSubmission, db: Session = Depends(get_db)):
+def answer_request(request_id: str, body: AnswerSubmission, background: BackgroundTasks, db: Session = Depends(get_db)):
     ask = db.get(models.Ask, request_id)
     if ask is None:
         raise HTTPException(status_code=404, detail="request not found")
@@ -158,6 +159,7 @@ def answer_request(request_id: str, body: AnswerSubmission, db: Session = Depend
 
     record = _audit_to_answer_record(row)
     publish("request.answered", record)
+    background.add_task(deliver_outcome, ask.id, "request.answered", ask.state, record, ask.deliver_to)
     return record
 
 
@@ -170,7 +172,7 @@ def _outcome_of(value) -> Optional[str]:
 
 
 @router.post("/{request_id}/cancel", response_model=RequestReceipt)
-def cancel_request(request_id: str, body: CancelRequestBody, db: Session = Depends(get_db)):
+def cancel_request(request_id: str, body: CancelRequestBody, background: BackgroundTasks, db: Session = Depends(get_db)):
     ask = db.get(models.Ask, request_id)
     if ask is None:
         raise HTTPException(status_code=404, detail="request not found")
@@ -197,7 +199,9 @@ def cancel_request(request_id: str, body: CancelRequestBody, db: Session = Depen
     ask.state = "cancelled"
     db.commit()
 
-    publish("request.cancelled", _audit_to_answer_record(row))
+    record = _audit_to_answer_record(row)
+    publish("request.cancelled", record)
+    background.add_task(deliver_outcome, ask.id, "request.cancelled", ask.state, record, ask.deliver_to)
     return {"request_id": ask.id, "state": ask.state}
 
 

@@ -28,6 +28,7 @@ from sqlalchemy import select
 from . import models
 from .requests_api import TERMINAL_STATES, _audit_to_answer_record
 from .events import publish
+from .webhooks import deliver_outcome
 
 AUTO_DENY_VALUE = {"decision": "deny", "reason": "auto_deny: deadline passed with no answer"}
 SWEPT_BY = "system:expiry_sweep"
@@ -75,6 +76,7 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
             db.commit()
             record = _audit_to_answer_record(row)
             publish("request.expired", record)
+            deliver_outcome(ask.id, "request.expired", ask.state, record, ask.deliver_to)
             results.append({"request_id": ask.id, "expiry_policy": "auto_deny", "action": "auto_denied"})
             continue
 
@@ -82,6 +84,7 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
         ask.state = "expired"
         db.commit()
         publish("request.expired", {"request_id": ask.id, "state": "expired"})
+        deliver_outcome(ask.id, "request.expired", ask.state, None, ask.deliver_to)
         results.append({"request_id": ask.id, "expiry_policy": "expire", "action": "expired"})
 
     return results
