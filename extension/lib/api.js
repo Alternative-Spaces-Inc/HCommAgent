@@ -77,6 +77,21 @@ export async function fetchInbox(apiBase) {
  * and the new leftover buffer (a partial block that has not seen its
  * terminating blank line yet).
  */
+
+/**
+ * The data: line of each SSE block is the full publish envelope from
+ * api/app/events.py's format_sse/publish: {event, data, timestamp}, with
+ * the actual CollectionRequest or AnswerRecord nested under .data, not at
+ * the top level (the top-level "event" key duplicates the SSE "event:"
+ * line's name; it is not the record). This unwraps that one extra layer.
+ */
+export function unwrapStreamEnvelope(parsedData) {
+  if (parsedData && typeof parsedData === "object" && "data" in parsedData) {
+    return parsedData.data;
+  }
+  return parsedData;
+}
+
 export function parseSSEChunk(buffer, chunkText) {
   const combined = buffer + chunkText;
   const blocks = combined.split("\n\n");

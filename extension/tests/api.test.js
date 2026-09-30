@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswerPayload, parseSSEChunk, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
+import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
 
 test("buildAnswerPayload for radio uses a single option id", () => {
   const body = buildAnswerPayload({ control: "radio", selection: "opt_a" });
@@ -45,17 +45,18 @@ test("parseSSEChunk ignores the connected comment and parses no events", () => {
 });
 
 test("parseSSEChunk parses one full event block", () => {
-  const chunk = 'event: request.created\ndata: {"request_id":"r1","title":"pick one"}\n\n';
+  const chunk = 'event: request.created\ndata: {"event":"request.created","data":{"request_id":"r1","title":"pick one"},"timestamp":"2026-09-30T12:00:00+00:00"}\n\n';
   const { events, buffer } = parseSSEChunk("", chunk);
   assert.equal(events.length, 1);
   assert.equal(events[0].event, "request.created");
-  assert.deepEqual(events[0].data, { request_id: "r1", title: "pick one" });
+  assert.deepEqual(events[0].data, { event: "request.created", data: { request_id: "r1", title: "pick one" }, timestamp: "2026-09-30T12:00:00+00:00" });
+  assert.deepEqual(unwrapStreamEnvelope(events[0].data), { request_id: "r1", title: "pick one" });
   assert.equal(buffer, "");
 });
 
 test("parseSSEChunk buffers a partial block across two chunks", () => {
-  const first = 'event: request.answered\ndata: {"reque';
-  const second = 'st_id":"r2"}\n\n';
+  const first = 'event: request.answered\ndata: {"event":"request.answered","data":{"reque';
+  const second = 'st_id":"r2"},"timestamp":"2026-09-30T12:00:00+00:00"}\n\n';
   const step1 = parseSSEChunk("", first);
   assert.deepEqual(step1.events, []);
   assert.equal(step1.buffer, first);
@@ -63,15 +64,15 @@ test("parseSSEChunk buffers a partial block across two chunks", () => {
   const step2 = parseSSEChunk(step1.buffer, second);
   assert.equal(step2.events.length, 1);
   assert.equal(step2.events[0].event, "request.answered");
-  assert.deepEqual(step2.events[0].data, { request_id: "r2" });
+  assert.deepEqual(unwrapStreamEnvelope(step2.events[0].data), { request_id: "r2" });
   assert.equal(step2.buffer, "");
 });
 
 test("parseSSEChunk parses multiple events and a keep-alive in one chunk", () => {
   const chunk =
     ': keep-alive\n\n' +
-    'event: request.cancelled\ndata: {"request_id":"r3"}\n\n' +
-    'event: request.expired\ndata: {"request_id":"r4"}\n\n';
+    'event: request.cancelled\ndata: {"event":"request.cancelled","data":{"request_id":"r3"},"timestamp":"t"}\n\n' +
+    'event: request.expired\ndata: {"event":"request.expired","data":{"request_id":"r4"},"timestamp":"t"}\n\n';
   const { events, buffer } = parseSSEChunk("", chunk);
   assert.equal(events.length, 2);
   assert.equal(events[0].event, "request.cancelled");
@@ -85,4 +86,14 @@ test("parseSSEChunk drops a malformed data line without throwing", () => {
   assert.equal(events.length, 1);
   assert.equal(events[0].data, null);
   assert.ok(events[0].parseError);
+});
+
+test("unwrapStreamEnvelope pulls the record out from under the publish envelope's data key", () => {
+  const envelope = { event: "request.created", data: { request_id: "r5" }, timestamp: "t" };
+  assert.deepEqual(unwrapStreamEnvelope(envelope), { request_id: "r5" });
+});
+
+test("unwrapStreamEnvelope passes through a value that has no data key", () => {
+  assert.deepEqual(unwrapStreamEnvelope({ request_id: "r6" }), { request_id: "r6" });
+  assert.equal(unwrapStreamEnvelope(null), null);
 });

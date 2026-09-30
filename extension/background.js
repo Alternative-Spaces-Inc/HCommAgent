@@ -6,7 +6,7 @@
 // poll interval, including across a suspend/wake cycle that drops the
 // stream mid-connection.
 
-import { fetchInbox, parseSSEChunk, SURFACE } from "./lib/api.js";
+import { fetchInbox, parseSSEChunk, unwrapStreamEnvelope, SURFACE } from "./lib/api.js";
 
 const POLL_ALARM_NAME = "hca-inbox-poll";
 const POLL_INTERVAL_MINUTES = 1;
@@ -121,18 +121,24 @@ async function handleStreamEvent(evt) {
   if (!apiBase) return;
   const cache = await getCache();
 
-  if (evt.event === "request.created" && evt.data) {
-    const id = requestIdOf(evt.data);
+  // evt.data is the raw parsed JSON of the SSE data: line, which is the
+  // full publish envelope ({event, data, timestamp}), not the record
+  // itself; unwrap to the actual CollectionRequest or AnswerRecord.
+  const record = evt.data ? unwrapStreamEnvelope(evt.data) : null;
+  if (!record) return;
+
+  if (evt.event === "request.created") {
+    const id = requestIdOf(record);
     if (id && !cache[id]) {
-      cache[id] = evt.data;
+      cache[id] = record;
       await setCache(cache);
-      await notifyNewAsk(evt.data);
+      await notifyNewAsk(record);
     }
     return;
   }
 
-  if (["request.answered", "request.cancelled", "request.expired"].includes(evt.event) && evt.data) {
-    const id = evt.data.request_id;
+  if (["request.answered", "request.cancelled", "request.expired"].includes(evt.event)) {
+    const id = record.request_id;
     if (id && cache[id]) {
       delete cache[id];
       await setCache(cache);
