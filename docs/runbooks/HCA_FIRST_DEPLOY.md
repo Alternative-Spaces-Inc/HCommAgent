@@ -154,6 +154,20 @@ Expected: JSON with `api_key`, `prefix`, `caller`, `created_at`. The `api_key` v
 
 Chrome path: address bar `chrome://extensions`, top right toggle `Developer mode` on, button `Load unpacked`, pick the `extension` folder inside `$HOME/hca-deploy`. On the HCA card, link `Details`, then `Extension options`. Field `API base URL`: paste the SERVICE_URL from step 9. Button `Save`. The badge shows the pending count once the inbox has an ask.
 
+## Step 11: register your browser device (HCA-P6)
+
+Since P6 the human routes (inbox, stream, answer, audit) accept only requests signed by a registered device key. Once per browser profile.
+
+In Chrome: address bar, `chrome://extensions`, Human Collections Agent card, **Details** button, scroll to **Extension options** row, click it. On the options page, section **This device**, button **Copy public key** (below the Public key box). The key is now on the clipboard.
+
+In Terminal, paste the clipboard into a file and register it. The admin token is read from Secret Manager inside the block and never printed; the label is what audit rows show as answered_by when the answer body names nobody.
+
+```bash
+P=<PROJECT_ID> && R=<REGION> && pbpaste > "$HOME/hca-device.pem" && head -1 "$HOME/hca-device.pem" && URL="$(gcloud run services describe hca-api-service --project="$P" --region="$R" --format='value(status.url)')" && T="$(gcloud secrets versions access latest --secret=hca-admin-token --project="$P")" && python3 -c 'import json,sys; print(json.dumps({"label": sys.argv[1], "public_key_pem": open(sys.argv[2]).read()}))' "<LABEL>" "$HOME/hca-device.pem" > "$HOME/hca-device.json" && curl -sS -w '\nHTTP %{http_code}\n' -X POST -H "Authorization: Bearer ${T}" -H "Content-Type: application/json" --data-binary @"$HOME/hca-device.json" "${URL}/v1/devices" ; unset T
+```
+
+Expected: first line `-----BEGIN PUBLIC KEY-----`, then a JSON body with `device_id` matching the id shown on the options page, then `HTTP 201`. `HTTP 422` means the clipboard did not hold the PEM (copy again). To revoke a device later: same block shape, `POST ${URL}/v1/devices/<DEVICE_ID>/revoke` with the same bearer.
+
 ## Rollback
 
 Cloud Run keeps every revision. To route traffic back to the previous one:
