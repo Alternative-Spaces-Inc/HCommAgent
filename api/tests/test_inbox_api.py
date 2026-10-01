@@ -62,6 +62,10 @@ def test_inbox_lists_only_pending_sorted_by_deadline_and_impact():
     ids = [item["title"] for item in resp.json()]
 
     assert "already answered" not in ids
+    # every inbox item carries the request_id the surface answers against
+    for item in resp.json():
+        assert item["request_id"], f"inbox item {item['title']!r} has no request_id"
+    assert answered_id not in [item["request_id"] for item in resp.json()]
     # near deadlines first, red gate ahead of plain at the same deadline, no-deadline last
     assert ids.index("near deadline red gate") < ids.index("near deadline plain")
     assert ids.index("near deadline plain") < ids.index("far deadline")
