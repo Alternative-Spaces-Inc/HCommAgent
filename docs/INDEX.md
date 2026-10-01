@@ -37,3 +37,4 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md](../docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md): Prior art on universal human-in-the-loop interfaces
 - [platform/about-you/HCA_ABOUT_YOU.md](../platform/about-you/HCA_ABOUT_YOU.md): About you paste text (cap 3,144 characters)
 - [platform/soul-renders/hca.md](../platform/soul-renders/hca.md): Soul render for the Base44 Personalization, Identity field
+- docs/deploys/2026-10-01_p6_device_proof.md: P6 device key proof, PR 20 inbox request_id fix, revision 00004
