@@ -31,7 +31,11 @@ def _sort_key(ask: models.Ask):
 def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_device)):
     asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))).scalars().all()
     ordered = sorted(asks, key=_sort_key)
-    return [_ask_to_collection_request(a) for a in ordered]
+    # Each inbox item carries its request_id as a sibling of the
+    # CollectionRequest fields; the extension needs it to build the
+    # POST /v1/requests/{request_id}/answer path (HCA-P6 proof found the
+    # list without it, so the popup answered against "undefined").
+    return [_ask_to_collection_request(a) | {"request_id": a.id} for a in ordered]
 
 
 async def inbox_event_source(keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS):

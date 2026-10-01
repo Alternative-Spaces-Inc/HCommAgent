@@ -107,13 +107,20 @@ paths:
         - DeviceSignature: []
       responses:
         '200':
-          description: Array of pending collection requests sorted by deadline and impact
+          description: Array of pending collection requests sorted by deadline and impact, each carrying its request_id
           content:
             application/json:
               schema:
                 type: array
                 items:
-                  $ref: '#/components/schemas/CollectionRequest'
+                  allOf:
+                    - $ref: '#/components/schemas/CollectionRequest'
+                    - type: object
+                      required: [request_id]
+                      properties:
+                        request_id:
+                          type: string
+                          description: Id the surface answers against in POST /v1/requests/ID/answer
   /v1/inbox/stream:
     get:
       summary: Stream inbox events via Server-Sent Events (SSE)
