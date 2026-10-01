@@ -118,7 +118,9 @@ paths:
                     - type: object
                       required: [request_id]
                       properties:
-                        request_id: { type: string, description: Id used in POST /v1/requests/{request_id}/answer }
+                        request_id:
+                          type: string
+                          description: Id the surface answers against in POST /v1/requests/ID/answer
   /v1/inbox/stream:
     get:
       summary: Stream inbox events via Server-Sent Events (SSE)
