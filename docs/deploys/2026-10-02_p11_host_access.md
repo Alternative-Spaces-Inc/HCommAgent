@@ -44,10 +44,38 @@ options page after the extension folder is refreshed from main.
    shows a dialog naming the host; click "Allow".
 4. The status line under the field reads "Access to <host> granted."
 
-## Proof
+## Proof (2026-10-02 14:58 PT)
 
-Filled in after the owner steps: a proof ask answered from the popup with
-no manifest patch and no Site access toggle, audit row cited.
+Extension folder refreshed from main `02dd02ec` (PR 33 runtime host access,
+PR 34 icons); card reloaded; options Save then Allow on the Chrome dialog.
+Server logs show signed `GET /v1/inbox` 200 from the extension every minute
+from 21:35Z on, including twice at 21:43:14Z right after the reload, with
+`host_permissions` empty in the loaded manifest. Chrome's card error text
+is a fixed Chromium string that lists all four properties whenever any one
+is missing, so it cannot tell a stale entry from a fresh one; the proof ask
+settled it.
+
+Request `c8076e4574a9433fbc32f5b74671b821`, title "P11 proof: host access
+granted at runtime, which letter?", radio A/B, suggested B, posted by
+caller `agent-p11-proof`. The desktop notification appeared (icon fix
+proven) and the card was answered in the popup.
+
+| field | value |
+| --- | --- |
+| state | answered |
+| value | b |
+| answered_by | Al MacBook Chrome |
+| answered_at | 2026-10-02T21:58:30Z |
+| surface | browser_overlay |
+| device | dev_ddea0aae221d2e3b9cedd9e4c05e260e |
+
+Both proof keys (`c87ad00617af`, `dad2d70e89d9`) revoked through the P10
+route the same minute. Lesson: GET /v1/requests/{id} is caller scoped, so
+read the record before revoking the key; the second key existed only
+because the first was revoked too early.
+
+Server unchanged: revision 00012, main `530d2d9f` code; PRs 33 and 34 are
+extension and docs only.
 
 ## Found during the owner steps: notifications never had an icon
 
