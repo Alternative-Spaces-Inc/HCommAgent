@@ -73,3 +73,47 @@ already succeeded in that build.
    `dev_ddea0aae...`.
 5. Redeploy with `REQ=1`; a proof ask answered from the linked device is
    the P7 proof record.
+
+## Result (2026-10-02, 15:4x to 15:55 UTC)
+
+| Item | Value |
+| --- | --- |
+| Merged | PR 23 squashed as 995dc2a5; PR 24 (separator fix) squashed as d13f221b |
+| Build | 02468081-8366-422f-9e0f-1e1be1d0064f, SUCCESS, 2m44s, image tag d13f221b |
+| Revision, REQ=0 | hca-api-service-00005-8dg; env HCA_GOOGLE_CLIENT_ID (public), HCA_OWNER_EMAILS (owner account), HCA_REQUIRE_GOOGLE_LINK=0 |
+| Link | options page Sign in with Google, owner account, 15:51:40 UTC; GET /v1/devices shows google_email on dev_ddea0aae221d2e3b9cedd9e4c05e260e |
+| Revision, REQ=1 | hca-api-service-00006-tsf, same image, set with gcloud run services update --update-env-vars (no rebuild; the runbook block with REQ=1 is the equivalent full path) |
+| Unsigned probes | GET /v1/devices/self 401, POST /v1/devices/self/google-link 401, /health 200 |
+
+## Proof (read with the agent key of caller agent-p7-proof)
+
+Request 7afbf8e45d05444393cca6ff26bb6ef9, title "P7 proof: Google-linked device, which letter?", control radio, options a and b, suggested a, expiry_policy hold, deliver_to poll.
+
+- state: answered
+- value: a
+- answered_by: Al MacBook Chrome
+- answered_at: 2026-10-02T15:55:35Z
+- surface: browser_overlay
+- device: dev_ddea0aae221d2e3b9cedd9e4c05e260e
+
+Answered from the popup with HCA_REQUIRE_GOOGLE_LINK=1 live, so the route
+accepted the device only because its row carries the owner's Google
+account. The revoked device dev_a90693e0 stays unlinked.
+
+## Extension on the Mac
+
+The unpacked folder outside the deploy clone was synced from the merged
+extension/ tree with rsync (manifest.json excluded), then the repo manifest
+was written back with the folder's host_permissions entry kept. Result:
+permissions storage, notifications, alarms, identity; oauth2 client id
+present; manifest key present (fixed ID). Reloaded from chrome://extensions.
+
+## Open items after P7
+
+- host_permissions is still a per-install patch (the service URL is not in
+  the repo manifest). Candidate: a build step that writes it from the
+  runbook value.
+- Consent screen stays in testing mode; the link flow only needs a fresh
+  access token at link time, so the 7-day refresh limit does not affect it.
+- The REQ flag is per service revision; a future full rebuild must pass
+  _REQUIRE_GOOGLE_LINK=1 or it silently returns to 0. Runbook block says so.
