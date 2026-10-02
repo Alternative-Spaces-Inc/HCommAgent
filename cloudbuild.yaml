@@ -1,7 +1,9 @@
 # HCA API: Cloud Build pipeline (docs/plans/HCA_CLOUD_RUN_PLAN_v1.md section 6).
 #
-# Runs on every merge to main once the trigger exists (runbook step 11), and
-# by hand with the block in runbook step 8. Five steps, in order:
+# Runs on every merge to main through the trigger hca-main-deploy (runbook
+# step 11, HCA-P8), and by hand with the block in runbook step 8. Six steps:
+#   0. guard: refuse a build whose substitutions would deploy without the
+#      Google-link gate (HCA-P7) unless _ALLOW_UNGATED=1 says so on purpose
 #   1. pytest against SQLite (fails the build before any image is built)
 #   2. build the api image
 #   3. push it to Artifact Registry
@@ -27,13 +29,29 @@ substitutions:
   _MAX_INSTANCES: "1"               # in-process event bus; see api/Dockerfile
   _GOOGLE_CLIENT_ID: ""             # HCA-P7: public client id of the Chrome Extension OAuth client (set by the block)
   _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = any verified account
-  _REQUIRE_GOOGLE_LINK: "0"         # HCA-P7: "1" once the owner's device is linked (runbook step)
+  _REQUIRE_GOOGLE_LINK: "1"         # HCA-P7: human routes refuse a device with no linked Google account
+  _ALLOW_UNGATED: "0"               # HCA-P8: "1" only for a first deploy on a fresh project (no client id yet)
 
 options:
   logging: CLOUD_LOGGING_ONLY
   dynamicSubstitutions: true
 
 steps:
+  - id: guard
+    name: bash
+    env:
+      - CLIENT_ID=${_GOOGLE_CLIENT_ID}
+      - REQ=${_REQUIRE_GOOGLE_LINK}
+      - ALLOW_UNGATED=${_ALLOW_UNGATED}
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        if [ "$$ALLOW_UNGATED" = "1" ]; then echo "guard: ungated build allowed on purpose"; exit 0; fi
+        [ -n "$$CLIENT_ID" ] || { echo "guard: _GOOGLE_CLIENT_ID is empty; set it on the trigger or pass _ALLOW_UNGATED=1"; exit 1; }
+        [ "$$REQ" = "1" ] || { echo "guard: _REQUIRE_GOOGLE_LINK is '$$REQ', not 1; the P7 gate would drop silently"; exit 1; }
+        echo "guard: gate pinned"
+
   - id: pytest
     name: python:3.12-slim
     dir: api
