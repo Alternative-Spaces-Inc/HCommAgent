@@ -91,7 +91,7 @@ steps:
         pip install --no-cache-dir -q -r requirements.txt
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
-        for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
+        for i in $$(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
         python3 ../scripts/smoke_golden_path.py --base http://127.0.0.1:8080 --human
 
   - id: build
@@ -164,8 +164,8 @@ steps:
       - -c
       - |
         set -euo pipefail
-        URL="$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
-        python3 scripts/smoke_golden_path.py --base "$URL"
+        URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
+        python3 scripts/smoke_golden_path.py --base "$$URL"
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
