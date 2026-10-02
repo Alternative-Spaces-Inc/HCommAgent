@@ -47,12 +47,13 @@ async function notifyNewAsk(item) {
       type: "basic",
       title: item.title || "A decision is waiting",
       message: item.why || "Open the Human Collections Agent popup to answer.",
-      iconUrl: undefined,
+      // Chrome requires iconUrl for type basic; without it create() fails
+      // with "required properties are missing" (seen on the card 2026-10-02).
+      iconUrl: chrome.runtime.getURL("icons/icon128.png"),
       priority: item.red_gate ? 2 : 0,
     });
   } catch (e) {
-    // notifications can fail without an icon on some Chrome builds; the
-    // badge count still reflects the pending ask either way.
+    // the badge count still reflects the pending ask either way.
     console.warn("HCA notification failed", e);
   }
 }
