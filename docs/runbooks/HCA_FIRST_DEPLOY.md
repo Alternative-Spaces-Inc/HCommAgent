@@ -171,6 +171,16 @@ Expected: `trigger created`. The trigger runs as the same service account the ma
 
 First deploy on a fresh project, before any OAuth client exists: pass `_ALLOW_UNGATED=1` once in the step 8 block, then follow the P7 section to link the owner's device, then let the trigger take over.
 
+## Step 11b: let the pipeline read the admin token (HCA-P9)
+
+The `smoke-live` step mints a throwaway agent key against the new revision, so the build service account needs to read one secret. One grant, Terminal:
+
+```bash
+P=<PROJECT_ID> && N="$(gcloud projects describe "$P" --format='value(projectNumber)')" && gcloud secrets add-iam-policy-binding hca-admin-token --project="$P" --member="serviceAccount:${N}-compute@developer.gserviceaccount.com" --role=roles/secretmanager.secretAccessor --format='value(etag)' >/dev/null && echo "smoke can read the admin token"
+```
+
+Expected: `smoke can read the admin token`. Scope is that single secret; the database URL and sweep token stay unreadable to the build. Each merge now leaves one cancelled request and one agent key named `smoke-<unix time>` in the database; both are inert, and a key clean-up route is a later packet.
+
 ## Step 12: the first agent API key
 
 Mints a key for one automation caller through the guarded endpoint. The admin token is read from Secret Manager inside the block; the minted key is printed once, because you are the one who stores it where that agent reads its secrets. Replace `<CALLER>` with the agent id (for example `andy`).
