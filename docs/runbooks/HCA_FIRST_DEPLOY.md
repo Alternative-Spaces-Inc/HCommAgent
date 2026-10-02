@@ -111,7 +111,8 @@ P=<PROJECT_ID> && R=<REGION> && CID=<GOOGLE_CLIENT_ID> && OWNERS=<OWNER_EMAIL> &
 `REQ=0` first: deploy, sign in from the extension options page (Sign in
 with Google), confirm `GET /v1/devices` shows `google_email` on the
 owner's device, then redeploy with `REQ=1` so unlinked devices are
-refused on the human routes.
+refused on the human routes. Every later deploy must keep `REQ=1`, since the
+substitution default is 0 and a rebuild without it turns the gate back off.
 
 Expected: the final status line `STATUS: SUCCESS`. Any `FAILURE` stops here; paste the last 30 lines and I read them.
 
