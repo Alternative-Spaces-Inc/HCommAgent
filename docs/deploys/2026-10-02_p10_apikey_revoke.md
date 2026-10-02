@@ -35,3 +35,15 @@ since the api_keys table). The merge deploys through the trigger and the
 
 Merge; expect eight steps SUCCESS and the `smoke-live` log to show
 `PASS revoke smoke key`, `PASS revoked key refused`, `OK agent path`.
+
+## CodeQL alert 7, dismissed as false positive (Al, 2026-10-02 13:17 PT)
+
+CodeQL `py/weak-sensitive-data-hashing` has flagged `_hash_secret` in
+`api/app/apikeys.py` since 2026-09-30 and attached it to this PR because
+the new tests pass a plaintext key through that path. The hashed value is
+the 24 byte random secret half of an agent key (192 bits of entropy), not a
+human password. SHA-256 at rest with a constant time compare is the design
+in the plan (section 4 and the API key leakage row of the risk table);
+computationally expensive password hashes defend low entropy secrets and
+would add latency to every agent request for no gain here. Dismissed
+through the GitHub API with this reasoning as the comment.
