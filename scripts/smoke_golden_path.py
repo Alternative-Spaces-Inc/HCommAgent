@@ -13,6 +13,8 @@ not through a TestClient. Two modes:
   (default)   agent path only: healthz, mint a key, post an ask, read it
               back, cancel it, read it back cancelled. Runs against the
               live service after deploy; the Google-link gate stays on.
+  Both modes end by revoking the key they minted (HCA-P10), so a merge
+  leaves no live credential behind.
 
 Every check prints one line, PASS or FAIL, and the script exits non-zero
 on the first failure. Budget: the whole run must finish in 300 seconds.
@@ -152,6 +154,13 @@ def main():
     code, body = http("POST", f"{base}/v1/api-keys", {"caller": caller}, {"Authorization": f"Bearer {admin}"})
     check("POST /v1/api-keys", code == 201 and isinstance(body, dict) and body.get("api_key", "").startswith("hca_"), f"{code}")
     agent = {"Authorization": f"Bearer {body['api_key']}"}
+    key_prefix = body["prefix"]
+
+    def revoke_key():
+        code, body = http("POST", f"{base}/v1/api-keys/{key_prefix}/revoke", {}, {"Authorization": f"Bearer {admin}"})
+        check("revoke smoke key", code == 200 and body.get("revoked_at"), f"{code}")
+        code, body = http("GET", f"{base}/v1/requests/{rid}", headers=agent)
+        check("revoked key refused", code == 403, f"{code}")
 
     if not args.human:
         code, body = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "poll"}), agent)
@@ -163,6 +172,7 @@ def main():
         check("POST /v1/requests/{id}/cancel", code == 200 and body.get("state") == "cancelled", f"{code}")
         code, body = http("GET", f"{base}/v1/requests/{rid}", headers=agent)
         check("GET after cancel", code == 200 and body.get("state") == "cancelled" and (body.get("answer") or {}).get("value", {}).get("decision") == "cancel", f"{code}")
+        revoke_key()
         print(f"[{elapsed()}] OK agent path, request {rid}", flush=True)
         return
 
@@ -208,6 +218,7 @@ def main():
 
     code, body = http("POST", f"{base}/v1/devices/{device_id}/revoke", {}, {"Authorization": f"Bearer {admin}"})
     check("revoke smoke device", code == 200 and body.get("revoked_at"), f"{code}")
+    revoke_key()
     print(f"[{elapsed()}] OK golden path, request {rid}, device {device_id}", flush=True)
 
 
