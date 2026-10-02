@@ -11,6 +11,9 @@
     "identity"
   ],
   "host_permissions": [],
+  "optional_host_permissions": [
+    "https://*/*"
+  ],
   "oauth2": {
     "client_id": "529822100897-kqt82297rvh559desb96e4ehp06fttka.apps.googleusercontent.com",
     "scopes": [
