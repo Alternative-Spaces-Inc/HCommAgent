@@ -6,7 +6,8 @@
 // poll interval, including across a suspend/wake cycle that drops the
 // stream mid-connection.
 
-import { fetchInbox, parseSSEChunk, unwrapStreamEnvelope, SURFACE } from "./lib/api.js";
+import { flushQueue, readQueue } from "./lib/offlinequeue.js";
+import { fetchInbox, postAnswer, parseSSEChunk, unwrapStreamEnvelope, SURFACE } from "./lib/api.js";
 import { signedFetch } from "./lib/devicekey.js";
 
 const POLL_ALARM_NAME = "hca-inbox-poll";
@@ -72,9 +73,39 @@ async function reconcileWithInbox(apiBase) {
   await setCache(nextCache);
 }
 
+// HCA-P12: replay answers the popup saved while the API was unreachable.
+// Runs before every poll and on every stream (re)connect, and on demand
+// when the popup has just queued one. Signing happens here, at send time.
+let flushing = false;
+async function flushOfflineAnswers(apiBase) {
+  if (flushing) return;
+  const pending = await readQueue();
+  if (!pending.length) return;
+  flushing = true;
+  try {
+    const counts = await flushQueue((requestId, body) => postAnswer(apiBase, requestId, body));
+    if (counts.sent || counts.stale || counts.dropped) {
+      console.info("HCA offline queue flushed", counts);
+    }
+    if (counts.dropped) {
+      await chrome.notifications.create("hca-queue-dropped", {
+        type: "basic",
+        title: "An offline answer could not be delivered",
+        message: "The server kept refusing it. Open the popup to answer again if the ask is still pending.",
+        iconUrl: chrome.runtime.getURL("icons/icon128.png"),
+      });
+    }
+  } catch (e) {
+    console.warn("HCA offline queue flush failed", e);
+  } finally {
+    flushing = false;
+  }
+}
+
 async function pollInbox() {
   const apiBase = await getApiBase();
   if (!apiBase) return;
+  await flushOfflineAnswers(apiBase);
   try {
     await reconcileWithInbox(apiBase);
   } catch (e) {
@@ -82,9 +113,17 @@ async function pollInbox() {
   }
 }
 
+chrome.runtime.onMessage.addListener((msg) => {
+  if (msg && msg.type === "hca_flush_queue") {
+    getApiBase().then((apiBase) => apiBase && flushOfflineAnswers(apiBase));
+  }
+  return false;
+});
+
 async function connectStream() {
   const apiBase = await getApiBase();
   if (!apiBase) return;
+  await flushOfflineAnswers(apiBase);
 
   if (streamAbortController) {
     streamAbortController.abort();

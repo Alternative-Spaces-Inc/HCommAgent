@@ -20,10 +20,12 @@
     button.deny { background: #c0392b; color: #fff; border-color: #c0392b; }
     .unsupported { color: #a05a00; font-size: 12px; }
     .error { color: #c0392b; font-size: 12px; margin-top: 6px; }
+    .queue-notice { background: #fff6d6; color: #5a4300; padding: 6px 8px; border-radius: 4px; font-size: 12px; margin-bottom: 8px; }
   </style>
 </head>
 <body>
   <h1>Pending decisions</h1>
+  <div id="queue-notice" class="queue-notice" hidden></div>
   <div id="cards"></div>
   <script type="module" src="popup.js"></script>
 </body>
