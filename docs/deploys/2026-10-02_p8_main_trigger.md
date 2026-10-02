@@ -43,3 +43,24 @@ Merge a docs-only commit after the trigger exists; expect one build in
 Cloud Build History for that sha, status SUCCESS, guard step output
 `guard: gate pinned`, and a new revision whose `commit` label is the merge
 sha, with `HCA_REQUIRE_GOOGLE_LINK=1` still set.
+
+## Proof (2026-10-02 17:0x UTC)
+
+- Connection `github-hca`: COMPLETE on the organization installation of the
+  Cloud Build GitHub App, limited to this repository. Two false starts: the
+  first authorization bound the connection to the owner's personal-account
+  installation, and the stored user token could not be repointed, so the
+  connection was deleted and recreated and the organization installation
+  chosen in the Google install page. gcloud did not grant the Secret Manager
+  role to the Cloud Build service agent by itself; it was granted by hand.
+- Trigger `hca-main-deploy`, id `60db90df`, branch `^main$`, compute service
+  account, substitutions `_REQUIRE_GOOGLE_LINK=1`, client id, owner list,
+  Cloud SQL instance.
+- PR 26 squash merged as main `1a6a28fd`. The merge fired build `e53eb2f3`
+  (trigger name recorded on the build): guard, pytest, build, push, migrate,
+  deploy all SUCCESS. Guard log line: `guard: gate pinned`.
+- Cloud Run revision `hca-api-service-00007`, label `commit=1a6a28fd`, env
+  `HCA_REQUIRE_GOOGLE_LINK=1`, client id and owner list present.
+
+Result: from this merge on, a squash merge to main is the whole deploy.
+The manual block in runbook step 8 is the fallback only.
