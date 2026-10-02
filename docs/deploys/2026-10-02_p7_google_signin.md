@@ -52,6 +52,15 @@ gates the account, missing client id 503, require flag blocks an unlinked
 device until it links while the link route stays open, flag off leaves an
 unlinked device working. Suite: 66 passed. Extension tests: 21 passed.
 
+## First deploy attempt
+
+Build 596d79a5 (main 995dc2a5, REQ=0) failed at the deploy step: the
+`--set-env-vars` list used `@` as its custom separator and the owner email
+carries an `@`, so gcloud read `alternative-spaces.com` as a bad dict entry.
+Fixed by switching the separator to `:` (none of the three values contains
+one). Tests, image, push and the migration job (f3a4b5c6d7e8 applied) had
+already succeeded in that build.
+
 ## Deploy and proof (after merge)
 
 1. Deploy from the Mac with the P7 substitutions block in the runbook,
