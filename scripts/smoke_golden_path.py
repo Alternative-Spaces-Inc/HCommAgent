@@ -145,8 +145,8 @@ def main():
     admin = os.environ.get("HCA_ADMIN_TOKEN", "")
     check("env HCA_ADMIN_TOKEN present", bool(admin))
 
-    code, body = http("GET", f"{base}/healthz")
-    check("GET /healthz", code == 200, f"{code}")
+    code, body = http("GET", f"{base}/health")
+    check("GET /health", code == 200, f"{code}")
 
     caller = f"smoke-{int(time.time())}"
     code, body = http("POST", f"{base}/v1/api-keys", {"caller": caller}, {"Authorization": f"Bearer {admin}"})
