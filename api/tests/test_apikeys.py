@@ -83,3 +83,38 @@ def test_revoked_key_does_not_verify():
         assert verify_api_key(db, body["api_key"]) is None
     finally:
         db.close()
+
+
+def test_list_and_revoke_by_prefix_are_admin_only_and_idempotent():
+    issued = client.post("/v1/api-keys", json={"caller": "agent-keys-revoke"}, headers=ADMIN_AUTH).json()
+    prefix, plaintext = issued["prefix"], issued["api_key"]
+
+    assert client.get("/v1/api-keys").status_code == 401
+    assert client.post(f"/v1/api-keys/{prefix}/revoke").status_code == 401
+
+    listed = client.get("/v1/api-keys", headers=ADMIN_AUTH)
+    assert listed.status_code == 200
+    mine = [k for k in listed.json() if k["prefix"] == prefix]
+    assert len(mine) == 1 and mine[0]["caller"] == "agent-keys-revoke" and mine[0]["revoked_at"] is None
+    assert "api_key" not in mine[0] and "key_hash" not in mine[0]
+
+    first = client.post(f"/v1/api-keys/{prefix}/revoke", headers=ADMIN_AUTH)
+    assert first.status_code == 200 and first.json()["revoked_at"] is not None
+    second = client.post(f"/v1/api-keys/{prefix}/revoke", headers=ADMIN_AUTH)
+    assert second.status_code == 200 and second.json()["revoked_at"] == first.json()["revoked_at"]
+
+    assert client.post(f"/v1/api-keys/nosuchprefix/revoke", headers=ADMIN_AUTH).status_code == 404
+
+    db = SessionLocal()
+    try:
+        assert verify_api_key(db, plaintext) is None
+    finally:
+        db.close()
+
+
+def test_revoked_key_is_refused_on_an_agent_route():
+    issued = client.post("/v1/api-keys", json={"caller": "agent-keys-refused"}, headers=ADMIN_AUTH).json()
+    agent = {"Authorization": f"Bearer {issued['api_key']}"}
+    assert client.get("/v1/requests/does-not-exist", headers=agent).status_code == 404
+    client.post(f"/v1/api-keys/{issued['prefix']}/revoke", headers=ADMIN_AUTH)
+    assert client.get("/v1/requests/does-not-exist", headers=agent).status_code == 403

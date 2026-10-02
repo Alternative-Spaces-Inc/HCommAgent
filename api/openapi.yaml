@@ -311,6 +311,43 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/ApiKeyIssueResponse'
+    get:
+      summary: List issued keys without secret material (HCA-P10)
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: Every key row, oldest first; revoked rows carry revoked_at
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKeyView'
+  /v1/api-keys/{prefix}/revoke:
+    post:
+      summary: Revoke a key by its visible prefix (HCA-P10)
+      description: >
+        Idempotent, like device revoke. After this every agent route answers
+        403 for the key. The smoke script calls it on the key it minted so a
+        merge leaves no live credential behind.
+      security:
+        - AdminToken: []
+      parameters:
+        - name: prefix
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: The key row with revoked_at set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyView'
+        '404':
+          description: No key with that prefix
 
 components:
   securitySchemes:
@@ -369,6 +406,14 @@ components:
         last_seen_at: { type: string, format: date-time, nullable: true }
         google_email: { type: string, nullable: true, description: Google account linked through /v1/devices/self/google-link (HCA-P7) }
         google_linked_at: { type: string, format: date-time, nullable: true }
+    ApiKeyView:
+      type: object
+      required: [prefix, caller, created_at]
+      properties:
+        prefix: { type: string }
+        caller: { type: string }
+        created_at: { type: string, format: date-time }
+        revoked_at: { type: string, format: date-time, nullable: true }
     ApiKeyIssueResponse:
       type: object
       required: [api_key, prefix, caller, created_at]
