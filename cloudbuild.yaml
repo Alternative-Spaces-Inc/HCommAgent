@@ -25,6 +25,9 @@ substitutions:
   _SWEEP_TOKEN_SECRET: hca-sweep-trigger-token
   _ADMIN_TOKEN_SECRET: hca-admin-token
   _MAX_INSTANCES: "1"               # in-process event bus; see api/Dockerfile
+  _GOOGLE_CLIENT_ID: ""             # HCA-P7: public client id of the Chrome Extension OAuth client (set by the block)
+  _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = any verified account
+  _REQUIRE_GOOGLE_LINK: "0"         # HCA-P7: "1" once the owner's device is linked (runbook step)
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -96,6 +99,7 @@ steps:
           --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
           --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest \
+          --set-env-vars=^@^HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}@HCA_OWNER_EMAILS=${_OWNER_EMAILS}@HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK} \
           --min-instances=1 \
           --max-instances=${_MAX_INSTANCES} \
           --concurrency=80 \

@@ -100,6 +100,19 @@ Runs the whole pipeline: tests, image, push, migrate job, service. Around 8 to 1
 P=<PROJECT_ID> && R=<REGION> && cd "$HOME/hca-deploy" && SHA="$(git rev-parse HEAD)" && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && gcloud builds submit --project="$P" --region="$R" --config=cloudbuild.yaml --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN},COMMIT_SHA=${SHA}" .
 ```
 
+Since HCA-P7 the deploy also carries three plain (not secret) values: the
+public client id of the Chrome Extension OAuth client, the owner account
+list and the link requirement flag. Add them to the substitutions:
+
+```bash
+P=<PROJECT_ID> && R=<REGION> && CID=<GOOGLE_CLIENT_ID> && OWNERS=<OWNER_EMAIL> && REQ=0 && cd "$HOME/hca-deploy" && SHA="$(git rev-parse HEAD)" && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && gcloud builds submit --project="$P" --region="$R" --config=cloudbuild.yaml --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN},COMMIT_SHA=${SHA},_GOOGLE_CLIENT_ID=${CID},_OWNER_EMAILS=${OWNERS},_REQUIRE_GOOGLE_LINK=${REQ}" .
+```
+
+`REQ=0` first: deploy, sign in from the extension options page (Sign in
+with Google), confirm `GET /v1/devices` shows `google_email` on the
+owner's device, then redeploy with `REQ=1` so unlinked devices are
+refused on the human routes.
+
 Expected: the final status line `STATUS: SUCCESS`. Any `FAILURE` stops here; paste the last 30 lines and I read them.
 
 ## Step 9: the service URL and its health

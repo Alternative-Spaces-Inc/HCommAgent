@@ -131,3 +131,25 @@ export function parseSSEChunk(buffer, chunkText) {
 
   return { events, buffer: newBuffer };
 }
+
+// HCA-P7: Google sign-in linked to this device.
+export async function fetchSelfDevice(apiBase) {
+  const resp = await signedFetch(`${apiBase}/v1/devices/self`);
+  if (!resp.ok) throw new Error(`GET /v1/devices/self ${resp.status}`);
+  return resp.json();
+}
+
+export async function linkGoogle(apiBase, accessToken) {
+  const payload = JSON.stringify({ access_token: accessToken });
+  const resp = await signedFetch(`${apiBase}/v1/devices/self/google-link`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+  });
+  if (!resp.ok) {
+    let detail = "";
+    try { detail = (await resp.json()).detail || ""; } catch (_) { /* no body */ }
+    throw new Error(`google link ${resp.status}${detail ? `: ${detail}` : ""}`);
+  }
+  return resp.json();
+}

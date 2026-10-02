@@ -7,9 +7,17 @@
   "permissions": [
     "storage",
     "notifications",
-    "alarms"
+    "alarms",
+    "identity"
   ],
   "host_permissions": [],
+  "oauth2": {
+    "client_id": "529822100897-kqt82297rvh559desb96e4ehp06fttka.apps.googleusercontent.com",
+    "scopes": [
+      "openid",
+      "email"
+    ]
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
