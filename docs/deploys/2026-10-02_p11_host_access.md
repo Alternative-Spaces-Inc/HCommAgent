@@ -48,3 +48,16 @@ options page after the extension folder is refreshed from main.
 
 Filled in after the owner steps: a proof ask answered from the popup with
 no manifest patch and no Site access toggle, audit row cited.
+
+## Found during the owner steps: notifications never had an icon
+
+After Save and Allow the card showed "Unchecked runtime.lastError: Some of
+the required properties are missing: type, iconUrl, title and message."
+That text comes from `chrome.notifications.create` in `background.js`,
+which passed `iconUrl: undefined`; Chrome requires an icon for type
+`basic`, so the browser notification surface has silently failed since P2
+(the catch logged a warning, the badge count still worked). The error
+appearing right after Allow is also evidence the inbox fetch to the API
+succeeded under the runtime grant. Fix in the same packet: three generated
+PNG icons under `extension/icons/`, declared in the manifest `icons` block
+and passed as `iconUrl`.
