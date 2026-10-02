@@ -14,7 +14,8 @@ What this runbook stands up, matching `docs/plans/HCA_CLOUD_RUN_PLAN_v1.md` sect
 | Cloud Run job | `hca-migrate` | `alembic upgrade head` before each deploy |
 | Cloud Run service | `hca-api-service` | the API, min 1 instance, max 1 (see note) |
 | Cloud Scheduler job | `hca-expiry-sweep` | hits the bearer-guarded sweep every 5 minutes |
-| Cloud Build trigger | `hca-main-deploy` | runs `cloudbuild.yaml` on every merge to main |
+| Cloud Build connection | `github-hca` | 2nd gen GitHub connection, this repository only |
+| Cloud Build trigger | `hca-main-deploy` | runs `cloudbuild.yaml` on every merge to main, P7 values pinned |
 
 Note on max instances: `app/events.py` is an in-process event bus, so the service runs one uvicorn worker and one instance until a shared bus lands (Postgres LISTEN/NOTIFY or Redis, a later packet). The extension's alarm fallback re-reads the inbox, so a push missed for that reason is recovered on the next alarm. Raising `_MAX_INSTANCES` before that packet lands would silently drop SSE events.
 
@@ -140,19 +141,35 @@ P=<PROJECT_ID> && gcloud logging read 'resource.type="cloud_run_revision" AND re
 
 Expected: at least one `200` line.
 
-## Step 11: deploy on every merge to main
+## Step 11: deploy on every merge to main (HCA-P8)
 
-Two parts. First the GitHub connection, which is a browser step because Cloud Build authorizes through GitHub's OAuth:
+Three parts, Terminal first. Values that are not secrets but are yours (client id, owner account) are pinned on the trigger, not in the repo.
 
-Console path: open the Cloud Console, top search box, type `Cloud Build`, open it. Left menu, `Repositories`. Top of the page, tab `2nd gen`. Button `Create host connection`. Region: the same `<REGION>`. Provider: `GitHub`. Name: `github-hca`. Button `Connect`, then in the GitHub window `Install Google Cloud Build` on the `Alternative-Spaces-Inc` organization, limited to the repository `human-collections-agent`. Back in the Console, button `Link repository`, pick `Alternative-Spaces-Inc/human-collections-agent`, button `Link`.
-
-Then the trigger, in Terminal:
+Part 1, the GitHub connection. The command prints one URL; opening it is the only browser step, and it installs the Cloud Build GitHub App on the organization, limited to this repository:
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && gcloud builds triggers create github --project="$P" --region="$R" --name=hca-main-deploy --repository="projects/${P}/locations/${R}/connections/github-hca/repositories/human-collections-agent" --branch-pattern='^main$' --build-config=cloudbuild.yaml --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN}" && echo "trigger created"
+P=<PROJECT_ID> && R=<REGION> && gcloud builds connections create github github-hca --project="$P" --region="$R"
 ```
 
-Expected: `trigger created`. From here, every squash merge to main runs tests, builds, migrates and deploys; the run shows under Cloud Build, History.
+Expected: a line starting `Please authorize the Cloud Build GitHub app by visiting` followed by a URL, then (after the browser step) `Created connection [github-hca]`. In the browser: sign in to GitHub if asked, pick the organization `Alternative-Spaces-Inc`, choose `Only select repositories`, pick `human-collections-agent`, button `Install`. If gcloud asks to grant `roles/secretmanager.admin` to the Cloud Build service agent, answer `Y`; the connection stores its GitHub token in Secret Manager.
+
+Part 2, link the repository:
+
+```bash
+P=<PROJECT_ID> && R=<REGION> && gcloud builds repositories create human-collections-agent --project="$P" --region="$R" --connection=github-hca --remote-uri="https://github.com/Alternative-Spaces-Inc/human-collections-agent.git" && gcloud builds repositories list --project="$P" --region="$R" --connection=github-hca --format='value(name)'
+```
+
+Expected: one name ending in `human-collections-agent`.
+
+Part 3, the trigger, with the P7 values pinned. The `guard` step in `cloudbuild.yaml` fails any build that arrives without them:
+
+```bash
+P=<PROJECT_ID> && R=<REGION> && CID=<GOOGLE_CLIENT_ID> && OWNERS=<OWNER_EMAIL> && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && SA="$(gcloud builds describe "$(gcloud builds list --project="$P" --region="$R" --limit=1 --format='value(id)')" --project="$P" --region="$R" --format='value(serviceAccount)')" && gcloud builds triggers create github --project="$P" --region="$R" --name=hca-main-deploy --repository="projects/${P}/locations/${R}/connections/github-hca/repositories/human-collections-agent" --branch-pattern='^main$' --build-config=cloudbuild.yaml --service-account="$SA" --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN},_GOOGLE_CLIENT_ID=${CID},_OWNER_EMAILS=${OWNERS},_REQUIRE_GOOGLE_LINK=1" && echo "trigger created"
+```
+
+Expected: `trigger created`. The trigger runs as the same service account the manual builds used, so no new IAM grant. From here every squash merge to main runs guard, tests, build, migrate and deploy; the run shows under Cloud Build, History, and `gcloud builds list --project=<PROJECT_ID> --region=<REGION> --limit=3` from Terminal. Step 8's manual block remains the fallback when the trigger is paused; it must pass the same `_GOOGLE_CLIENT_ID` and `_REQUIRE_GOOGLE_LINK=1` or the guard stops it.
+
+First deploy on a fresh project, before any OAuth client exists: pass `_ALLOW_UNGATED=1` once in the step 8 block, then follow the P7 section to link the owner's device, then let the trigger take over.
 
 ## Step 12: the first agent API key
 
@@ -197,5 +214,5 @@ Migrations are forward-only by policy; a revision rollback never runs `alembic d
 Deletes everything this runbook created, in dependency order. Irreversible.
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && gcloud scheduler jobs delete hca-expiry-sweep --project="$P" --location="$R" --quiet ; gcloud builds triggers delete hca-main-deploy --project="$P" --region="$R" --quiet ; gcloud run services delete hca-api-service --project="$P" --region="$R" --quiet ; gcloud run jobs delete hca-migrate --project="$P" --region="$R" --quiet ; gcloud sql instances delete hca-pg --project="$P" --quiet ; for S in hca-database-url hca-sweep-trigger-token hca-admin-token; do gcloud secrets delete "$S" --project="$P" --quiet; done ; gcloud artifacts repositories delete hca-services --project="$P" --location="$R" --quiet ; gcloud iam service-accounts delete "sa-hca-api@${P}.iam.gserviceaccount.com" --project="$P" --quiet
+P=<PROJECT_ID> && R=<REGION> && gcloud scheduler jobs delete hca-expiry-sweep --project="$P" --location="$R" --quiet ; gcloud builds triggers delete hca-main-deploy --project="$P" --region="$R" --quiet ; gcloud builds repositories delete human-collections-agent --project="$P" --region="$R" --connection=github-hca --quiet ; gcloud builds connections delete github-hca --project="$P" --region="$R" --quiet ; gcloud run services delete hca-api-service --project="$P" --region="$R" --quiet ; gcloud run jobs delete hca-migrate --project="$P" --region="$R" --quiet ; gcloud sql instances delete hca-pg --project="$P" --quiet ; for S in hca-database-url hca-sweep-trigger-token hca-admin-token; do gcloud secrets delete "$S" --project="$P" --quiet; done ; gcloud artifacts repositories delete hca-services --project="$P" --location="$R" --quiet ; gcloud iam service-accounts delete "sa-hca-api@${P}.iam.gserviceaccount.com" --project="$P" --quiet
 ```
