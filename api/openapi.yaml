@@ -229,7 +229,7 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceView' }
-        '401': { description: Device signature missing, stale, replayed or not verifying }
+        '401': { description: "Device signature missing, stale, replayed or not verifying" }
         '403': { description: Device unknown or revoked }
   /v1/devices/self/google-link:
     post:
@@ -262,8 +262,8 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceView' }
-        '401': { description: Device signature failed, or the Google token did not verify or has expired }
-        '403': { description: Device unknown or revoked, token issued to another client, email unverified, or account not on the owner list }
+        '401': { description: "Device signature failed, or the Google token did not verify or has expired" }
+        '403': { description: "Device unknown or revoked, token issued to another client, email unverified, or account not on the owner list" }
         '422': { description: access_token missing }
         '503': { description: HCA_GOOGLE_CLIENT_ID not configured (fails closed) }
   /v1/devices/{device_id}/revoke:
@@ -485,7 +485,7 @@ components:
       required: [control, value, surface]
       properties:
         control: { type: string }
-        value: { description: Option id, list of ids, boolean, or text }
+        value: { description: "Option id, list of ids, boolean, or text" }
         answered_by: { type: string }
         answered_role: { type: string }
         surface: { $ref: '#/components/schemas/Surface' }
@@ -500,7 +500,7 @@ components:
       properties:
         request_id: { type: string }
         control: { type: string }
-        value: { description: Option id, list of ids, boolean, or text }
+        value: { description: "Option id, list of ids, boolean, or text" }
         answered_by: { type: string }
         answered_role: { type: string }
         answered_at: { type: string, format: date-time }
