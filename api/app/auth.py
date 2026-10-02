@@ -29,8 +29,15 @@ Two guards:
     header is missing, the timestamp is stale, the nonce was already used
     or the signature does not verify; 403 when the device is unknown or
     revoked. Returns the Device row so the answer route can record which
-    device answered. HCA-P6 closed these routes; Google sign-in on top of
-    the device key is the next packet.
+    device answered. HCA-P6 closed these routes.
+
+  require_linked_device: require_device plus, when HCA_REQUIRE_GOOGLE_LINK
+    is "1", a Google account linked to the device (HCA-P7,
+    app/googleauth.py). 403 "device is not linked to a Google account"
+    otherwise. The flag defaults off so an upgrade never locks out a
+    device that has not signed in yet; the runbook turns it on once the
+    owner's device shows google_email. The link route itself takes
+    require_device, so a device can always sign in.
 """
 
 import hmac
@@ -118,4 +125,14 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
 
     device.last_seen_at = datetime.now(timezone.utc)
     db.commit()
+    return device
+
+
+def google_link_required() -> bool:
+    return os.environ.get("HCA_REQUIRE_GOOGLE_LINK", "").strip() == "1"
+
+
+def require_linked_device(device: models.Device = Depends(require_device)) -> models.Device:
+    if google_link_required() and not device.google_sub:
+        raise HTTPException(status_code=403, detail="device is not linked to a Google account")
     return device

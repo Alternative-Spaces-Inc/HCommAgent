@@ -11,6 +11,7 @@
     button { padding: 6px 14px; }
     .saved { color: #2a7a2a; margin-left: 8px; }
     p.note { color: #666; font-size: 12px; }
+    .error { color: #a12a2a; font-size: 12px; }
     code { font-family: ui-monospace, monospace; }
     h2 { font-size: 14px; margin-top: 28px; }
   </style>
@@ -40,6 +41,16 @@
   <textarea id="device-pem" readonly></textarea>
   <button id="copy-pem">Copy public key</button>
   <span id="copied" class="saved" hidden>Copied</span>
+
+  <h2>Google account</h2>
+  <p class="note">
+    Sign in once to bind this device to your Google account. Answers from
+    this device are then accepted only while the device is linked to an
+    owner account; the server refuses tokens minted for any other app and
+    any account outside the owner list.
+  </p>
+  <button id="google-signin">Sign in with Google</button>
+  <p id="google-status" class="note"></p>
   <script type="module" src="options.js"></script>
 </body>
 </html>

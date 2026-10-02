@@ -218,6 +218,54 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/DeviceView' }
+  /v1/devices/self:
+    get:
+      summary: The calling device's own row, linked Google account included (HCA-P7)
+      security:
+        - DeviceSignature: []
+      responses:
+        '200':
+          description: This device
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '401': { description: "Device signature missing, stale, replayed or not verifying" }
+        '403': { description: Device unknown or revoked }
+  /v1/devices/self/google-link:
+    post:
+      summary: Link the calling device to a Google account (HCA-P7, app/googleauth.py)
+      description: >
+        The extension obtains an access token for its Chrome Extension OAuth
+        client (chrome.identity.getAuthToken, manifest oauth2 block) and posts
+        it over a device-signed call. The server verifies it at Google's
+        tokeninfo endpoint and accepts it only when it was issued to
+        HCA_GOOGLE_CLIENT_ID, the email is verified, the token is unexpired
+        and, when HCA_OWNER_EMAILS is set, the email is on that list. Linking
+        again replaces the account. When HCA_REQUIRE_GOOGLE_LINK is "1" the
+        human routes (inbox, inbox/stream, answer, audit) refuse an unlinked
+        device with 403; this route always accepts a signed device so it can
+        link.
+      security:
+        - DeviceSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [access_token]
+              properties:
+                access_token: { type: string, description: OAuth access token from chrome.identity for the extension's own client }
+      responses:
+        '200':
+          description: Device now linked; google_email and google_linked_at set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '401': { description: "Device signature failed, or the Google token did not verify or has expired" }
+        '403': { description: "Device unknown or revoked, token issued to another client, email unverified, or account not on the owner list" }
+        '422': { description: access_token missing }
+        '503': { description: HCA_GOOGLE_CLIENT_ID not configured (fails closed) }
   /v1/devices/{device_id}/revoke:
     post:
       summary: Revoke a device so its signatures stop verifying (HCA-P6)
@@ -319,6 +367,8 @@ components:
         created_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time, nullable: true }
         last_seen_at: { type: string, format: date-time, nullable: true }
+        google_email: { type: string, nullable: true, description: Google account linked through /v1/devices/self/google-link (HCA-P7) }
+        google_linked_at: { type: string, format: date-time, nullable: true }
     ApiKeyIssueResponse:
       type: object
       required: [api_key, prefix, caller, created_at]
@@ -435,7 +485,7 @@ components:
       required: [control, value, surface]
       properties:
         control: { type: string }
-        value: { description: Option id, list of ids, boolean, or text }
+        value: { description: "Option id, list of ids, boolean, or text" }
         answered_by: { type: string }
         answered_role: { type: string }
         surface: { $ref: '#/components/schemas/Surface' }
@@ -450,7 +500,7 @@ components:
       properties:
         request_id: { type: string }
         control: { type: string }
-        value: { description: Option id, list of ids, boolean, or text }
+        value: { description: "Option id, list of ids, boolean, or text" }
         answered_by: { type: string }
         answered_role: { type: string }
         answered_at: { type: string, format: date-time }
