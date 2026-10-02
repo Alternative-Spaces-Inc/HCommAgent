@@ -1,11 +1,13 @@
 import { currentDevice } from "./lib/devicekey.js";
 import { fetchSelfDevice, linkGoogle } from "./lib/api.js";
+import { hasHostAccess, requestHostAccess } from "./lib/hostaccess.js";
 
 const API_BASE_KEY = "hca_api_base";
 
 async function load() {
   const stored = await chrome.storage.local.get(API_BASE_KEY);
   document.getElementById("api-base").value = stored[API_BASE_KEY] || "";
+  await showHostAccess();
   await showDevice();
   await showGoogle();
 }
@@ -13,6 +15,25 @@ async function load() {
 async function apiBase() {
   const stored = await chrome.storage.local.get(API_BASE_KEY);
   return stored[API_BASE_KEY] || "";
+}
+
+function setHostStatus(text, isError = false) {
+  const el = document.getElementById("host-status");
+  el.textContent = text;
+  el.className = isError ? "error" : "note";
+}
+
+// HCA-P11: the API origin is granted at runtime, not patched into the
+// manifest. Reports whether this install already holds it.
+async function showHostAccess() {
+  const base = await apiBase();
+  if (!base) { setHostStatus("No API base URL saved yet."); return; }
+  try {
+    const ok = await hasHostAccess(base);
+    setHostStatus(ok ? `Access to ${new URL(base).host} granted.` : `Access to ${new URL(base).host} not granted yet. Click Save to be asked.`, !ok);
+  } catch (e) {
+    setHostStatus(e.message, true);
+  }
 }
 
 function setGoogleStatus(text, isError = false) {
@@ -70,12 +91,28 @@ async function showDevice() {
   document.getElementById("device-created").textContent = device.createdAt || "";
 }
 
+// Save runs inside the click, which is the user gesture
+// chrome.permissions.request needs. Order: ask first, store second, so a
+// refused dialog leaves the old (working) URL in place.
 async function save() {
   const value = document.getElementById("api-base").value.trim().replace(/\/+$/, "");
+  let access;
+  try {
+    access = await requestHostAccess(value);
+  } catch (e) {
+    setHostStatus(e.message, true);
+    return;
+  }
+  if (!access.granted) {
+    setHostStatus(`Access to ${new URL(value).host} was refused; the URL was not saved.`, true);
+    return;
+  }
   await chrome.storage.local.set({ [API_BASE_KEY]: value });
+  setHostStatus(`Access to ${new URL(value).host} granted.`);
   const saved = document.getElementById("saved");
   saved.hidden = false;
   setTimeout(() => { saved.hidden = true; }, 1500);
+  await showGoogle();
 }
 
 async function copyPem() {

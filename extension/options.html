@@ -24,8 +24,11 @@
   <span id="saved" class="saved" hidden>Saved</span>
   <p class="note">
     The Cloud Run service URL from the deploy runbook, no trailing slash.
-    Add the same origin to manifest.json host_permissions when packaging.
+    Save asks Chrome once for access to that origin (one Allow dialog); the
+    grant is kept for this extension ID, so no manifest edit and no Site
+    access toggle is needed.
   </p>
+  <p id="host-status" class="note"></p>
 
   <h2>This device</h2>
   <p class="note">
