@@ -1,4 +1,5 @@
 import { buildAnswerPayload, postAnswer, SUPPORTED_CONTROLS } from "./lib/api.js";
+import { isOfflineError, enqueue, readQueue, writeQueue, QUEUE_KEY } from "./lib/offlinequeue.js";
 
 const CACHE_KEY = "hca_inbox_cache";
 const API_BASE_KEY = "hca_api_base";
@@ -59,19 +60,54 @@ function renderOptionsFor(control, options, suggestedId, containerId) {
   return { container, getSelection, buttonGroup: null };
 }
 
+async function dropFromCache(requestId) {
+  const stored = await chrome.storage.local.get(CACHE_KEY);
+  const cache = stored[CACHE_KEY] || {};
+  delete cache[requestId];
+  await chrome.storage.local.set({ [CACHE_KEY]: cache });
+}
+
+// HCA-P12: a transport failure (no response at all) queues the unsigned
+// answer for the service worker to sign and send when the API is back.
+// Any server reply, including 5xx, is shown as an error instead: we were
+// online, and retrying a human decision blindly could double-post it.
 async function submitAnswer(apiBase, requestId, control, selection, cardEl, errorEl) {
   errorEl.textContent = "";
+  let body;
   try {
-    const body = buildAnswerPayload({ control, selection });
-    await postAnswer(apiBase, requestId, body);
-    const stored = await chrome.storage.local.get(CACHE_KEY);
-    const cache = stored[CACHE_KEY] || {};
-    delete cache[requestId];
-    await chrome.storage.local.set({ [CACHE_KEY]: cache });
-    cardEl.remove();
+    body = buildAnswerPayload({ control, selection });
   } catch (e) {
     errorEl.textContent = e.message || String(e);
+    return;
   }
+  try {
+    await postAnswer(apiBase, requestId, body);
+    await dropFromCache(requestId);
+    cardEl.remove();
+    await renderQueueNotice();
+  } catch (e) {
+    if (!isOfflineError(e)) {
+      errorEl.textContent = e.message || String(e);
+      return;
+    }
+    const queue = enqueue(await readQueue(), { requestId, body });
+    await writeQueue(queue);
+    await dropFromCache(requestId);
+    cardEl.remove();
+    chrome.runtime.sendMessage({ type: "hca_flush_queue" }).catch(() => {});
+    await renderQueueNotice();
+  }
+}
+
+async function renderQueueNotice() {
+  const el = document.getElementById("queue-notice");
+  if (!el) return;
+  const queue = await readQueue();
+  if (!queue.length) { el.hidden = true; el.textContent = ""; return; }
+  el.hidden = false;
+  el.textContent = queue.length === 1
+    ? "1 answer saved offline; it will be sent when the API is reachable."
+    : `${queue.length} answers saved offline; they will be sent when the API is reachable.`;
 }
 
 function renderCard(apiBase, item, isFocused) {
@@ -148,6 +184,7 @@ async function render() {
   const cache = stored[CACHE_KEY] || {};
   const focusId = stored[FOCUS_KEY];
   const items = Object.values(cache);
+  await renderQueueNotice();
 
   if (!apiBase) {
     const empty = document.createElement("div");
