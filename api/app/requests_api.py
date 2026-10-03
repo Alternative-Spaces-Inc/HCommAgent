@@ -5,6 +5,7 @@ from typing import Optional
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from . import models
 from .db import get_db
@@ -158,7 +159,16 @@ def answer_request(request_id: str, body: AnswerSubmission, background: Backgrou
     )
     db.add(row)
     ask.state = "answered"
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Two answers for the same ask raced past the state check above
+        # (seen 2026-10-03 when the extension replayed a queued answer from
+        # two code paths in the same second). The unique constraint on
+        # audit_rows.ask_id keeps one decision per ask; the loser gets the
+        # same 409 a late second answer gets, not a 500.
+        db.rollback()
+        raise HTTPException(status_code=409, detail="request already answered")
 
     record = _audit_to_answer_record(row)
     publish("request.answered", record)

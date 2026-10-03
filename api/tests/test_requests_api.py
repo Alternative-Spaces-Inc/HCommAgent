@@ -79,3 +79,33 @@ def test_answer_422_on_bad_option_id():
         json={"control": "radio", "value": "green", "surface": "browser_overlay"},
     )
     assert resp.status_code == 422
+
+
+def test_answer_race_loser_gets_409_not_500(monkeypatch):
+    # Simulate two answers committing in the same instant: the second
+    # commit hits the unique constraint on audit_rows.ask_id.
+    from sqlalchemy.exc import IntegrityError
+    from sqlalchemy.orm import Session
+    resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("test-agent"))
+    request_id = resp.json()["request_id"]
+    real_commit = Session.commit
+    calls = {"n": 0}
+
+    def racing_commit(self):
+        from app import models
+        pending_audit = any(isinstance(o, models.AuditRow) for o in self.new)
+        if pending_audit and calls["n"] == 0:
+            calls["n"] += 1
+            raise IntegrityError("INSERT INTO audit_rows", {}, Exception("duplicate key value violates unique constraint audit_rows_ask_id_key"))
+        return real_commit(self)
+
+    monkeypatch.setattr(Session, "commit", racing_commit)
+    resp = human_post(client, f"/v1/requests/{request_id}/answer",
+                      json={"control": "radio", "value": "blue", "surface": "browser_overlay"})
+    assert resp.status_code == 409
+    assert resp.json()["detail"] == "request already answered"
+    monkeypatch.undo()
+    # the ask is untouched, so a real answer still lands
+    resp = human_post(client, f"/v1/requests/{request_id}/answer",
+                      json={"control": "radio", "value": "blue", "surface": "browser_overlay"})
+    assert resp.status_code == 201
