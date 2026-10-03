@@ -65,5 +65,35 @@ no offline notice). Step 2 above now says so.
 
 Take 2 (request `993bfdc2`) was posted and then cancelled when the owner
 stopped for the day. Proof key `63a9eeb4758d` (caller agent-p12-proof)
-revoked 15:07Z. Open: repeat with the Ethernet cable unplugged and Wi-Fi
-off, then read the record and the poll gap in the server logs.
+revoked 15:07Z.
+
+Take 3 (request `9ec2d7ed`, key `204d38b5fb92`, 2026-10-03): the queue
+proven. The owner unplugged the Ethernet cable and turned Wi-Fi off,
+answered B in the popup (card removed, yellow "1 answer saved offline"
+notice shown), then reconnected.
+
+| time (UTC) | server log |
+| --- | --- |
+| 15:20:24 | GET /v1/inbox 200 (last poll before offline) |
+| 15:21:24 | no poll: offline |
+| 15:22:24 | POST /v1/requests/9ec2d7ed/answer 201, then GET /v1/inbox 200 |
+| 15:22:24 | POST /v1/requests/9ec2d7ed/answer 500 (see defects) |
+| 15:23:24 | GET /v1/inbox 200, queue empty, no replay |
+
+Record: state answered, value b, answered_by Al MacBook Chrome, device
+dev_ddea0aae221d2e3b9cedd9e4c05e260e, surface browser_overlay, answered_at
+15:22:24Z, that is one minute after the answer was given offline. The
+owner was asked nothing while offline: the three steps were handed over
+in one message before disconnecting.
+
+Two defects found by the proof, both fixed in the follow-up PR:
+
+1. Extension: `flushOfflineAnswers` took its `flushing` guard after an
+   await on storage, so the poll alarm and the stream reconnect, firing in
+   the same tick when the network returned, both posted the answer. Guard
+   now taken synchronously.
+2. Server: the loser of that race hit the unique constraint
+   `audit_rows_ask_id_key` on commit and got a 500 (IntegrityError
+   unhandled). It now gets the same 409 "request already answered" a late
+   second answer gets, so the client drops it as stale. Data was never at
+   risk: the constraint kept one decision per ask.

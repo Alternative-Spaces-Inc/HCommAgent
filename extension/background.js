@@ -76,13 +76,17 @@ async function reconcileWithInbox(apiBase) {
 // HCA-P12: replay answers the popup saved while the API was unreachable.
 // Runs before every poll and on every stream (re)connect, and on demand
 // when the popup has just queued one. Signing happens here, at send time.
+// The guard is taken synchronously, before the first await: the poll
+// alarm and the stream reconnect both call this within the same tick when
+// the network returns, and a check that waited on storage first let both
+// through (2026-10-03 proof take 3: one 201, one 500 on the same answer).
 let flushing = false;
 async function flushOfflineAnswers(apiBase) {
   if (flushing) return;
-  const pending = await readQueue();
-  if (!pending.length) return;
   flushing = true;
   try {
+    const pending = await readQueue();
+    if (!pending.length) return;
     const counts = await flushQueue((requestId, body) => postAnswer(apiBase, requestId, body));
     if (counts.sent || counts.stale || counts.dropped) {
       console.info("HCA offline queue flushed", counts);
