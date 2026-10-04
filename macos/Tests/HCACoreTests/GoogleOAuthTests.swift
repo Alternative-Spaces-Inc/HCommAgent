@@ -42,6 +42,9 @@ final class GoogleOAuthTests: XCTestCase {
                                                                  pkce: GoogleOAuth.PKCE(verifier: "ver")), as: UTF8.self)
         XCTAssertEqual(body, "client_id=cid&code=4%2Fa%20b&code_verifier=ver&redirect_uri=http%3A%2F%2F127.0.0.1%3A1%2Foauth2&grant_type=authorization_code")
         XCTAssertFalse(body.contains("client_secret"))
+        let withSecret = String(decoding: GoogleOAuth.tokenRequestBody(clientId: "cid", clientSecret: "s3", code: "c", redirectURI: "r",
+                                                                       pkce: GoogleOAuth.PKCE(verifier: "v")), as: UTF8.self)
+        XCTAssertTrue(withSecret.hasPrefix("client_id=cid&client_secret=s3&code=c&"))
         let t = try JSONDecoder().decode(GoogleOAuth.TokenResponse.self, from: Data(#"{"access_token":"ya29.x","expires_in":3599,"scope":"openid email","token_type":"Bearer"}"#.utf8))
         XCTAssertEqual(t.access_token, "ya29.x")
         XCTAssertNil(t.error)

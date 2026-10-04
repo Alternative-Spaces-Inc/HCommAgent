@@ -8,6 +8,7 @@ import Network
 /// UserDefaults key googleClientId (public value, set with defaults write).
 final class GoogleLinker {
     static let defaultsKey = "googleClientId"
+    static let secretDefaultsKey = "googleClientSecret"
 
     enum LinkError: Error, LocalizedError {
         case noClientId, listenFailed, browserFailed, denied(String), stateMismatch, exchangeFailed(String), timeout
@@ -60,7 +61,8 @@ final class GoogleLinker {
         var request = URLRequest(url: GoogleOAuth.tokenEndpoint)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = GoogleOAuth.tokenRequestBody(clientId: clientId, code: code, redirectURI: redirectURI, pkce: pkce)
+        let secret = UserDefaults.standard.string(forKey: Self.secretDefaultsKey)
+        request.httpBody = GoogleOAuth.tokenRequestBody(clientId: clientId, clientSecret: secret, code: code, redirectURI: redirectURI, pkce: pkce)
         NSLog("hca.link code received, exchanging")
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
