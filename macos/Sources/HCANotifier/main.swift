@@ -2,15 +2,30 @@ import AppKit
 import UserNotifications
 import HCACore
 
-/// HCA Notifier, Day 1: menu bar item, notification permission, a test
-/// notification using the same category shapes the real asks will use.
-/// No network yet. Must run from the .app bundle built by scripts/bundle.sh.
+/// HCA Notifier: menu bar item, native notifications with action buttons for
+/// pending asks, signed calls on the device key. Must run from the .app
+/// bundle built by scripts/bundle.sh (UNUserNotificationCenter refuses a bare
+/// executable).
+///
+/// Day 1: menu, permission, test banners. Day 2: Keychain device key.
+/// Day 3: signed inbox read, SSE stream with poll fallback, signed answer,
+/// dedupe between stream and poll.
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
+    private let connectionItem = NSMenuItem(title: "Server: not configured", action: nil, keyEquivalent: "")
+    private let pendingItem = NSMenuItem(title: "Pending: 0", action: nil, keyEquivalent: "")
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
     private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
+
     private var signer: DeviceSigner?
+    private var client: APIClient?
+    private var store = InboxStore()
+    private var shownAt: [String: Date] = [:]
+    private var streamTask: Task<Void, Never>?
+    private var pollTask: Task<Void, Never>?
+    private var streamConnected = false
+    static let pollInterval: UInt64 = 60
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,31 +35,34 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
         let menu = NSMenu()
         menu.addItem(statusMenuItem)
+        menu.addItem(connectionItem)
+        menu.addItem(pendingItem)
         menu.addItem(lastActionItem)
         menu.addItem(.separator())
         menu.addItem(deviceItem)
         menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
         menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Refresh inbox now", action: #selector(refreshNow), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Send test notification (Approve / Deny)", action: #selector(sendTestApproveDeny), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Send test notification (3 options)", action: #selector(sendTestRadio), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit HCA Notifier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
 
-        // Day 2: the device key lives in the login Keychain; created on first run.
         do {
             let s = try KeychainKeyStore.loadOrCreate()
             signer = s
             deviceItem.title = "Device: \(s.deviceId)"
             Self.writePublicKeyFile(s)
+            client = APIClient(signer: s)
         } catch {
             deviceItem.title = "Device: key error \(error.localizedDescription)"
         }
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
-        center.setNotificationCategories(Self.categories())
+        center.setNotificationCategories(Self.baseCategories())
         center.requestAuthorization(options: [.alert, .sound]) { granted, error in
             DispatchQueue.main.async {
                 if let error = error {
@@ -56,10 +74,104 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
             }
         }
+
+        startNetwork()
     }
 
-    // One category per shape. Radio categories are keyed by option count so
-    // the action buttons can carry the real option labels at post time.
+    // MARK: network
+
+    private func startNetwork() {
+        guard let client = client else { return }
+        guard client.baseURL != nil else {
+            connectionItem.title = "Server: not configured (apiBaseURL)"
+            return
+        }
+        Task { await checkDevice() }
+        pollTask = Task { [weak self] in
+            while !Task.isCancelled {
+                await self?.poll()
+                try? await Task.sleep(nanoseconds: Self.pollInterval * 1_000_000_000)
+            }
+        }
+        streamTask = Task { [weak self] in
+            var backoff: UInt64 = 2
+            while !Task.isCancelled {
+                guard let self = self, let client = self.client else { return }
+                var opened = false
+                do {
+                    try await client.stream(onOpen: {
+                        opened = true
+                        DispatchQueue.main.async {
+                            self.streamConnected = true
+                            self.connectionItem.title = "Server: stream connected"
+                        }
+                        Task { await self.poll() }   // catch up on anything missed while reconnecting
+                    }, onEvent: { env in
+                        DispatchQueue.main.async { self.handle(event: env) }
+                    })
+                    await MainActor.run { self.streamConnected = false; self.connectionItem.title = "Server: stream closed, reconnecting" }
+                } catch {
+                    await MainActor.run {
+                        self.streamConnected = false
+                        self.connectionItem.title = "Server: stream error, polling (\(error.localizedDescription))"
+                    }
+                }
+                backoff = opened ? 2 : min(backoff * 2, 60)
+                try? await Task.sleep(nanoseconds: backoff * 1_000_000_000)
+            }
+        }
+    }
+
+    /// Signed GET /v1/devices/self: proves the key is registered and shows the Google link state.
+    private func checkDevice() async {
+        guard let client = client else { return }
+        do {
+            let me = try await client.deviceSelf()
+            await MainActor.run {
+                let link = me.google_email.map { "Google: \($0)" } ?? "Google: not linked"
+                self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), \(link))"
+            }
+        } catch {
+            await MainActor.run { self.deviceItem.title = "Device: \(self.signer?.deviceId ?? "?") (server: \(error.localizedDescription))" }
+        }
+    }
+
+    private func poll() async {
+        guard let client = client else { return }
+        do {
+            let items = try await client.inbox()
+            await MainActor.run {
+                let delta = self.store.applyInbox(items)
+                self.apply(delta)
+                if !self.streamConnected { self.connectionItem.title = "Server: polling every \(Self.pollInterval)s" }
+            }
+        } catch {
+            await MainActor.run {
+                if !self.streamConnected { self.connectionItem.title = "Server: poll error (\(error.localizedDescription))" }
+            }
+        }
+    }
+
+    private func handle(event: StreamEnvelope) {
+        apply(store.apply(event: event))
+    }
+
+    private func apply(_ delta: InboxStore.Delta) {
+        for item in delta.added { post(item: item) }
+        if !delta.removed.isEmpty {
+            UNUserNotificationCenter.current().removeDeliveredNotifications(
+                withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
+            for id in delta.removed { shownAt.removeValue(forKey: id) }
+        }
+        pendingItem.title = "Pending: \(store.count)"
+    }
+
+    @objc func refreshNow() {
+        Task { await poll() }
+    }
+
+    // MARK: notifications
+
     static func categoryIdentifier(for shape: NotificationShape) -> String {
         switch shape {
         case .approveDeny: return NotificationShaper.categoryPrefix + "approve_deny"
@@ -68,7 +180,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    static func categories() -> Set<UNNotificationCategory> {
+    /// Fixed categories: approve_deny, placeholder radio sizes, alert-only.
+    static func baseCategories() -> Set<UNNotificationCategory> {
         var set = Set<UNNotificationCategory>()
         set.insert(UNNotificationCategory(
             identifier: NotificationShaper.categoryPrefix + "approve_deny",
@@ -78,9 +191,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             ],
             intentIdentifiers: [], options: [.customDismissAction]))
         for n in 1...NotificationShape.maxRadioOptions {
-            // Titles are placeholders: macOS shows the category's titles, so
-            // Day 3 registers per-ask categories with the real labels. Day 1
-            // proves the plumbing.
             let actions = (0..<n).map { i in
                 UNNotificationAction(identifier: "option_\(i)", title: "Option \(i + 1)", options: [.authenticationRequired])
             }
@@ -92,42 +202,83 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return set
     }
 
-    private func post(ask: AskSummary) {
-        let shape = NotificationShaper.shape(for: ask)
+    /// Per-ask category so the buttons carry the ask's own labels.
+    private var askCategories: [String: UNNotificationCategory] = [:]
+
+    private func categoryFor(item: InboxItem, shape: NotificationShape) -> String {
+        let actions: [UNNotificationAction]
+        switch shape {
+        case .approveDeny:
+            let labels = item.options_or_fields.map { $0.label }
+            actions = [
+                UNNotificationAction(identifier: "approve", title: labels.first ?? "Approve", options: [.authenticationRequired]),
+                UNNotificationAction(identifier: "deny", title: labels.count > 1 ? labels[1] : "Deny", options: [.destructive, .authenticationRequired]),
+            ]
+        case .radio(let options):
+            actions = options.map { UNNotificationAction(identifier: $0.identifier, title: $0.title, options: [.authenticationRequired]) }
+        case .alertOnly:
+            return NotificationShaper.categoryPrefix + "alert"
+        }
+        let id = NotificationShaper.categoryPrefix + "ask." + item.request_id
+        askCategories[id] = UNNotificationCategory(identifier: id, actions: actions, intentIdentifiers: [], options: [.customDismissAction])
+        UNUserNotificationCenter.current().setNotificationCategories(Self.baseCategories().union(askCategories.values))
+        return id
+    }
+
+    private func post(item: InboxItem) {
+        let summary = item.summary
+        let shape = NotificationShaper.shape(for: summary)
         let content = UNMutableNotificationContent()
-        content.title = ask.title
-        content.body = NotificationShaper.body(for: ask, shape: shape)
-        content.categoryIdentifier = Self.categoryIdentifier(for: shape)
+        content.title = (item.isRedGate ? "RED GATE: " : "") + item.title
+        var body = NotificationShaper.body(for: summary, shape: shape)
+        if let why = item.why, !why.isEmpty { body = why + (body.isEmpty ? "" : "\n") + body }
+        content.body = body
+        content.subtitle = item.caller.map { "from \($0)" } ?? ""
+        content.categoryIdentifier = categoryFor(item: item, shape: shape)
         content.sound = .default
-        content.userInfo = ["request_id": ask.requestId]
-        let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: ask.requestId),
+        content.interruptionLevel = item.isRedGate ? .timeSensitive : .active
+        content.userInfo = ["request_id": item.request_id]
+        shownAt[item.request_id] = Date()
+        let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
                                             content: content, trigger: nil)
         UNUserNotificationCenter.current().add(request) { error in
             DispatchQueue.main.async {
-                if let error = error {
-                    self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)"
-                } else {
-                    self.lastActionItem.title = "Last action: posted \(ask.requestId)"
-                }
+                if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
             }
         }
     }
 
+    private func postLocal(title: String, body: String) {
+        let content = UNMutableNotificationContent()
+        content.title = title
+        content.body = body
+        content.categoryIdentifier = NotificationShaper.categoryPrefix + "alert"
+        UNUserNotificationCenter.current().add(UNNotificationRequest(identifier: "hca-local-\(UUID().uuidString)", content: content, trigger: nil))
+    }
+
+    // MARK: test notifications (no server)
+
+    private func postTest(_ ask: AskSummary) {
+        let item = InboxItem(request_id: ask.requestId, caller: "test", title: ask.title, control: ask.control,
+                             options_or_fields: ask.options.map { InboxItem.Option(id: $0.value, label: $0.label) },
+                             suggested: nil)
+        post(item: item)
+    }
+
     @objc func sendTestApproveDeny() {
-        post(ask: AskSummary(requestId: "test-approve-\(Int(Date().timeIntervalSince1970))", control: "approve_deny",
-                             title: "HCA test: approve this test?", options: [], suggestedValue: nil))
+        postTest(AskSummary(requestId: "test-approve-\(Int(Date().timeIntervalSince1970))", control: "approve_deny",
+                            title: "HCA test: approve this test?", options: [(value: "approve", label: "Approve"), (value: "deny", label: "Deny")], suggestedValue: nil))
     }
 
     @objc func sendTestRadio() {
-        post(ask: AskSummary(requestId: "test-radio-\(Int(Date().timeIntervalSince1970))", control: "radio",
-                             title: "HCA test: pick one of three",
-                             options: [(value: "a", label: "Alpha"), (value: "b", label: "Beta"), (value: "c", label: "Gamma")],
-                             suggestedValue: "b"))
+        postTest(AskSummary(requestId: "test-radio-\(Int(Date().timeIntervalSince1970))", control: "radio",
+                            title: "HCA test: pick one of three",
+                            options: [(value: "a", label: "Alpha"), (value: "b", label: "Beta"), (value: "c", label: "Gamma")],
+                            suggestedValue: "b"))
     }
 
-    /// The public half is not a secret. Writing it next to the app lets the
-    /// registration block (runbook) read it from a file instead of the
-    /// clipboard, so the owner has nothing to copy.
+    // MARK: device key
+
     static var publicKeyFileURL: URL {
         let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("HCA Notifier", isDirectory: true)
@@ -154,14 +305,58 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         lastActionItem.title = "Last action: device id copied"
     }
 
-    // Action taps land here. Day 1 only records them in the menu.
+    // MARK: action taps
+
     func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let requestId = NotificationShaper.requestId(fromNotificationIdentifier: response.notification.request.identifier) ?? "?"
+        let action = response.actionIdentifier
         DispatchQueue.main.async {
-            self.lastActionItem.title = "Last action: \(response.actionIdentifier) on \(requestId)"
+            self.lastActionItem.title = "Last action: \(action) on \(requestId)"
+            guard let item = self.store.pending[requestId] else {
+                // Test notifications and already-removed asks end here.
+                if requestId.hasPrefix("test-") { self.lastActionItem.title = "Last action: \(action) on \(requestId) (test, not sent)" }
+                completionHandler(); return
+            }
+            guard let optionId = ActionMapper.optionId(for: action, item: item) else { completionHandler(); return }
+            let started = self.shownAt[requestId]
+            let body = AnswerSubmission(control: item.control, value: optionId,
+                                        path_taken: ["macos_notification", "banner", action],
+                                        duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
+            self.lastActionItem.title = "Last action: sending \(optionId) for \(requestId)"
+            Task {
+                await self.submit(requestId: requestId, body: body)
+                completionHandler()
+            }
         }
-        completionHandler()
+    }
+
+    private func submit(requestId: String, body: AnswerSubmission) async {
+        guard let client = client else { return }
+        do {
+            let outcome = try await client.answer(requestId: requestId, body: body)
+            await MainActor.run {
+                switch outcome {
+                case .recorded:
+                    self.lastActionItem.title = "Last action: answered \(body.value) on \(requestId)"
+                case .alreadyAnswered:
+                    self.lastActionItem.title = "Last action: \(requestId) was already answered elsewhere"
+                case .gone:
+                    self.lastActionItem.title = "Last action: \(requestId) is gone (cancelled or expired)"
+                case .refused(let code, let text):
+                    self.lastActionItem.title = "Last action: refused HTTP \(code) on \(requestId)"
+                    self.postLocal(title: "HCA: answer refused (HTTP \(code))", body: String(text.prefix(140)))
+                    return
+                }
+                self.store.markAnswered(requestId)
+                self.apply(InboxStore.Delta(added: [], removed: [requestId]))
+            }
+        } catch {
+            await MainActor.run {
+                self.lastActionItem.title = "Last action: send failed on \(requestId)"
+                self.postLocal(title: "HCA: answer not sent", body: "\(error.localizedDescription). The ask stays pending; answer again or use Chrome.")
+            }
+        }
     }
 
     func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,

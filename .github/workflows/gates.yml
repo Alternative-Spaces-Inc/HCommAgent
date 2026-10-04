@@ -1,5 +1,8 @@
 name: HCA Quality Gates
 
+permissions:
+  contents: read
+
 on:
   push:
     branches: [ main ]
