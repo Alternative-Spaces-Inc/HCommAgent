@@ -134,3 +134,21 @@ def test_flag_off_leaves_unlinked_device_working(client):
     ensure_registered()
     r = human_get(client, "/v1/inbox")
     assert r.status_code == 200
+
+
+def test_second_client_id_from_list_is_accepted(client, monkeypatch):
+    """HCA-P13: the macOS app's Desktop client is a second allowed audience."""
+    monkeypatch.setenv("HCA_GOOGLE_CLIENT_IDS", " desktop-client.apps.googleusercontent.com ,other.apps.googleusercontent.com")
+    fake(info=_info(aud="desktop-client.apps.googleusercontent.com", azp="desktop-client.apps.googleusercontent.com"))
+    r = human_post(client, "/v1/devices/self/google-link", {"access_token": "ya29.desktop"})
+    assert r.status_code == 200, r.text
+    assert r.json()["google_email"] == "owner@example.com"
+
+
+def test_list_only_configuration_works_and_unknown_client_still_refused(client, monkeypatch):
+    monkeypatch.delenv("HCA_GOOGLE_CLIENT_ID")
+    monkeypatch.setenv("HCA_GOOGLE_CLIENT_IDS", "desktop-client.apps.googleusercontent.com")
+    fake(info=_info(aud="desktop-client.apps.googleusercontent.com", azp="desktop-client.apps.googleusercontent.com"))
+    assert human_post(client, "/v1/devices/self/google-link", {"access_token": "ya29.a"}).status_code == 200
+    fake(info=_info(aud="stranger.apps.googleusercontent.com", azp="stranger.apps.googleusercontent.com"))
+    assert human_post(client, "/v1/devices/self/google-link", {"access_token": "ya29.b"}).status_code == 403

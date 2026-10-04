@@ -43,6 +43,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
         menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Link Google account (opens browser)", action: #selector(linkGoogle), keyEquivalent: "g"))
         menu.addItem(NSMenuItem(title: "Refresh inbox now", action: #selector(refreshNow), keyEquivalent: "r"))
         menu.addItem(NSMenuItem(title: "Send test notification (Approve / Deny)", action: #selector(sendTestApproveDeny), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Send test notification (3 options)", action: #selector(sendTestRadio), keyEquivalent: ""))
@@ -164,6 +165,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             for id in delta.removed { shownAt.removeValue(forKey: id) }
         }
         pendingItem.title = "Pending: \(store.count)"
+    }
+
+    private var linking = false
+
+    /// Day 4: installed-app sign-in, then the device-signed link call.
+    @objc func linkGoogle() {
+        guard !linking, let client = client else { return }
+        linking = true
+        lastActionItem.title = "Last action: Google sign-in opened in the browser"
+        Task {
+            defer { Task { @MainActor in self.linking = false } }
+            do {
+                let token = try await GoogleLinker().obtainAccessToken(loginHint: nil)
+                let me = try await client.googleLink(accessToken: token)
+                await MainActor.run {
+                    self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), Google: \(me.google_email ?? "?"))"
+                    self.lastActionItem.title = "Last action: Google account linked"
+                }
+                await self.poll()
+            } catch {
+                await MainActor.run {
+                    self.lastActionItem.title = "Last action: Google link failed"
+                    self.postLocal(title: "HCA: Google link failed", body: error.localizedDescription)
+                }
+            }
+        }
     }
 
     @objc func refreshNow() {
