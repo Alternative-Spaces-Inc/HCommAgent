@@ -207,6 +207,21 @@ In Terminal, paste the clipboard into a file and register it. The admin token is
 P=<PROJECT_ID> && R=<REGION> && pbpaste > "$HOME/hca-device.pem" && head -1 "$HOME/hca-device.pem" && URL="$(gcloud run services describe hca-api-service --project="$P" --region="$R" --format='value(status.url)')" && T="$(gcloud secrets versions access latest --secret=hca-admin-token --project="$P")" && python3 -c 'import json,sys; print(json.dumps({"label": sys.argv[1], "public_key_pem": open(sys.argv[2]).read()}))' "<LABEL>" "$HOME/hca-device.pem" > "$HOME/hca-device.json" && curl -sS -w '\nHTTP %{http_code}\n' -X POST -H "Authorization: Bearer ${T}" -H "Content-Type: application/json" --data-binary @"$HOME/hca-device.json" "${URL}/v1/devices" ; unset T
 ```
 
+### Registering the macOS device (HCA Notifier, P13)
+
+Same route and admin token as the extension. In the menu bar, click the
+HCA icon, then "Copy device public key (PEM)". Then in Terminal, one block;
+the surface is recorded on the device so audit rows read macos_notification:
+
+```
+P=<PROJECT_ID> && R=<REGION> && pbpaste > "$HOME/hca-mac-device.pem" && head -1 "$HOME/hca-mac-device.pem" && URL="$(gcloud run services describe hca-api-service --project="$P" --region="$R" --format='value(status.url)')" && T="$(gcloud secrets versions access latest --secret=hca-admin-token --project="$P")" && python3 -c 'import json,sys; print(json.dumps({"label": sys.argv[1], "public_key_pem": open(sys.argv[2]).read(), "surface": "macos_notification"}))' "<LABEL>" "$HOME/hca-mac-device.pem" > "$HOME/hca-mac-device.json" && curl -sS -w '\nHTTP %{http_code}\n' -X POST -H "Authorization: Bearer ${T}" -H "Content-Type: application/json" --data-binary @"$HOME/hca-mac-device.json" "${URL}/v1/devices" ; unset T
+```
+
+Expected: `-----BEGIN PUBLIC KEY-----` on the first line, then a JSON device
+record whose `id` equals the "Device:" line in the app menu, and `HTTP 201`.
+A `409` means the key is already registered.
+
+
 Expected: first line `-----BEGIN PUBLIC KEY-----`, then a JSON body with `device_id` matching the id shown on the options page, then `HTTP 201`. `HTTP 422` means the clipboard did not hold the PEM (copy again). To revoke a device later: same block shape, `POST ${URL}/v1/devices/<DEVICE_ID>/revoke` with the same bearer.
 
 ## Rollback
