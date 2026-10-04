@@ -408,6 +408,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 }
 
+// Ignore the trigger signals before anything else runs: a SIGUSR1 that arrives
+// during launch, before the dispatch sources exist, would otherwise terminate the app.
+signal(SIGUSR1, SIG_IGN)
+signal(SIGUSR2, SIG_IGN)
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate
