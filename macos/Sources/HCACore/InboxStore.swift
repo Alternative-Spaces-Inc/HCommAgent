@@ -10,8 +10,11 @@ public struct InboxStore: Equatable {
     public init() {}
 
     public struct Delta: Equatable {
-        public var added: [InboxItem] = []
-        public var removed: [String] = []
+        public var added: [InboxItem]
+        public var removed: [String]
+        public init(added: [InboxItem] = [], removed: [String] = []) {
+            self.added = added; self.removed = removed
+        }
     }
 
     /// Replace the pending set with a full inbox read.
