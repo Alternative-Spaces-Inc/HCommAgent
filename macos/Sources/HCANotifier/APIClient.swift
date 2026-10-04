@@ -58,6 +58,14 @@ final class APIClient {
         return try JSONDecoder().decode(DeviceSelf.self, from: data)
     }
 
+    /// POST /v1/devices/self/google-link with the access token the browser flow produced.
+    func googleLink(accessToken: String) async throws -> DeviceSelf {
+        let body = try JSONSerialization.data(withJSONObject: ["access_token": accessToken])
+        let (code, data) = try await send("POST", "v1/devices/self/google-link", body: body)
+        guard code == 200 else { throw ClientError.http(code, String(decoding: data, as: UTF8.self)) }
+        return try JSONDecoder().decode(DeviceSelf.self, from: data)
+    }
+
     func inbox() async throws -> [InboxItem] {
         let (code, data) = try await send("GET", "v1/inbox")
         guard code == 200 else { throw ClientError.http(code, String(decoding: data, as: UTF8.self)) }

@@ -11,16 +11,18 @@ with the client the token was minted for (aud / azp), the account (sub,
 email, email_verified) and the remaining lifetime. The token is accepted
 only when
 
-  - aud or azp equals HCA_GOOGLE_CLIENT_ID (the public client id of the
-    Chrome Extension OAuth client; a token minted for any other app is
-    refused, so a stolen token from another site cannot link a device),
+  - aud or azp is one of the configured client ids: HCA_GOOGLE_CLIENT_ID
+    (the Chrome Extension OAuth client, kept as an alias) plus every id in
+    HCA_GOOGLE_CLIENT_IDS (comma separated; HCA-P13 adds the Desktop client
+    the macOS app uses). A token minted for any other app is refused, so a
+    stolen token from another site cannot link a device,
   - email_verified is true,
   - expires_in is positive,
   - and, when HCA_OWNER_EMAILS is set (comma separated), the email is in
     that list; the owner list is the allow list for who may answer asks.
 
-Missing HCA_GOOGLE_CLIENT_ID fails closed: linking is refused with 503 so
-a deployment without the client id cannot accept any account.
+No configured client id at all fails closed: linking is refused with 503
+so a deployment without client ids cannot accept any account.
 
 The HTTP call is injectable (set_fetcher) so tests never reach Google.
 """
@@ -70,13 +72,22 @@ def client_id() -> str:
     return os.environ.get("HCA_GOOGLE_CLIENT_ID", "").strip()
 
 
+def client_ids() -> set[str]:
+    """Every OAuth client whose tokens may link a device (HCA-P13)."""
+    ids = {client_id()}
+    raw = os.environ.get("HCA_GOOGLE_CLIENT_IDS", "")
+    ids.update(c.strip() for c in raw.split(","))
+    ids.discard("")
+    return ids
+
+
 def owner_emails() -> set[str]:
     raw = os.environ.get("HCA_OWNER_EMAILS", "")
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
 def verify_access_token(access_token: str) -> GoogleIdentity:
-    expected = client_id()
+    expected = client_ids()
     if not expected:
         raise GoogleAuthError(503, "google client id is not configured")
     token = (access_token or "").strip()
@@ -88,7 +99,7 @@ def verify_access_token(access_token: str) -> GoogleIdentity:
         raise GoogleAuthError(401, "google token did not verify")
 
     audience = {str(info.get("aud", "")), str(info.get("azp", ""))}
-    if expected not in audience:
+    if not (expected & audience):
         raise GoogleAuthError(403, "google token was issued to another client")
 
     verified = info.get("email_verified")
