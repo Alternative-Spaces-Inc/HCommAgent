@@ -117,9 +117,12 @@ async function pollInbox() {
   }
 }
 
-chrome.runtime.onMessage.addListener((msg) => {
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (msg && msg.type === "hca_flush_queue") {
     getApiBase().then((apiBase) => apiBase && flushOfflineAnswers(apiBase));
+    // Reply so the popup's sendMessage promise settles cleanly instead of
+    // Chrome logging a dropped reply on the extensions card.
+    sendResponse({ ok: true });
   }
   return false;
 });
