@@ -9,6 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
+    private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
+    private var signer: DeviceSigner?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
@@ -20,11 +22,25 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(statusMenuItem)
         menu.addItem(lastActionItem)
         menu.addItem(.separator())
+        menu.addItem(deviceItem)
+        menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
+        menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
+        menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Send test notification (Approve / Deny)", action: #selector(sendTestApproveDeny), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Send test notification (3 options)", action: #selector(sendTestRadio), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit HCA Notifier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         statusItem.menu = menu
+
+        // Day 2: the device key lives in the login Keychain; created on first run.
+        do {
+            let s = try KeychainKeyStore.loadOrCreate()
+            signer = s
+            deviceItem.title = "Device: \(s.deviceId)"
+            Self.writePublicKeyFile(s)
+        } catch {
+            deviceItem.title = "Device: key error \(error.localizedDescription)"
+        }
 
         let center = UNUserNotificationCenter.current()
         center.delegate = self
@@ -107,6 +123,35 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                              title: "HCA test: pick one of three",
                              options: [(value: "a", label: "Alpha"), (value: "b", label: "Beta"), (value: "c", label: "Gamma")],
                              suggestedValue: "b"))
+    }
+
+    /// The public half is not a secret. Writing it next to the app lets the
+    /// registration block (runbook) read it from a file instead of the
+    /// clipboard, so the owner has nothing to copy.
+    static var publicKeyFileURL: URL {
+        let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("HCA Notifier", isDirectory: true)
+        return dir.appendingPathComponent("device_public_key.pem")
+    }
+
+    static func writePublicKeyFile(_ signer: DeviceSigner) {
+        let url = publicKeyFileURL
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try? signer.publicKeyPEM.write(to: url, atomically: true, encoding: .utf8)
+    }
+
+    @objc func copyPublicKey() {
+        guard let signer = signer else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(signer.publicKeyPEM, forType: .string)
+        lastActionItem.title = "Last action: public key PEM copied"
+    }
+
+    @objc func copyDeviceId() {
+        guard let signer = signer else { return }
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(signer.deviceId, forType: .string)
+        lastActionItem.title = "Last action: device id copied"
     }
 
     // Action taps land here. Day 1 only records them in the menu.
