@@ -1,0 +1,54 @@
+{
+  "note": "Shared device-signature vectors for api/app/devicesig.py, extension/lib/devicekey.js and macos/Sources/HCACore/DeviceSigner.swift. The private key is a TEST key generated for this file only; it is registered nowhere and must never be. ECDSA signatures are randomized, so each client verifies these signatures with the public key and signs its own canonical strings for round trips.",
+  "version": "HCA1",
+  "test_private_key_pkcs8_pem": "-----BEGIN PRIVATE KEY-----\nMIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQQge+h0Y/QUGxf1tEUX\nt+jO9tzqjXpW/99iNbWj5dDsMYKhRANCAAQAHc5D4f+WpvM2aRxlvryiIIhMkLza\nmjOVs4xODuaHiVZsMgv66PPlBllD/zYFupRpE+wqKXEsF034lTJjm64v\n-----END PRIVATE KEY-----\n",
+  "test_private_key_raw_hex": "7be87463f4141b17f5b44517b7e8cef6dcea8d7a56ffdf6235b5a3e5d0ec3182",
+  "public_key_spki_pem": "-----BEGIN PUBLIC KEY-----\nMFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEAB3OQ+H/lqbzNmkcZb68oiCITJC8\n2pozlbOMTg7mh4lWbDIL+ujz5QZZQ/82BbqUaRPsKilxLBdN+JUyY5uuLw==\n-----END PUBLIC KEY-----\n",
+  "device_id": "dev_5c3a6377c69b1dde5fbcbe7cb9806e70",
+  "cases": [
+    {
+      "name": "get_no_body",
+      "timestamp": "1759600000",
+      "nonce": "n0nce-get",
+      "method": "GET",
+      "path_and_query": "/v1/inbox",
+      "body_utf8": "",
+      "body_sha256_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "canonical_utf8": "HCA1\n1759600000\nn0nce-get\nGET\n/v1/inbox\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signature_b64url": "AEt10FRe89TnlUc_gDBj1paS2v28ZHlfuheRIn-xpdRIKOyribQ0YWxSyCGWpU4aFWKIAsgRWGuKekk4Dz0sLw"
+    },
+    {
+      "name": "get_with_query",
+      "timestamp": "1759600001",
+      "nonce": "n0nce-q",
+      "method": "get",
+      "path_and_query": "/v1/audit?limit=5&since=2026-10-01T00%3A00%3A00Z",
+      "body_utf8": "",
+      "body_sha256_hex": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "canonical_utf8": "HCA1\n1759600001\nn0nce-q\nGET\n/v1/audit?limit=5&since=2026-10-01T00%3A00%3A00Z\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "signature_b64url": "DY83th6ePtk-89EsOrhA8PsH6r1zKAdo6DH8CGbQdYQlIx1odSU3WBHhdHpHIx-5C0o_7wGoqL1awY21qdPPYw"
+    },
+    {
+      "name": "post_json_body",
+      "timestamp": "1759600002",
+      "nonce": "n0nce-post",
+      "method": "POST",
+      "path_and_query": "/v1/requests/9ec2d7ed/answer",
+      "body_utf8": "{\"value\":\"b\",\"surface\":\"macos_notification\",\"path_taken\":\"option_1\"}",
+      "body_sha256_hex": "28d66668027cc9ab2ce81aeeadedad83a2a363a00c820195dee5fe18fe0a64a9",
+      "canonical_utf8": "HCA1\n1759600002\nn0nce-post\nPOST\n/v1/requests/9ec2d7ed/answer\n28d66668027cc9ab2ce81aeeadedad83a2a363a00c820195dee5fe18fe0a64a9",
+      "signature_b64url": "cgcYzyUKC07HSv1YC8B-p1_UGsH6gL9B5Cp2pq8fIFB2huFINPqims--wMqE3dXpCl-UmALIafS_VN0tg8uiFg"
+    },
+    {
+      "name": "post_utf8_body",
+      "timestamp": "1759600003",
+      "nonce": "n0nce-utf8",
+      "method": "POST",
+      "path_and_query": "/v1/requests/abc/answer",
+      "body_utf8": "{\"value\":\"ok\",\"note\":\"caf\u00e9 \u2713\"}",
+      "body_sha256_hex": "d2b1445507dc9b6392b7026108ef30e9bf86b7e3f315751466901e11f003114d",
+      "canonical_utf8": "HCA1\n1759600003\nn0nce-utf8\nPOST\n/v1/requests/abc/answer\nd2b1445507dc9b6392b7026108ef30e9bf86b7e3f315751466901e11f003114d",
+      "signature_b64url": "z8WlB2QHAdgvoA4FMfQASoClm3Gl2rIwxzanCyXBVnWKcKZX_ak4WpnJpDVXl-A3s2sg1f81-NA0UhwEFvEAqA"
+    }
+  ]
+}
