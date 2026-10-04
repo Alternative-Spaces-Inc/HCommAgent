@@ -33,11 +33,15 @@ final class GoogleLinker {
         let pkce = GoogleOAuth.PKCE.random()
         let state = GoogleOAuth.randomState()
 
+        NSLog("hca.link start")
         let (port, codeStream) = try await startListener(expectedState: state)
         defer { stopListener() }
+        NSLog("hca.link listener ready on port %d", Int(port))
         let redirectURI = GoogleOAuth.redirectURI(port: port)
         let url = GoogleOAuth.authorizationURL(clientId: clientId, redirectURI: redirectURI, pkce: pkce, state: state, loginHint: loginHint)
-        guard NSWorkspace.shared.open(url) else { throw LinkError.browserFailed }
+        let opened = await MainActor.run { NSWorkspace.shared.open(url) }
+        NSLog("hca.link browser open: %@", opened ? "yes" : "no")
+        guard opened else { throw LinkError.browserFailed }
 
         let code = try await withThrowingTaskGroup(of: String.self) { group -> String in
             group.addTask {
@@ -57,8 +61,10 @@ final class GoogleLinker {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = GoogleOAuth.tokenRequestBody(clientId: clientId, code: code, redirectURI: redirectURI, pkce: pkce)
+        NSLog("hca.link code received, exchanging")
         let (data, response) = try await URLSession.shared.data(for: request)
         let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        NSLog("hca.link exchange HTTP %d", status)
         let parsed = try? JSONDecoder().decode(GoogleOAuth.TokenResponse.self, from: data)
         guard status == 200, let token = parsed?.access_token, !token.isEmpty else {
             throw LinkError.exchangeFailed("HTTP \(status) \(parsed?.error ?? "") \(parsed?.error_description ?? "")")
@@ -71,8 +77,13 @@ final class GoogleLinker {
     /// Starts the loopback listener and resolves once it is bound to a port.
     private func startListener(expectedState: String) async throws -> (UInt16, AsyncThrowingStream<String, Error>) {
         let params = NWParameters.tcp
+        params.requiredInterfaceType = .loopback
         params.requiredLocalEndpoint = NWEndpoint.hostPort(host: "127.0.0.1", port: .any)
-        guard let listener = try? NWListener(using: params) else { throw LinkError.listenFailed }
+        let listener: NWListener
+        do { listener = try NWListener(using: params) } catch {
+            NSLog("hca.link listener init failed: %@", String(describing: error))
+            throw LinkError.listenFailed
+        }
         self.listener = listener
 
         var yield: ((String) -> Void)?
@@ -103,16 +114,18 @@ final class GoogleLinker {
             }
         }
 
+        final class Once { var done = false }
+        let once = Once()
         let port: UInt16 = try await withCheckedThrowingContinuation { cont in
-            var done = false
             listener.stateUpdateHandler = { state in
-                guard !done else { return }
+                NSLog("hca.link listener state: %@", String(describing: state))
+                guard !once.done else { return }
                 switch state {
                 case .ready:
-                    done = true
+                    once.done = true
                     cont.resume(returning: listener.port?.rawValue ?? 0)
-                case .failed, .cancelled:
-                    done = true
+                case .failed, .cancelled, .waiting:
+                    once.done = true
                     cont.resume(throwing: LinkError.listenFailed)
                 default: break
                 }

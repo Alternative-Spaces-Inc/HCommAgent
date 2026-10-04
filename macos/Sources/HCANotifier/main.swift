@@ -77,6 +77,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         startNetwork()
+        installSignalTrigger()
+    }
+
+    /// kill -USR1 <pid> runs the Google link flow (the agent triggers it over the bridge;
+    /// the owner only signs in). SIGUSR2 refreshes the inbox.
+    private var signalSources: [DispatchSourceSignal] = []
+    private func installSignalTrigger() {
+        for (sig, action) in [(SIGUSR1, #selector(linkGoogle)), (SIGUSR2, #selector(refreshNow))] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { [weak self] in _ = self?.perform(action) }
+            src.resume()
+            signalSources.append(src)
+        }
     }
 
     // MARK: network
@@ -171,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Day 4: installed-app sign-in, then the device-signed link call.
     @objc func linkGoogle() {
+        NSLog("hca.link menu action (linking=%@, client=%@)", linking ? "yes" : "no", client == nil ? "nil" : "set")
         guard !linking, let client = client else { return }
         linking = true
         lastActionItem.title = "Last action: Google sign-in opened in the browser"
@@ -185,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
                 await self.poll()
             } catch {
+                NSLog("hca.link failed: %@", error.localizedDescription)
                 await MainActor.run {
                     self.lastActionItem.title = "Last action: Google link failed"
                     self.postLocal(title: "HCA: Google link failed", body: error.localizedDescription)
