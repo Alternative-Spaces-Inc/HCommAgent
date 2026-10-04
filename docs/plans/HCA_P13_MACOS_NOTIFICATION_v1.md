@@ -99,13 +99,14 @@ Developer ID signing and notarization, auto-update, Sparkle, App Store.
 6. Menu bar: Link Google, sign in once.
 7. Answer the proof ask from the banner.
 
-## Open decision for the owner
+## Decision (owner, 2026-10-04 12:4x PT)
 
-How the Mac device passes the Google-link gate: a Desktop OAuth client
-plus the server accepting a second client id (suggested, keeps the gate
-honest and reuses P7 end to end), or a new "link by an already linked
-device" feature (more design, no Console step). The plan above assumes
-the first.
+The Mac device passes the Google-link gate through a Desktop OAuth client
+in the dedicated project plus the server accepting a list of client ids
+(`HCA_GOOGLE_CLIENT_IDS`, pinned on the Cloud Build trigger). Alternative
+offered and declined: a "link by an already linked device" code flow (no
+Console step, but a new trust path and no proof of the Google account from
+the Mac itself).
 
 ## Build mechanics
 
