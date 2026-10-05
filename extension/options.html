@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <title>Human Collections Agent: Options</title>
   <style>
+    select { width: 100%; padding: 6px; box-sizing: border-box; margin-bottom: 10px; }
     body { font: 13px system-ui, sans-serif; max-width: 520px; margin: 24px auto; }
     label { display: block; margin-bottom: 4px; font-weight: 600; }
     input, textarea { width: 100%; padding: 6px; box-sizing: border-box; margin-bottom: 10px; font-family: ui-monospace, monospace; }
@@ -54,6 +55,23 @@
   </p>
   <button id="google-signin">Sign in with Google</button>
   <p id="google-status" class="note"></p>
+
+  <h2>Surface priority</h2>
+  <p class="note">
+    Where this browser sits in the ladder of your devices. Asks go to the
+    primary device first; a fallback device sees them only if the primary
+    has not answered within 90 seconds (45 for a red gate) or has been
+    offline for 10 minutes. Saved on the server, signed by this device.
+  </p>
+  <label for="priority">This browser is</label>
+  <select id="priority">
+    <option value="10">Primary: asks show here first</option>
+    <option value="100">Default: shares the ladder with other default devices</option>
+    <option value="200">Fallback: asks reach here only after the primary's window</option>
+  </select>
+  <button id="priority-save">Save priority</button>
+  <span id="priority-saved" class="saved" hidden>Saved</span>
+  <p id="priority-status" class="note"></p>
   <script type="module" src="options.js"></script>
 </body>
 </html>

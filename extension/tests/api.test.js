@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
+import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, priorityLabel, PRIORITY_CHOICES, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
 
 test("buildAnswerPayload for radio uses a single option id", () => {
   const body = buildAnswerPayload({ control: "radio", selection: "opt_a" });
@@ -109,4 +109,12 @@ test("isAddressedTo honours visible_to for this device only", () => {
   assert.equal(isAddressedTo(rec, "dev_secondary"), false);
   assert.equal(isAddressedTo(rec, null), false);
   assert.equal(isAddressedTo({ request_id: "r1", visible_to: [] }, "dev_primary"), false);
+});
+
+test("priorityLabel names the three ladder places and labels anything else custom", () => {
+  assert.equal(PRIORITY_CHOICES.map((c) => c.value).join(","), "10,100,200");
+  assert.match(priorityLabel(10), /^Primary/);
+  assert.match(priorityLabel("100"), /^Default/);
+  assert.match(priorityLabel(200), /^Fallback/);
+  assert.equal(priorityLabel(37), "Custom (37)");
 });

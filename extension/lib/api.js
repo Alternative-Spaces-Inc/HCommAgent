@@ -148,6 +148,34 @@ export async function fetchSelfDevice(apiBase) {
   return resp.json();
 }
 
+// HCA-P14 priority controls. The ladder places the owner can pick; the
+// numbers are the server's priority values (lower is earlier).
+export const PRIORITY_CHOICES = Object.freeze([
+  { value: 10, label: "Primary: asks show here first" },
+  { value: 100, label: "Default: shares the ladder with other default devices" },
+  { value: 200, label: "Fallback: asks reach here only after the primary's window" },
+]);
+
+export function priorityLabel(priority) {
+  const hit = PRIORITY_CHOICES.find((c) => c.value === Number(priority));
+  return hit ? hit.label : `Custom (${priority})`;
+}
+
+export async function setSelfPriority(apiBase, priority) {
+  const payload = JSON.stringify({ priority: Number(priority) });
+  const resp = await signedFetch(`${apiBase}/v1/devices/self`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: payload,
+  });
+  if (!resp.ok) {
+    let detail = "";
+    try { detail = (await resp.json()).detail || ""; } catch (_) { /* no body */ }
+    throw new Error(`set priority ${resp.status}${detail ? `: ${detail}` : ""}`);
+  }
+  return resp.json();
+}
+
 export async function linkGoogle(apiBase, accessToken) {
   const payload = JSON.stringify({ access_token: accessToken });
   const resp = await signedFetch(`${apiBase}/v1/devices/self/google-link`, {
