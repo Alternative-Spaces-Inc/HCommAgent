@@ -259,7 +259,7 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/DeviceView' }
         '401': { description: "Device signature missing, stale, replayed or not verifying" }
-        '403': { description: Device unknown, revoked or not Google-linked }
+        '403': { description: "Device unknown, revoked or not Google-linked" }
         '422': { description: priority outside 0 to 1000 }
   /v1/devices/self/google-link:
     post:
