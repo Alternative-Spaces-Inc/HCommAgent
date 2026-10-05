@@ -235,6 +235,32 @@ paths:
               schema: { $ref: '#/components/schemas/DeviceView' }
         '401': { description: "Device signature missing, stale, replayed or not verifying" }
         '403': { description: Device unknown or revoked }
+    patch:
+      summary: The calling device sets its own surface ladder priority (HCA-P14 priority controls)
+      description: >-
+        Same gate as answering (device signature, Google link when the gate is on).
+        Lets the owner choose the primary surface from the Mac menu or the extension
+        options page without the admin token. Lower is earlier; equal values share a rank.
+      security:
+        - DeviceSignature: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority]
+              properties:
+                priority: { type: integer, minimum: 0, maximum: 1000 }
+      responses:
+        '200':
+          description: This device with its new priority
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '401': { description: "Device signature missing, stale, replayed or not verifying" }
+        '403': { description: Device unknown, revoked or not Google-linked }
+        '422': { description: priority outside 0 to 1000 }
   /v1/devices/self/google-link:
     post:
       summary: Link the calling device to a Google account (HCA-P7, app/googleauth.py)

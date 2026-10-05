@@ -192,3 +192,26 @@ def test_default_priorities_keep_pre_p14_behaviour():
     rid = _post_ask("everyone at once")
     assert rid in [i["request_id"] for i in human_get(client, "/v1/inbox").json()]
     assert rid in [i["request_id"] for i in _second_get("/v1/inbox").json()]
+
+
+def test_device_sets_its_own_priority_with_a_signed_patch():
+    ensure_registered()
+    client.patch(f"/v1/devices/{DEVICE_ID}", json={"priority": 100}, headers=ADMIN_AUTH)
+    body = b'{"priority":10}'
+    h = human_headers("PATCH", "/v1/devices/self", body)
+    h["Content-Type"] = "application/json"
+    r = client.patch("/v1/devices/self", content=body, headers=h)
+    assert r.status_code == 200, r.text
+    assert r.json()["priority"] == 10
+    assert r.json()["device_id"] == DEVICE_ID
+    me = human_get(client, "/v1/devices/self").json()
+    assert me["priority"] == 10
+    # out of range refused, unsigned refused, admin view agrees
+    body = b'{"priority":5000}'
+    h = human_headers("PATCH", "/v1/devices/self", body)
+    h["Content-Type"] = "application/json"
+    assert client.patch("/v1/devices/self", content=body, headers=h).status_code == 422
+    assert client.patch("/v1/devices/self", json={"priority": 1}).status_code in (401, 403)
+    admin = [d for d in client.get("/v1/devices", headers=ADMIN_AUTH).json() if d["device_id"] == DEVICE_ID][0]
+    assert admin["priority"] == 10
+    client.patch(f"/v1/devices/{DEVICE_ID}", json={"priority": 100}, headers=ADMIN_AUTH)
