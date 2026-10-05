@@ -31,17 +31,25 @@ browser_overlay, device dev_ddea0aae, 17:41:07Z (65 s after creation, 20 s
 after the window opened). Notification Center on the Mac held zero banners
 afterwards: the Mac app withdrew its banner on request.answered.
 
+C. Cleared banner re-post, request 2c0e59ce, posted 17:47:46Z under a
+short-lived key agent-p14-proofc (revoked after the read). The owner swiped
+the Mac banner away without answering; the app re-posted it (repostCleared
+runs after each 60 s poll, once the 90 s window since the last post has
+passed) and the owner answered the re-posted banner: value came_back,
+surface macos_notification, path [macos_notification, banner, option_0],
+18:27:34Z. The ask had been re-posted repeatedly across the 40 minutes it
+stayed open, so a cleared ask no longer disappears until restart.
+
 Result: the primary-then-fallback ladder works end to end on live, with the
-rule on the server and both clients honouring visible_to.
+rule on the server and both clients honouring visible_to, and a cleared Mac
+banner comes back while the ask is pending.
 
 ## Findings
 
 1. P13 Day 5 findings 1 and 2 (surfaces indistinguishable, every device gets
    every ask) are closed by routing: only one surface shows an ask at a time
    until its window lapses.
-2. Finding 3 (cleared banners never re-post) is addressed in code
-   (repostCleared, 90 s after every poll) but not yet proven by a dedicated
-   test on the Mac; proof C remains.
+2. Finding 3 (cleared banners never re-post) is closed by proof C.
 3. The Day 2 Cloud Build (a99c6255) appeared in the build list about 20
    minutes after the merge; the Day 1 build appeared at once. Check before
    assuming a trigger did not fire.
@@ -51,9 +59,12 @@ rule on the server and both clients honouring visible_to.
 5. Server log rows for /v1/inbox do not carry the device id, so per-device
    inbox evidence has to come from client state or the answer record.
 
+6. GET /v1/requests/{id} returns the answer under the key answer; the
+   device id is not part of that view (surface and path_taken are). The
+   signed audit route carries the device id.
+
 ## Next
 
-Proof C: post an ask, clear the Mac banner by hand, confirm it re-posts
-within 90 s, answer it; then the P14 closing record and the plan's open
-items (device priority in the Mac menu and the extension options page so the
-owner can change rank without the admin token).
+Owner-side priority controls (device priority in the Mac menu and the
+extension options page) so the owner can change rank without the admin
+token; then the P14 closing record. Two smoke-<ts> keys still live.
