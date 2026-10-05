@@ -77,6 +77,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         startNetwork()
+        installSignalTrigger()
+    }
+
+    /// kill -USR1 <pid> runs the Google link flow (the agent triggers it over the bridge;
+    /// the owner only signs in). SIGUSR2 refreshes the inbox.
+    private var signalSources: [DispatchSourceSignal] = []
+    private func installSignalTrigger() {
+        for (sig, action) in [(SIGUSR1, #selector(linkGoogle)), (SIGUSR2, #selector(refreshNow))] {
+            signal(sig, SIG_IGN)
+            let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+            src.setEventHandler { [weak self] in _ = self?.perform(action) }
+            src.resume()
+            signalSources.append(src)
+        }
     }
 
     // MARK: network
@@ -171,6 +185,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     /// Day 4: installed-app sign-in, then the device-signed link call.
     @objc func linkGoogle() {
+        NSLog("hca.link menu action (linking=%@, client=%@)", linking ? "yes" : "no", client == nil ? "nil" : "set")
         guard !linking, let client = client else { return }
         linking = true
         lastActionItem.title = "Last action: Google sign-in opened in the browser"
@@ -185,6 +200,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 }
                 await self.poll()
             } catch {
+                NSLog("hca.link failed: %@", error.localizedDescription)
                 await MainActor.run {
                     self.lastActionItem.title = "Last action: Google link failed"
                     self.postLocal(title: "HCA: Google link failed", body: error.localizedDescription)
@@ -266,11 +282,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         content.interruptionLevel = item.isRedGate ? .timeSensitive : .active
         content.userInfo = ["request_id": item.request_id]
         shownAt[item.request_id] = Date()
-        let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
-                                            content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { error in
-            DispatchQueue.main.async {
-                if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
+        // The per-ask category was registered a moment ago; a notification posted
+        // before usernoted has applied the new set shows without buttons (seen on
+        // the 2026-10-04 proof: banner, no Approve or Deny). Read the set back
+        // first: getNotificationCategories completes after the pending set has
+        // been applied, so the add below is ordered behind it. If the id is still
+        // missing, fall back to a base category so the buttons always exist.
+        let center = UNUserNotificationCenter.current()
+        let wanted = content.categoryIdentifier
+        center.getNotificationCategories { categories in
+            if !categories.contains(where: { $0.identifier == wanted }) {
+                content.categoryIdentifier = NotificationShaper.categoryPrefix + (shape == .approveDeny ? "approve_deny" : "alert")
+            }
+            let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
+                                                content: content, trigger: nil)
+            center.add(request) { error in
+                DispatchQueue.main.async {
+                    if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
+                }
             }
         }
     }
@@ -392,6 +421,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 }
 
+// Ignore the trigger signals before anything else runs: a SIGUSR1 that arrives
+// during launch, before the dispatch sources exist, would otherwise terminate the app.
+signal(SIGUSR1, SIG_IGN)
+signal(SIGUSR2, SIG_IGN)
 let app = NSApplication.shared
 let delegate = AppDelegate()
 app.delegate = delegate

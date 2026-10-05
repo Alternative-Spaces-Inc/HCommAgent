@@ -74,13 +74,17 @@ public enum GoogleOAuth {
         return .code(code)
     }
 
-    /// Form body for the code exchange. No client secret: installed apps are
-    /// public clients and Google marks client_secret optional for them.
-    public static func tokenRequestBody(clientId: String, code: String, redirectURI: String, pkce: PKCE) -> Data {
-        let pairs = [
+    /// Form body for the code exchange. Google's docs mark client_secret
+    /// optional for installed apps, but its token endpoint refuses a Desktop
+    /// client without it ("invalid_request client_secret is missing", seen
+    /// 2026-10-04). Google states the installed-app secret is not treated as
+    /// confidential; the app passes it when configured and never logs it.
+    public static func tokenRequestBody(clientId: String, clientSecret: String? = nil, code: String, redirectURI: String, pkce: PKCE) -> Data {
+        var pairs = [
             ("client_id", clientId), ("code", code), ("code_verifier", pkce.verifier),
             ("redirect_uri", redirectURI), ("grant_type", "authorization_code"),
         ]
+        if let secret = clientSecret, !secret.isEmpty { pairs.insert(("client_secret", secret), at: 1) }
         let allowed = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
         return Data(pairs.map { "\($0)=\($1.addingPercentEncoding(withAllowedCharacters: allowed) ?? $1)" }
             .joined(separator: "&").utf8)
