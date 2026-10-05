@@ -84,11 +84,11 @@ settings UI for priority.
 
 ## Owner decisions (red gates and selections)
 
-1. Which surface is primary on the MacBook: HCA Notifier (Mac banner) or
-   the Chrome extension. Suggested: HCA Notifier primary, Chrome at rank 1,
-   because the Mac banner works with Chrome closed and the extension is the
-   richer fallback for radio and text controls.
-2. Fallback window: 90 s default, or another value.
+1. Decided (Al, 2026-10-05 08:3x PT): HCA Notifier is primary (rank 0),
+   the Chrome extension is rank 1. Reason: the Mac banner works with Chrome
+   closed and the extension is the richer fallback for radio and text
+   controls.
+2. Fallback window: 90 s default (not changed by the owner).
 3. Approve the migration deploy (merge to main triggers it) and the
    Terminal block that sets the priorities.
 
