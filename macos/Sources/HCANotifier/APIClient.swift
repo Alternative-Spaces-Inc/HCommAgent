@@ -50,10 +50,19 @@ final class APIClient {
         let label: String?
         let surface: String?
         let google_email: String?
+        let priority: Int?
     }
 
     func deviceSelf() async throws -> DeviceSelf {
         let (code, data) = try await send("GET", "v1/devices/self")
+        guard code == 200 else { throw ClientError.http(code, String(decoding: data, as: UTF8.self)) }
+        return try JSONDecoder().decode(DeviceSelf.self, from: data)
+    }
+
+    /// PATCH /v1/devices/self with the ladder place the owner picked in the menu (HCA-P14 priority controls).
+    func setPriority(_ priority: Int) async throws -> DeviceSelf {
+        let body = try JSONSerialization.data(withJSONObject: ["priority": priority])
+        let (code, data) = try await send("PATCH", "v1/devices/self", body: body)
         guard code == 200 else { throw ClientError.http(code, String(decoding: data, as: UTF8.self)) }
         return try JSONDecoder().decode(DeviceSelf.self, from: data)
     }

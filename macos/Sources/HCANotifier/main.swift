@@ -17,6 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let pendingItem = NSMenuItem(title: "Pending: 0", action: nil, keyEquivalent: "")
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
     private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
+    private let priorityItem = NSMenuItem(title: "Priority: loading", action: nil, keyEquivalent: "")
+    private var priorityChoiceItems: [NSMenuItem] = []
 
     private var signer: DeviceSigner?
     private var client: APIClient?
@@ -40,6 +42,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(lastActionItem)
         menu.addItem(.separator())
         menu.addItem(deviceItem)
+        menu.addItem(priorityItem)
+        // HCA-P14 priority controls: pick this Mac's place in the surface ladder.
+        let prioritySub = NSMenu(title: "Surface priority")
+        for place in SurfacePriority.allCases {
+            let item = NSMenuItem(title: place.title, action: #selector(choosePriority(_:)), keyEquivalent: "")
+            item.tag = place.rawValue
+            prioritySub.addItem(item)
+            priorityChoiceItems.append(item)
+        }
+        let priorityParent = NSMenuItem(title: "Set this Mac's surface priority", action: nil, keyEquivalent: "")
+        priorityParent.submenu = prioritySub
+        menu.addItem(priorityParent)
         menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
         menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -145,6 +159,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             await MainActor.run {
                 let link = me.google_email.map { "Google: \($0)" } ?? "Google: not linked"
                 self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), \(link))"
+                self.showPriority(me.priority)
             }
         } catch {
             await MainActor.run { self.deviceItem.title = "Device: \(self.signer?.deviceId ?? "?") (server: \(error.localizedDescription))" }
@@ -229,6 +244,33 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc func refreshNow() {
         Task { await poll() }
+    }
+
+    // MARK: surface priority (HCA-P14 priority controls)
+
+    private func showPriority(_ priority: Int?) {
+        priorityItem.title = SurfacePriority.label(for: priority)
+        for item in priorityChoiceItems { item.state = (item.tag == priority) ? .on : .off }
+    }
+
+    @objc func choosePriority(_ sender: NSMenuItem) {
+        guard let client = client else { return }
+        let value = sender.tag
+        priorityItem.title = "Priority: saving (\(value))"
+        Task {
+            do {
+                let me = try await client.setPriority(value)
+                await MainActor.run {
+                    self.showPriority(me.priority)
+                    self.lastActionItem.title = "Last action: priority set to \(value)"
+                }
+            } catch {
+                await MainActor.run {
+                    self.priorityItem.title = "Priority: not saved (\(error.localizedDescription))"
+                    self.lastActionItem.title = "Last action: priority change refused"
+                }
+            }
+        }
     }
 
     // MARK: notifications
