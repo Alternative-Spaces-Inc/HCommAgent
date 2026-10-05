@@ -5,7 +5,7 @@ from typing import Any, Dict
 
 _subscribers: set[asyncio.Queue] = set()
 
-VALID_EVENTS = {"request.created", "request.answered", "request.cancelled", "request.expired"}
+VALID_EVENTS = {"request.created", "request.escalated", "request.answered", "request.cancelled", "request.expired"}
 
 
 def subscribe() -> asyncio.Queue:

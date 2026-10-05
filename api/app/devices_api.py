@@ -3,6 +3,7 @@
 POST /v1/devices        admin bearer; body {label, public_key_pem, surface?}
 GET  /v1/devices        admin bearer; every device, revoked included
 POST /v1/devices/{id}/revoke  admin bearer
+PATCH /v1/devices/{id}  admin bearer; body {priority} (HCA-P14, app/routing.py)
 GET  /v1/devices/self              device signature; the calling device's own view
 POST /v1/devices/self/google-link  device signature; body {access_token} (HCA-P7)
 
@@ -48,10 +49,15 @@ class GoogleLink(BaseModel):
     access_token: str
 
 
+class DevicePatch(BaseModel):
+    priority: int
+
+
 class DeviceView(BaseModel):
     device_id: str
     label: str
     surface: str
+    priority: int = 100
     created_at: datetime
     revoked_at: Optional[datetime] = None
     last_seen_at: Optional[datetime] = None
@@ -60,7 +66,7 @@ class DeviceView(BaseModel):
 
 
 def _view(d: models.Device) -> DeviceView:
-    return DeviceView(device_id=d.id, label=d.label, surface=d.surface, created_at=d.created_at,
+    return DeviceView(device_id=d.id, label=d.label, surface=d.surface, priority=d.priority if d.priority is not None else 100, created_at=d.created_at,
                       revoked_at=d.revoked_at, last_seen_at=d.last_seen_at,
                       google_email=d.google_email, google_linked_at=d.google_linked_at)
 
@@ -100,6 +106,21 @@ def revoke_device(device_id: str, db: Session = Depends(get_db), _admin=Depends(
     if device.revoked_at is None:
         device.revoked_at = datetime.now(timezone.utc)
         db.commit()
+    return _view(device)
+
+
+@router.patch("/{device_id}", response_model=DeviceView)
+def patch_device(device_id: str, body: DevicePatch, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    """Set the device's place in the surface ladder (HCA-P14). Lower is
+    earlier; equal values share a rank. The owner sets this once from the
+    runbook Terminal block."""
+    device = db.get(models.Device, device_id)
+    if device is None:
+        raise HTTPException(status_code=404, detail="device not found")
+    if body.priority < 0 or body.priority > 1000:
+        raise HTTPException(status_code=422, detail="priority must be between 0 and 1000")
+    device.priority = body.priority
+    db.commit()
     return _view(device)
 
 

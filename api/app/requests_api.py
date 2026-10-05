@@ -12,7 +12,9 @@ from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
 from .events import publish
 from .webhooks import deliver_outcome
-from .auth import require_agent_key, require_linked_device
+from .auth import require_agent_key, require_linked_device, google_link_required
+from .db import SessionLocal
+from . import routing
 
 router = APIRouter(prefix="/v1/requests", tags=["requests"])
 
@@ -95,7 +97,13 @@ def create_request(body: CollectionRequest, db: Session = Depends(get_db), key: 
 
     db.commit()
     receipt = {"request_id": ask.id, "state": ask.state}
-    publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id})
+    # HCA-P14: the created event names the rank 0 devices; later ranks get a
+    # request.escalated envelope when their window opens (app/routing.py).
+    eligible = routing.eligible_devices(db, now, google_link_required())
+    visible = routing.visible_to(db, ask, now, google_link_required())
+    publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": visible})
+    delays = routing.escalation_delays(ask.created_at, routing.rank_count(eligible), bool(ask.red_gate), now)
+    routing.schedule_escalations(ask.id, delays, SessionLocal, google_link_required, publish)
     return receipt
 
 

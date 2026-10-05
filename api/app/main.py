@@ -16,6 +16,14 @@ app.include_router(sweep_router)
 app.include_router(devices_router)
 
 
+@app.on_event("startup")
+async def _bind_routing_loop():
+    # HCA-P14: escalation timers (app/routing.py) run on the server loop.
+    import asyncio
+    from . import routing
+    routing.bind_loop(asyncio.get_running_loop())
+
+
 @app.get("/healthz")
 @app.get("/health")
 def healthz():

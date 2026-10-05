@@ -124,6 +124,10 @@ class Device(Base):
     id = Column(String, primary_key=True)
     label = Column(String, nullable=False)
     surface = Column(String, nullable=False, default="browser_overlay")
+    # HCA-P14 (app/routing.py): lower is earlier in the surface ladder.
+    # Devices with the same value share a rank and see an ask together; the
+    # default keeps every device at rank 0, which is the pre-P14 behaviour.
+    priority = Column(Integer, nullable=False, default=100, server_default="100")
     public_key_pem = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
