@@ -9,7 +9,9 @@ from . import models
 from .db import get_db
 from .events import subscribe, unsubscribe, format_sse
 from .requests_api import _ask_to_collection_request
-from .auth import require_linked_device
+from .auth import require_linked_device, google_link_required
+from . import routing
+from datetime import datetime, timezone
 
 router = APIRouter(prefix="/v1/inbox", tags=["inbox"])
 
@@ -30,6 +32,11 @@ def _sort_key(ask: models.Ask):
 @router.get("")
 def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
     asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))).scalars().all()
+    # HCA-P14: a device sees an ask only once its rank's window has opened
+    # (app/routing.py). The poll path applies the same rule as the stream.
+    now = datetime.now(timezone.utc)
+    link_required = google_link_required()
+    asks = [a for a in asks if routing.is_visible(db, a, device, now, link_required)]
     ordered = sorted(asks, key=_sort_key)
     # Each inbox item carries its request_id as a sibling of the
     # CollectionRequest fields; the extension needs it to build the

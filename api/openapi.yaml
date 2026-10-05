@@ -127,8 +127,12 @@ paths:
       security:
         - DeviceSignature: []
       description: >
-        Server-Sent Events (SSE) stream pushing request.created, request.answered,
-        request.cancelled, and request.expired events to connected surfaces.
+        Server-Sent Events (SSE) stream pushing request.created, request.escalated,
+        request.answered, request.cancelled, and request.expired events to connected
+        surfaces. Since HCA-P14 the created and escalated envelopes carry
+        data.visible_to, the device ids the event applies to at that moment; a
+        surface ignores envelopes that do not name its device. Envelopes without
+        visible_to (older servers) are treated as visible.
       responses:
         '200':
           description: SSE event stream
@@ -266,6 +270,39 @@ paths:
         '403': { description: "Device unknown or revoked, token issued to another client, email unverified, or account not on the owner list" }
         '422': { description: access_token missing }
         '503': { description: HCA_GOOGLE_CLIENT_ID not configured (fails closed) }
+  /v1/devices/{device_id}:
+    patch:
+      summary: Set the device's place in the surface ladder (HCA-P14)
+      description: >
+        Lower priority is earlier; devices with equal values share a rank and see an
+        ask together. An ask is visible to rank r from created_at plus r times the
+        fallback window (HCA_SURFACE_FALLBACK_SECONDS, default 90; half for a red
+        gate). Devices not seen within HCA_DEVICE_ACTIVE_SECONDS (default 600) are
+        left out of the ranking.
+      security:
+        - AdminToken: []
+      parameters:
+        - in: path
+          name: device_id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [priority]
+              properties:
+                priority: { type: integer, minimum: 0, maximum: 1000 }
+      responses:
+        '200':
+          description: The device with its new priority
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/DeviceView' }
+        '404': { description: Unknown device }
+        '422': { description: priority outside 0 to 1000 }
   /v1/devices/{device_id}/revoke:
     post:
       summary: Revoke a device so its signatures stop verifying (HCA-P6)
@@ -401,6 +438,7 @@ components:
         device_id: { type: string }
         label: { type: string }
         surface: { type: string }
+        priority: { type: integer, default: 100, description: Surface ladder position, lower is earlier (HCA-P14) }
         created_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time, nullable: true }
         last_seen_at: { type: string, format: date-time, nullable: true }
@@ -561,10 +599,13 @@ components:
       properties:
         event:
           type: string
-          enum: [request.created, request.answered, request.cancelled, request.expired]
+          enum: [request.created, request.escalated, request.answered, request.cancelled, request.expired]
         data:
           type: object
-          description: Event payload (such as CollectionRequest, AnswerRecord, or RequestReceipt)
+          description: >
+            Event payload (such as CollectionRequest, AnswerRecord, or RequestReceipt).
+            For request.created and request.escalated it also carries request_id and
+            visible_to (array of device ids, HCA-P14).
         timestamp:
           type: string
           format: date-time
