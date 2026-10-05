@@ -14,7 +14,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
     private let connectionItem = NSMenuItem(title: "Server: not configured", action: nil, keyEquivalent: "")
-    private let pendingItem = NSMenuItem(title: "Pending: 0", action: nil, keyEquivalent: "")
+    private let pendingItem = NSMenuItem(title: "Pending asks (0)", action: nil, keyEquivalent: "")
+    // HCA-P15: one row per pending ask, rebuilt on every inbox delta.
+    private var askRowItems: [NSMenuItem] = []
+    private let noAsksItem = NSMenuItem(title: "No pending asks", action: nil, keyEquivalent: "")
+    private var menu: NSMenu!
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
     private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
     private let priorityItem = NSMenuItem(title: "Priority: loading", action: nil, keyEquivalent: "")
@@ -36,10 +40,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             button.toolTip = "Human Collections Agent"
         }
         let menu = NSMenu()
+        self.menu = menu
         menu.addItem(statusMenuItem)
         menu.addItem(connectionItem)
-        menu.addItem(pendingItem)
         menu.addItem(lastActionItem)
+        menu.addItem(.separator())
+        menu.addItem(pendingItem)
+        menu.addItem(noAsksItem)
         menu.addItem(.separator())
         menu.addItem(deviceItem)
         menu.addItem(priorityItem)
@@ -217,7 +224,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
             for id in delta.removed { shownAt.removeValue(forKey: id) }
         }
-        pendingItem.title = "Pending: \(store.count)"
+        pendingItem.title = "Pending asks (\(store.count))"
+        rebuildAskRows()
+    }
+
+    /// HCA-P15: the rows under "Pending asks": each opens a submenu with the
+    /// why line and one line per option; a click sends the same signed answer
+    /// the banner sends, path [macos_notification, menu, <option_id>].
+    private func rebuildAskRows() {
+        guard let menu = menu else { return }
+        for item in askRowItems { menu.removeItem(item) }
+        askRowItems.removeAll()
+        let rows = MenuAskList.rows(from: store.pending)
+        noAsksItem.isHidden = !rows.isEmpty
+        var index = menu.index(of: noAsksItem) + 1
+        for row in rows {
+            let parent = NSMenuItem(title: "\(row.title)  [\(MenuAskList.shortId(row.requestId))]", action: nil, keyEquivalent: "")
+            let sub = NSMenu(title: row.title)
+            sub.autoenablesItems = false
+            if let why = row.why {
+                let whyItem = NSMenuItem(title: why, action: nil, keyEquivalent: "")
+                whyItem.isEnabled = false
+                sub.addItem(whyItem)
+                sub.addItem(.separator())
+            }
+            if row.answerable {
+                for choice in row.choices {
+                    let c = NSMenuItem(title: choice.title, action: #selector(chooseAnswer(_:)), keyEquivalent: "")
+                    c.target = self
+                    c.isEnabled = true
+                    c.state = choice.suggested ? .on : .off
+                    c.representedObject = [row.requestId, choice.optionId]
+                    sub.addItem(c)
+                }
+            } else {
+                let t = NSMenuItem(title: "Needs typed input: answer in Chrome", action: nil, keyEquivalent: "")
+                t.isEnabled = false
+                sub.addItem(t)
+            }
+            parent.submenu = sub
+            menu.insertItem(parent, at: index)
+            askRowItems.append(parent)
+            index += 1
+        }
+    }
+
+    @objc func chooseAnswer(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
+        let requestId = pair[0], optionId = pair[1]
+        lastActionItem.title = "Last action: menu click \(optionId) on \(requestId)"
+        guard let item = store.pending[requestId] else {
+            lastActionItem.title = "Last action: \(requestId) no longer pending"
+            return
+        }
+        let started = shownAt[requestId]
+        let body = AnswerSubmission(control: item.control, value: optionId,
+                                    path_taken: ["macos_notification", "menu", optionId],
+                                    duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
+        lastActionItem.title = "Last action: sending menu \(optionId) for \(requestId)"
+        Task { await self.submit(requestId: requestId, body: body) }
     }
 
     private var linking = false
