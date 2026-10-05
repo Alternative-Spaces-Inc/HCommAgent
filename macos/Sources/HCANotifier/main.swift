@@ -44,9 +44,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(deviceItem)
         menu.addItem(priorityItem)
         // HCA-P14 priority controls: pick this Mac's place in the surface ladder.
+        // Submenu items name their target explicitly and skip auto-enabling:
+        // in the first build the nil-target click inside the submenu did nothing
+        // on the owner's Mac (proof take 1), while top-level items worked.
         let prioritySub = NSMenu(title: "Surface priority")
+        prioritySub.autoenablesItems = false
         for place in SurfacePriority.allCases {
             let item = NSMenuItem(title: place.title, action: #selector(choosePriority(_:)), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = true
             item.tag = place.rawValue
             prioritySub.addItem(item)
             priorityChoiceItems.append(item)
@@ -254,8 +260,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     @objc func choosePriority(_ sender: NSMenuItem) {
-        guard let client = client else { return }
         let value = sender.tag
+        lastActionItem.title = "Last action: priority click (\(value))"
+        guard let client = client else {
+            priorityItem.title = "Priority: not saved (server not configured)"
+            return
+        }
         priorityItem.title = "Priority: saving (\(value))"
         Task {
             do {
