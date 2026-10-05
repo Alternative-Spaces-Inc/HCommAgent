@@ -282,11 +282,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         content.interruptionLevel = item.isRedGate ? .timeSensitive : .active
         content.userInfo = ["request_id": item.request_id]
         shownAt[item.request_id] = Date()
-        let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
-                                            content: content, trigger: nil)
-        UNUserNotificationCenter.current().add(request) { error in
-            DispatchQueue.main.async {
-                if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
+        // The per-ask category was registered a moment ago; a notification posted
+        // before usernoted has applied the new set shows without buttons (seen on
+        // the 2026-10-04 proof: banner, no Approve or Deny). Read the set back
+        // first: getNotificationCategories completes after the pending set has
+        // been applied, so the add below is ordered behind it. If the id is still
+        // missing, fall back to a base category so the buttons always exist.
+        let center = UNUserNotificationCenter.current()
+        let wanted = content.categoryIdentifier
+        center.getNotificationCategories { categories in
+            if !categories.contains(where: { $0.identifier == wanted }) {
+                content.categoryIdentifier = NotificationShaper.categoryPrefix + (shape == .approveDeny ? "approve_deny" : "alert")
+            }
+            let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
+                                                content: content, trigger: nil)
+            center.add(request) { error in
+                DispatchQueue.main.async {
+                    if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
+                }
             }
         }
     }
