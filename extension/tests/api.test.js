@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
+import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
 
 test("buildAnswerPayload for radio uses a single option id", () => {
   const body = buildAnswerPayload({ control: "radio", selection: "opt_a" });
@@ -96,4 +96,17 @@ test("unwrapStreamEnvelope pulls the record out from under the publish envelope'
 test("unwrapStreamEnvelope passes through a value that has no data key", () => {
   assert.deepEqual(unwrapStreamEnvelope({ request_id: "r6" }), { request_id: "r6" });
   assert.equal(unwrapStreamEnvelope(null), null);
+});
+
+test("isAddressedTo treats a record without visible_to as addressed to everyone (pre-P14 server)", () => {
+  assert.equal(isAddressedTo({ request_id: "r1" }, "dev_a"), true);
+  assert.equal(isAddressedTo({ request_id: "r1", visible_to: "junk" }, "dev_a"), true);
+});
+
+test("isAddressedTo honours visible_to for this device only", () => {
+  const rec = { request_id: "r1", visible_to: ["dev_primary"] };
+  assert.equal(isAddressedTo(rec, "dev_primary"), true);
+  assert.equal(isAddressedTo(rec, "dev_secondary"), false);
+  assert.equal(isAddressedTo(rec, null), false);
+  assert.equal(isAddressedTo({ request_id: "r1", visible_to: [] }, "dev_primary"), false);
 });

@@ -59,17 +59,21 @@ public struct StreamEnvelope: Decodable {
     public struct StreamData: Decodable {
         public let request_id: String?
         public let state: String?
-        /// Present on request.created: the full item.
+        /// Present on request.created and request.escalated: the full item.
         public let item: InboxItem?
+        /// HCA-P14 surface routing: device ids the event is addressed to right
+        /// now. Nil on an older server, which means everyone.
+        public let visible_to: [String]?
 
         public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: Keys.self)
             request_id = try c.decodeIfPresent(String.self, forKey: .request_id)
             state = try c.decodeIfPresent(String.self, forKey: .state)
+            visible_to = try c.decodeIfPresent([String].self, forKey: .visible_to)
             // request.created carries CollectionRequest fields at the same level.
             item = try? InboxItem(from: decoder)
         }
-        enum Keys: String, CodingKey { case request_id, state }
+        enum Keys: String, CodingKey { case request_id, state, visible_to }
     }
 }
 
