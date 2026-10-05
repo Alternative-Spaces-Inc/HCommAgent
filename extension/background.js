@@ -7,8 +7,8 @@
 // stream mid-connection.
 
 import { flushQueue, readQueue } from "./lib/offlinequeue.js";
-import { fetchInbox, postAnswer, parseSSEChunk, unwrapStreamEnvelope, SURFACE } from "./lib/api.js";
-import { signedFetch } from "./lib/devicekey.js";
+import { fetchInbox, postAnswer, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, SURFACE } from "./lib/api.js";
+import { signedFetch, currentDevice } from "./lib/devicekey.js";
 
 const POLL_ALARM_NAME = "hca-inbox-poll";
 const POLL_INTERVAL_MINUTES = 1;
@@ -175,7 +175,13 @@ async function handleStreamEvent(evt) {
   const record = evt.data ? unwrapStreamEnvelope(evt.data) : null;
   if (!record) return;
 
-  if (evt.event === "request.created") {
+  if (evt.event === "request.created" || evt.event === "request.escalated") {
+    // HCA-P14: show only envelopes addressed to this device; the poll applies
+    // the same server-side rule, so a later rank still sees the ask once its
+    // window has opened even if the escalated event was missed.
+    let deviceId = null;
+    try { deviceId = (await currentDevice()).deviceId; } catch (e) { deviceId = null; }
+    if (!isAddressedTo(record, deviceId)) return;
     const id = requestIdOf(record);
     if (id && !cache[id]) {
       cache[id] = record;

@@ -32,10 +32,20 @@ public struct InboxStore: Equatable {
         return delta
     }
 
-    public mutating func apply(event: StreamEnvelope) -> Delta {
+    /// HCA-P14: a created or escalated envelope that carries visible_to is
+    /// shown only when it names this device. Without the field (older
+    /// server) or without a known device id the envelope is shown.
+    public static func isAddressed(_ event: StreamEnvelope, to deviceId: String?) -> Bool {
+        guard let list = event.data.visible_to else { return true }
+        guard let id = deviceId else { return false }
+        return list.contains(id)
+    }
+
+    public mutating func apply(event: StreamEnvelope, deviceId: String? = nil) -> Delta {
         var delta = Delta()
         switch event.event {
-        case "request.created":
+        case "request.created", "request.escalated":
+            if event.data.visible_to != nil, !Self.isAddressed(event, to: deviceId) { break }
             if let item = event.data.item, pending[item.request_id] == nil {
                 pending[item.request_id] = item
                 if !shown.contains(item.request_id) { delta.added.append(item); shown.insert(item.request_id) }
@@ -55,4 +65,15 @@ public struct InboxStore: Equatable {
     }
 
     public var count: Int { pending.count }
+
+    /// HCA-P14 (P13 Day 5 finding 3): a banner the owner cleared was never
+    /// shown again until restart. Pending items whose notification is no
+    /// longer delivered and whose last post is older than `window` are due.
+    public func repostDue(delivered: Set<String>, shownAt: [String: Date], now: Date, window: TimeInterval) -> [InboxItem] {
+        pending.values.filter { item in
+            guard !delivered.contains(item.request_id) else { return false }
+            guard let at = shownAt[item.request_id] else { return true }
+            return now.timeIntervalSince(at) >= window
+        }.sorted { $0.request_id < $1.request_id }
+    }
 }

@@ -158,6 +158,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             await MainActor.run {
                 let delta = self.store.applyInbox(items)
                 self.apply(delta)
+                self.repostCleared()
                 if !self.streamConnected { self.connectionItem.title = "Server: polling every \(Self.pollInterval)s" }
             }
         } catch {
@@ -168,7 +169,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func handle(event: StreamEnvelope) {
-        apply(store.apply(event: event))
+        // HCA-P14: created and escalated envelopes name the devices they are
+        // for; ignore the ones not addressed to this device.
+        apply(store.apply(event: event, deviceId: signer?.deviceId))
+    }
+
+    /// HCA-P14: re-post pending asks whose banner the owner cleared (or that
+    /// never showed) once per repost window; runs after every poll.
+    static let repostWindow: TimeInterval = 90
+    private func repostCleared() {
+        let center = UNUserNotificationCenter.current()
+        center.getDeliveredNotifications { delivered in
+            let ids = Set(delivered.map { $0.request.identifier })
+            DispatchQueue.main.async {
+                let stillShown = Set(self.store.pending.keys.filter { ids.contains(NotificationShaper.notificationIdentifier(for: $0)) })
+                let due = self.store.repostDue(delivered: stillShown, shownAt: self.shownAt, now: Date(), window: Self.repostWindow)
+                for item in due { self.post(item: item) }
+            }
+        }
     }
 
     private func apply(_ delta: InboxStore.Delta) {

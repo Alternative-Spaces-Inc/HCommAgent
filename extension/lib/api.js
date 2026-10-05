@@ -89,6 +89,15 @@ export async function fetchInbox(apiBase) {
  * the top level (the top-level "event" key duplicates the SSE "event:"
  * line's name; it is not the record). This unwraps that one extra layer.
  */
+// HCA-P14 surface routing: request.created and request.escalated envelopes
+// carry visible_to, the device ids the event applies to right now. A record
+// without the field (older server) is treated as addressed to everyone.
+export function isAddressedTo(record, deviceId) {
+  const list = record && record.visible_to;
+  if (!Array.isArray(list)) return true;
+  return !!deviceId && list.includes(deviceId);
+}
+
 export function unwrapStreamEnvelope(parsedData) {
   if (parsedData && typeof parsedData === "object" && "data" in parsedData) {
     return parsedData.data;

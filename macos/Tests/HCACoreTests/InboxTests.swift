@@ -75,4 +75,47 @@ final class InboxTests: XCTestCase {
         let json = String(decoding: try body.encoded(), as: UTF8.self)
         XCTAssertEqual(json, #"{"control":"approve_deny","duration_ms":1200,"path_taken":["macos_notification","banner","approve"],"surface":"macos_notification","value":"approve"}"#)
     }
+
+    // HCA-P14 surface routing
+    let escalatedJSON = """
+    {"event":"request.escalated","data":{"request_id":"r2","visible_to":["dev_mac","dev_chrome"],"caller":"agent-x","audience":"owner","title":"Late ask","control":"approve_deny","options_or_fields":[{"id":"approve","label":"Approve"},{"id":"deny","label":"Deny"}],"suggested":{"option_id":"approve","why":"w"},"deliver_to":["browser_overlay"]},"timestamp":"2026-10-05T16:00:00+00:00"}
+    """
+
+    func testVisibleToDecodesAndAddressing() throws {
+        let e = try JSONDecoder().decode(StreamEnvelope.self, from: Data(escalatedJSON.utf8))
+        XCTAssertEqual(e.event, "request.escalated")
+        XCTAssertEqual(e.data.visible_to, ["dev_mac", "dev_chrome"])
+        XCTAssertEqual(e.data.item?.request_id, "r2")
+        XCTAssertTrue(InboxStore.isAddressed(e, to: "dev_mac"))
+        XCTAssertFalse(InboxStore.isAddressed(e, to: "dev_other"))
+        XCTAssertFalse(InboxStore.isAddressed(e, to: nil))
+        let old = try JSONDecoder().decode(StreamEnvelope.self, from: Data(createdJSON.utf8))
+        XCTAssertNil(old.data.visible_to)
+        XCTAssertTrue(InboxStore.isAddressed(old, to: "anyone"))
+        XCTAssertTrue(InboxStore.isAddressed(old, to: nil))
+    }
+
+    func testStoreIgnoresEnvelopesNotAddressedToThisDevice() throws {
+        var store = InboxStore()
+        let e = try JSONDecoder().decode(StreamEnvelope.self, from: Data(escalatedJSON.utf8))
+        XCTAssertEqual(store.apply(event: e, deviceId: "dev_other").added.count, 0)
+        XCTAssertEqual(store.count, 0)
+        XCTAssertEqual(store.apply(event: e, deviceId: "dev_mac").added.map { $0.request_id }, ["r2"])
+        XCTAssertEqual(store.count, 1)
+        let old = try JSONDecoder().decode(StreamEnvelope.self, from: Data(createdJSON.utf8))
+        XCTAssertEqual(store.apply(event: old, deviceId: "dev_other").added.map { $0.request_id }, ["r1"])
+    }
+
+    func testRepostDueOnlyForClearedAndAgedItems() throws {
+        var store = InboxStore()
+        let e = try JSONDecoder().decode(StreamEnvelope.self, from: Data(escalatedJSON.utf8))
+        _ = store.apply(event: e, deviceId: "dev_mac")
+        let old = try JSONDecoder().decode(StreamEnvelope.self, from: Data(createdJSON.utf8))
+        _ = store.apply(event: old)
+        let now = Date()
+        let shownAt = ["r1": now.addingTimeInterval(-200), "r2": now.addingTimeInterval(-10)]
+        XCTAssertEqual(store.repostDue(delivered: ["r1"], shownAt: shownAt, now: now, window: 90).map { $0.request_id }, [])
+        XCTAssertEqual(store.repostDue(delivered: [], shownAt: shownAt, now: now, window: 90).map { $0.request_id }, ["r1"])
+        XCTAssertEqual(store.repostDue(delivered: [], shownAt: [:], now: now, window: 90).map { $0.request_id }, ["r1", "r2"])
+    }
 }
