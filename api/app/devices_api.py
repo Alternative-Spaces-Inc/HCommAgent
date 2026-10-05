@@ -4,6 +4,9 @@ POST /v1/devices        admin bearer; body {label, public_key_pem, surface?}
 GET  /v1/devices        admin bearer; every device, revoked included
 POST /v1/devices/{id}/revoke  admin bearer
 PATCH /v1/devices/{id}  admin bearer; body {priority} (HCA-P14, app/routing.py)
+PATCH /v1/devices/self  device signature; body {priority}: the owner sets this
+                        device's ladder place from the Mac menu or the
+                        extension options page (HCA-P14 priority controls)
 GET  /v1/devices/self              device signature; the calling device's own view
 POST /v1/devices/self/google-link  device signature; body {access_token} (HCA-P7)
 
@@ -31,7 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
-from .auth import require_admin_bearer, require_device
+from .auth import require_admin_bearer, require_device, require_linked_device
 from . import googleauth
 from .db import get_db
 from .devicesig import device_id_for_public_key_pem
@@ -109,6 +112,24 @@ def revoke_device(device_id: str, db: Session = Depends(get_db), _admin=Depends(
     return _view(device)
 
 
+def _set_priority(device: models.Device, priority: int, db: Session) -> DeviceView:
+    if priority < 0 or priority > 1000:
+        raise HTTPException(status_code=422, detail="priority must be between 0 and 1000")
+    device.priority = priority
+    db.commit()
+    return _view(device)
+
+
+@router.patch("/self", response_model=DeviceView)
+def patch_self(body: DevicePatch, db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
+    """The calling device sets its own place in the surface ladder (HCA-P14
+    priority controls). Same gate as answering: a registered, signed and,
+    when the gate is on, Google-linked device. Only the owner's own devices
+    can move themselves; nobody can move another device this way. Declared
+    before the admin PATCH /{device_id} so the literal path self wins."""
+    return _set_priority(device, body.priority, db)
+
+
 @router.patch("/{device_id}", response_model=DeviceView)
 def patch_device(device_id: str, body: DevicePatch, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
     """Set the device's place in the surface ladder (HCA-P14). Lower is
@@ -117,11 +138,7 @@ def patch_device(device_id: str, body: DevicePatch, db: Session = Depends(get_db
     device = db.get(models.Device, device_id)
     if device is None:
         raise HTTPException(status_code=404, detail="device not found")
-    if body.priority < 0 or body.priority > 1000:
-        raise HTTPException(status_code=422, detail="priority must be between 0 and 1000")
-    device.priority = body.priority
-    db.commit()
-    return _view(device)
+    return _set_priority(device, body.priority, db)
 
 
 @router.get("/self", response_model=DeviceView)

@@ -118,4 +118,14 @@ final class InboxTests: XCTestCase {
         XCTAssertEqual(store.repostDue(delivered: [], shownAt: shownAt, now: now, window: 90).map { $0.request_id }, ["r1"])
         XCTAssertEqual(store.repostDue(delivered: [], shownAt: [:], now: now, window: 90).map { $0.request_id }, ["r1", "r2"])
     }
+
+    // HCA-P14 priority controls
+    func testSurfacePriorityPlacesAndLabels() {
+        XCTAssertEqual(SurfacePriority.allCases.map { $0.rawValue }, [10, 100, 200])
+        XCTAssertEqual(SurfacePriority.label(for: 10), "Priority: Primary (10)")
+        XCTAssertEqual(SurfacePriority.label(for: 200), "Priority: Fallback (200)")
+        XCTAssertEqual(SurfacePriority.label(for: 100), "Priority: Default (100)")
+        XCTAssertEqual(SurfacePriority.label(for: 37), "Priority: custom (37)")
+        XCTAssertEqual(SurfacePriority.label(for: nil), "Priority: unknown")
+    }
 }

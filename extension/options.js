@@ -1,5 +1,5 @@
 import { currentDevice } from "./lib/devicekey.js";
-import { fetchSelfDevice, linkGoogle } from "./lib/api.js";
+import { fetchSelfDevice, linkGoogle, setSelfPriority, priorityLabel } from "./lib/api.js";
 import { hasHostAccess, requestHostAccess } from "./lib/hostaccess.js";
 
 const API_BASE_KEY = "hca_api_base";
@@ -10,6 +10,7 @@ async function load() {
   await showHostAccess();
   await showDevice();
   await showGoogle();
+  await showPriority();
 }
 
 async function apiBase() {
@@ -54,6 +55,48 @@ async function showGoogle() {
       : "Not linked to a Google account yet.");
   } catch (e) {
     setGoogleStatus(`Could not read this device from the server (${e.message}). Is it registered?`, true);
+  }
+}
+
+// HCA-P14 priority controls: show and set this device's ladder place.
+function setPriorityStatus(text, isError = false) {
+  const el = document.getElementById("priority-status");
+  el.textContent = text;
+  el.className = isError ? "error" : "note";
+}
+
+async function showPriority() {
+  const base = await apiBase();
+  if (!base) { setPriorityStatus("Save the API base URL first."); return; }
+  try {
+    const view = await fetchSelfDevice(base);
+    const select = document.getElementById("priority");
+    const known = [...select.options].some((o) => Number(o.value) === Number(view.priority));
+    if (!known) {
+      const opt = document.createElement("option");
+      opt.value = String(view.priority);
+      opt.textContent = priorityLabel(view.priority);
+      select.appendChild(opt);
+    }
+    select.value = String(view.priority);
+    setPriorityStatus(`Current: ${priorityLabel(view.priority)} (${view.priority}).`);
+  } catch (e) {
+    setPriorityStatus(`Could not read this device's priority (${e.message}).`, true);
+  }
+}
+
+async function savePriority() {
+  const base = await apiBase();
+  if (!base) { setPriorityStatus("Save the API base URL first.", true); return; }
+  const value = Number(document.getElementById("priority").value);
+  try {
+    const view = await setSelfPriority(base, value);
+    const saved = document.getElementById("priority-saved");
+    saved.hidden = false;
+    setTimeout(() => { saved.hidden = true; }, 1500);
+    setPriorityStatus(`Current: ${priorityLabel(view.priority)} (${view.priority}).`);
+  } catch (e) {
+    setPriorityStatus(`Could not save (${e.message}). Is this device registered and linked?`, true);
   }
 }
 
@@ -113,6 +156,7 @@ async function save() {
   saved.hidden = false;
   setTimeout(() => { saved.hidden = true; }, 1500);
   await showGoogle();
+  await showPriority();
 }
 
 async function copyPem() {
@@ -126,4 +170,5 @@ async function copyPem() {
 document.getElementById("save").addEventListener("click", save);
 document.getElementById("copy-pem").addEventListener("click", copyPem);
 document.getElementById("google-signin").addEventListener("click", signInWithGoogle);
+document.getElementById("priority-save").addEventListener("click", savePriority);
 load();
