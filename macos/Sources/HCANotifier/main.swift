@@ -1,5 +1,6 @@
 import AppKit
 import UserNotifications
+import os
 import HCACore
 
 /// HCA Notifier: menu bar item, native notifications with action buttons for
@@ -14,7 +15,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
     private let connectionItem = NSMenuItem(title: "Server: not configured", action: nil, keyEquivalent: "")
-    private let pendingItem = NSMenuItem(title: "Pending: 0", action: nil, keyEquivalent: "")
+    private let pendingItem = NSMenuItem(title: "Pending asks (0)", action: nil, keyEquivalent: "")
+    // HCA-P15: one row per pending ask, rebuilt on every inbox delta.
+    private var askRowItems: [NSMenuItem] = []
+    private let noAsksItem = NSMenuItem(title: "No pending asks", action: nil, keyEquivalent: "")
+    private var menu: NSMenu!
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
     private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
     private let priorityItem = NSMenuItem(title: "Priority: loading", action: nil, keyEquivalent: "")
@@ -36,10 +41,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             button.toolTip = "Human Collections Agent"
         }
         let menu = NSMenu()
+        self.menu = menu
         menu.addItem(statusMenuItem)
         menu.addItem(connectionItem)
-        menu.addItem(pendingItem)
         menu.addItem(lastActionItem)
+        menu.addItem(.separator())
+        menu.addItem(pendingItem)
+        menu.addItem(noAsksItem)
         menu.addItem(.separator())
         menu.addItem(deviceItem)
         menu.addItem(priorityItem)
@@ -217,7 +225,76 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
             for id in delta.removed { shownAt.removeValue(forKey: id) }
         }
-        pendingItem.title = "Pending: \(store.count)"
+        pendingItem.title = "Pending asks (\(store.count))"
+        rebuildAskRows()
+    }
+
+    /// HCA-P15: the rows under "Pending asks": each opens a submenu with the
+    /// why line and one line per option; a click sends the same signed answer
+    /// the banner sends, path [macos_notification, menu, <option_id>].
+    private func rebuildAskRows() {
+        guard let menu = menu else { return }
+        for item in askRowItems { menu.removeItem(item) }
+        askRowItems.removeAll()
+        let rows = MenuAskList.rows(from: store.pending)
+        noAsksItem.isHidden = !rows.isEmpty
+        var index = menu.index(of: noAsksItem) + 1
+        for row in rows {
+            let parent = NSMenuItem(title: "\(row.title)  [\(MenuAskList.shortId(row.requestId))]", action: nil, keyEquivalent: "")
+            let sub = NSMenu(title: row.title)
+            sub.autoenablesItems = false
+            if let why = row.why {
+                let whyItem = NSMenuItem(title: why, action: nil, keyEquivalent: "")
+                whyItem.isEnabled = false
+                sub.addItem(whyItem)
+                sub.addItem(.separator())
+            }
+            if row.answerable {
+                for choice in row.choices {
+                    let c = NSMenuItem(title: choice.title, action: #selector(chooseAnswer(_:)), keyEquivalent: "")
+                    c.target = self
+                    c.isEnabled = true
+                    c.state = choice.suggested ? .on : .off
+                    c.representedObject = [row.requestId, choice.optionId]
+                    sub.addItem(c)
+                }
+            } else {
+                let t = NSMenuItem(title: "Needs typed input: answer in Chrome", action: nil, keyEquivalent: "")
+                t.isEnabled = false
+                sub.addItem(t)
+            }
+            parent.submenu = sub
+            menu.insertItem(parent, at: index)
+            askRowItems.append(parent)
+            index += 1
+        }
+    }
+
+    @objc func chooseAnswer(_ sender: NSMenuItem) {
+        guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
+        let requestId = pair[0], optionId = pair[1]
+        setLastAction("menu click \(optionId) on \(requestId)")
+        guard let item = store.pending[requestId] else {
+            setLastAction("\(requestId) no longer pending")
+            return
+        }
+        let started = shownAt[requestId]
+        let body = AnswerSubmission(control: item.control, value: optionId,
+                                    path_taken: ["macos_notification", "menu", optionId],
+                                    duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
+        setLastAction("sending menu \(optionId) for \(requestId)")
+        Task { await self.submit(requestId: requestId, body: body) }
+    }
+
+
+    /// HCA-P15: every owner action and its outcome goes to the menu line and
+    /// to the unified log (subsystem com.alternativespaces.hca.notifier,
+    /// category actions) so a proof can be read with `log show` instead of
+    /// asking the owner to read the menu.
+    private let actionLog = Logger(subsystem: "com.alternativespaces.hca.notifier", category: "actions")
+    private func setLastAction(_ text: String) {
+        lastActionItem.title = "Last action: " + text
+        actionLog.notice("\(text, privacy: .public)")
     }
 
     private var linking = false
@@ -227,7 +304,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         NSLog("hca.link menu action (linking=%@, client=%@)", linking ? "yes" : "no", client == nil ? "nil" : "set")
         guard !linking, let client = client else { return }
         linking = true
-        lastActionItem.title = "Last action: Google sign-in opened in the browser"
+        setLastAction("Google sign-in opened in the browser")
         Task {
             defer { Task { @MainActor in self.linking = false } }
             do {
@@ -235,13 +312,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let me = try await client.googleLink(accessToken: token)
                 await MainActor.run {
                     self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), Google: \(me.google_email ?? "?"))"
-                    self.lastActionItem.title = "Last action: Google account linked"
+                    self.setLastAction("Google account linked")
                 }
                 await self.poll()
             } catch {
                 NSLog("hca.link failed: %@", error.localizedDescription)
                 await MainActor.run {
-                    self.lastActionItem.title = "Last action: Google link failed"
+                    self.setLastAction("Google link failed")
                     self.postLocal(title: "HCA: Google link failed", body: error.localizedDescription)
                 }
             }
@@ -261,7 +338,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc func choosePriority(_ sender: NSMenuItem) {
         let value = sender.tag
-        lastActionItem.title = "Last action: priority click (\(value))"
+        setLastAction("priority click (\(value))")
         guard let client = client else {
             priorityItem.title = "Priority: not saved (server not configured)"
             return
@@ -272,12 +349,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 let me = try await client.setPriority(value)
                 await MainActor.run {
                     self.showPriority(me.priority)
-                    self.lastActionItem.title = "Last action: priority set to \(value)"
+                    self.setLastAction("priority set to \(value)")
                 }
             } catch {
                 await MainActor.run {
                     self.priorityItem.title = "Priority: not saved (\(error.localizedDescription))"
-                    self.lastActionItem.title = "Last action: priority change refused"
+                    self.setLastAction("priority change refused")
                 }
             }
         }
@@ -368,7 +445,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                                                 content: content, trigger: nil)
             center.add(request) { error in
                 DispatchQueue.main.async {
-                    if let error = error { self.lastActionItem.title = "Last action: post failed \(error.localizedDescription)" }
+                    if let error = error { self.setLastAction("post failed \(error.localizedDescription)") }
                 }
             }
         }
@@ -421,14 +498,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard let signer = signer else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(signer.publicKeyPEM, forType: .string)
-        lastActionItem.title = "Last action: public key PEM copied"
+        setLastAction("public key PEM copied")
     }
 
     @objc func copyDeviceId() {
         guard let signer = signer else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(signer.deviceId, forType: .string)
-        lastActionItem.title = "Last action: device id copied"
+        setLastAction("device id copied")
     }
 
     // MARK: action taps
@@ -438,10 +515,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let requestId = NotificationShaper.requestId(fromNotificationIdentifier: response.notification.request.identifier) ?? "?"
         let action = response.actionIdentifier
         DispatchQueue.main.async {
-            self.lastActionItem.title = "Last action: \(action) on \(requestId)"
+            self.setLastAction("\(action) on \(requestId)")
             guard let item = self.store.pending[requestId] else {
                 // Test notifications and already-removed asks end here.
-                if requestId.hasPrefix("test-") { self.lastActionItem.title = "Last action: \(action) on \(requestId) (test, not sent)" }
+                if requestId.hasPrefix("test-") { self.setLastAction("\(action) on \(requestId) (test, not sent)") }
                 completionHandler(); return
             }
             guard let optionId = ActionMapper.optionId(for: action, item: item) else { completionHandler(); return }
@@ -449,7 +526,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let body = AnswerSubmission(control: item.control, value: optionId,
                                         path_taken: ["macos_notification", "banner", action],
                                         duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
-            self.lastActionItem.title = "Last action: sending \(optionId) for \(requestId)"
+            self.setLastAction("sending \(optionId) for \(requestId)")
             Task {
                 await self.submit(requestId: requestId, body: body)
                 completionHandler()
@@ -464,13 +541,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             await MainActor.run {
                 switch outcome {
                 case .recorded:
-                    self.lastActionItem.title = "Last action: answered \(body.value) on \(requestId)"
+                    self.setLastAction("answered \(body.value) on \(requestId)")
                 case .alreadyAnswered:
-                    self.lastActionItem.title = "Last action: \(requestId) was already answered elsewhere"
+                    self.setLastAction("\(requestId) was already answered elsewhere")
                 case .gone:
-                    self.lastActionItem.title = "Last action: \(requestId) is gone (cancelled or expired)"
+                    self.setLastAction("\(requestId) is gone (cancelled or expired)")
                 case .refused(let code, let text):
-                    self.lastActionItem.title = "Last action: refused HTTP \(code) on \(requestId)"
+                    self.setLastAction("refused HTTP \(code) on \(requestId)")
                     self.postLocal(title: "HCA: answer refused (HTTP \(code))", body: String(text.prefix(140)))
                     return
                 }
@@ -479,7 +556,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             }
         } catch {
             await MainActor.run {
-                self.lastActionItem.title = "Last action: send failed on \(requestId)"
+                self.setLastAction("send failed on \(requestId)")
                 self.postLocal(title: "HCA: answer not sent", body: "\(error.localizedDescription). The ask stays pending; answer again or use Chrome.")
             }
         }
