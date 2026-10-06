@@ -71,9 +71,11 @@ an admin token gets 401 there.
 2. `gcloud auth login` piped through grep hung after the browser flow even
    though the credential was saved; kill the Python child. Run it with
    output to a file next time.
-3. `gcloud builds list` without --region intermittently returned nothing
-   with exit 0 during this session; the plan build (5eb297e6) is read
-   below.
+3. `gcloud builds list` without --region returned nothing (exit 0) for
+   most of this session; `--region=us-west1` lists the builds. Use the
+   region flag in every build read. Plan merge build: f47860cb SUCCESS for
+   5eb297e6 (19:32:37Z), revision hca-api-service-00036-j9z created
+   19:35:58Z, so live equals main.
 
 ## Not done
 
