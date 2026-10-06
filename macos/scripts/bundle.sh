@@ -1,5 +1,9 @@
 #!/bin/bash
-# Build HCA Notifier and assemble an ad-hoc signed .app bundle.
+# Build HCA Notifier and assemble a signed .app bundle.
+# Signing (HCA-P16): HCA_SIGN_IDENTITY if set, else the "HCA Notifier Local
+# Signing" identity when present (macos/scripts/make_signing_identity.sh),
+# else ad-hoc. A certificate identity keeps the designated requirement
+# stable across rebuilds, so the Keychain stops prompting for the device key.
 # Usage: bash macos/scripts/bundle.sh [output_dir]   (default ~/hca-notifier)
 # UNUserNotificationCenter refuses a bare executable, so the bundle is required.
 set -euo pipefail
@@ -29,6 +33,17 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>NSHighResolutionCapable</key><true/>
 </dict></plist>
 PLIST
-codesign --force --sign - --identifier com.alternativespaces.hca.notifier "$APP"
+IDENTITY="${HCA_SIGN_IDENTITY:-}"
+if [ -z "$IDENTITY" ] && security find-identity -v -p codesigning 2>/dev/null | grep -q "HCA Notifier Local Signing"; then
+  IDENTITY="HCA Notifier Local Signing"
+fi
+if [ -n "$IDENTITY" ]; then
+  codesign --force --sign "$IDENTITY" --identifier com.alternativespaces.hca.notifier "$APP"
+  echo "signing: $IDENTITY"
+else
+  codesign --force --sign - --identifier com.alternativespaces.hca.notifier "$APP"
+  echo "signing: ad-hoc (no HCA Notifier Local Signing identity found)"
+fi
+echo "requirement: $(codesign -d -r- "$APP" 2>&1 | grep '^designated' | cut -c1-160)"
 echo "bundle: $APP"
 echo "version: ${VERSION}"
