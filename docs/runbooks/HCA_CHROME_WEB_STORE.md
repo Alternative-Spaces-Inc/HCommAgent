@@ -89,23 +89,36 @@ Store icon: upload extension/icons/icon128.png. Screenshot: one 1280x800
 PNG of the popup with a pending ask (the agent produces it from a test
 ask before this step and puts it in ~/Downloads).
 
-Privacy tab: Single purpose: "Shows decisions sent by the owner's own
-server and records the owner's answer." Permission justifications:
-identity: "Google sign-in proves the device belongs to a listed owner
-account; openid and email scopes only." notifications: "Shows a desktop
-notification for each new decision." alarms: "Polls the owner's server
-when the event stream is down." storage: "Keeps the device key, the
-server address and unsent answers." Host permission (optional, any
-https): "Site access is requested at runtime for the one server address
-the owner enters; no other site is read." Remote code: "No, this item
-does not use remote code." Data usage: tick "Authentication information"
-and "Personally identifiable information" (the verified email), tick the
-three certifications (not sold, not used outside the single purpose, not
-used for creditworthiness). Privacy policy URL: the live service URL
-plus /privacy (the agent reads it from gcloud run services describe and
-pastes it into the chat for the owner to copy).
+Privacy tab (done 2026-10-07 13:2x PT, every field verified from the
+owner's screenshot): Single purpose: "Shows decisions sent by the owner's
+own server and records the owner's answer." Permission justification
+boxes, exactly four (the dashboard shows no box for the optional host
+permission https://*/*, so nothing is entered for it): identity: "Google
+sign-in proves the device belongs to a listed owner account; openid and
+email scopes only." notifications: "Shows a desktop notification for each
+new decision." alarms: "Polls the owner's server when the event stream is
+down." storage: "Keeps the device key, the server address and unsent
+answers." Remote code: "No, I am not using remote code" (the Yes button
+is preselected on a fresh item; check it). Data usage: tick
+"Personally identifiable information" and "Authentication information"
+only, tick the three certifications. Privacy policy URL: the live service
+URL plus /privacy (read with gcloud run services describe, format
+value(status.url); it answers 200 text/html). Paste one sentence per box:
+pasting several at once lands them in one box.
+
+Screenshot (listing): produced by the agent from a test ask with a
+temporary agent key: open chrome-extension://<item id>/popup.html in a new
+Chrome window sized 520x700 via osascript (window addressed by its id, not
+"front window"), screencapture -R of the content area below the 87 px
+toolbar, padded onto a white 1280x800 canvas, ask cancelled and key
+revoked in the same run. Wait at least 90 s after posting the ask before
+opening the window: the Mac Notifier ranks first, so the Chrome surface
+shows "Nothing pending" until the fallback window elapses.
 
 Distribution tab: Visibility "Unlisted". Payments "Free". Regions all.
+Set and saved 2026-10-07 13:2x PT. Listing tab saved the same hour:
+description, category Productivity, language English, 128 icon, one
+1280x800 screenshot.
 
 ## 4. Submit (owner, red gate)
 
