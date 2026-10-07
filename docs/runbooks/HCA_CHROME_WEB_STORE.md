@@ -55,11 +55,23 @@ Then (Path B):
 
 - Google Cloud Console, dedicated project, "APIs & Services", "Credentials",
   section "OAuth 2.0 Client IDs", row of the Chrome Extension client:
-  click its name, change "Item ID" to the new store ID, "Save". If the
-  field is read-only, "+ Create credentials", "OAuth client ID", type
-  "Chrome Extension", the new Item ID; the agent then writes the new
-  client_id into extension/manifest.json oauth2 and adds it to the
-  trigger's _GOOGLE_CLIENT_IDS.
+  the "Item ID" field is read-only (verified 2026-10-07), so a second
+  client was created: "+ Create credentials", "OAuth client ID", type
+  "Chrome Extension", name "HCA Chrome extension (store)", Item ID
+  icaocojldacopllkkjdhghkeoeghccfe. Its public client_id
+  529822100897-taeem2o8rr3av3s1v1tv7oj9eaf3efrr.apps.googleusercontent.com
+  is the manifest oauth2 client_id from this change on and is appended to
+  the trigger's _GOOGLE_CLIENT_IDS list (the server accepts any id in
+  HCA_GOOGLE_CLIENT_ID plus HCA_GOOGLE_CLIENT_IDS). The old client
+  (Item ID jmpjjfhgggjmbebejaapchodjacmbmpm) stays until Day 3; the
+  unpacked device is already linked and never signs in again.
+  Trigger edit as done 2026-10-07: gcloud builds triggers update github
+  with --update-substitutions returns INVALID_ARGUMENT for this trigger
+  (the comma inside the value is not the cause; the escaped form fails
+  the same way). What works: gcloud beta builds triggers export to a
+  yaml file in /tmp, edit the one _GOOGLE_CLIENT_IDS line, gcloud beta
+  builds triggers import --source, describe to read it back, delete the
+  temp files. All other pinned values stay as exported.
 - The store install (step 5) is a new extension with a fresh device key:
   the agent registers it with the admin token from the Terminal, the
   owner clicks "Sign in with Google" once on its options page, the agent
