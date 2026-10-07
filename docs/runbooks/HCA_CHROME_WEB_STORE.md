@@ -134,22 +134,71 @@ Submitted 2026-10-07 13:4x PT; status "Pending review". Review outcome
 arrives by email to the contact address; Day 3 starts when the status
 reads Published.
 
-## 4. Submit (owner, red gate)
+## 5. Day 3: install from the store, move the device, retire the unpacked card
 
-Top right "Submit for review". Dialog: leave "Publish automatically after
-it has passed review" ticked (Unlisted means only link holders see it).
-Click "Submit". Status column shows "Pending review". Review takes hours
-to days; the agent polls the status with the Publish API later (Day 3) or
-the owner reads the status badge on request.
+Path B applies: the store item has its own ID
+(icaocojldacopllkkjdhghkeoeghccfe), so the store install is a second
+extension next to the unpacked one, with its own device key. Order
+matters: register and link the new device before revoking the old one,
+so no ask goes unserved in between. Every server call is
+scripts/store_device.sh on the Mac (admin token read inside, never
+printed); the owner's clicks are the install, one Copy, one Save and
+one Google sign-in.
 
-## 5. Install from the store and retire the unpacked card (owner, Day 3)
-
-When status is "Published": open the item link (Distribution tab shows
-it) in Chrome, click "Add to Chrome", "Add extension". Then
-chrome://extensions: the store install appears with the same ID (Path A),
-so Chrome replaces the unpacked card; if two cards show, click "Remove"
-on the one labelled "Unpacked extension" with the folder path. The agent
-posts a proof ask and reads the record.
+1. Status check (agent): the dashboard emails the contact address when
+   review ends; the item page status line reads "Published". Store link:
+   https://chromewebstore.google.com/detail/icaocojldacopllkkjdhghkeoeghccfe
+   (Distribution tab shows the same link).
+2. Install (owner): open the store link in Chrome, blue button "Add to
+   Chrome" (right of the title), dialog "Add extension". Expected: the HCA
+   icon appears in the toolbar puzzle menu; chrome://extensions shows two
+   Human Collections Agent cards: the new one has ID icaocoj... and no
+   folder path, the old one reads "Unpacked extension" with the
+   ~/hca-extension path.
+3. Server address (owner): on the new card, "Details", row "Extension
+   options". Field "API base URL": paste the live service URL (agent reads
+   it with gcloud run services describe, format value(status.url)). Button
+   "Save". Chrome asks to allow access to that site: "Allow". Expected:
+   status line under the field reads saved; badge stays empty until the
+   device is registered.
+4. Register (owner copies, agent registers): same options page, section
+   "This device", button "Copy public key". Then on the Mac:
+   bash ~/hca-deploy/scripts/store_device.sh register "<LABEL>" (the label
+   audit rows show, for example the browser and machine name)
+   Expected: first line BEGIN PUBLIC KEY, a JSON device record, HTTP 201.
+   Note the device_id (dev_...). 409 means the key is already registered:
+   run store_device.sh list and take the id from there.
+5. Google link (owner): options page, button "Sign in with Google"
+   (section "Google account"). Chrome shows the Google account chooser for
+   the OAuth client in the manifest (the store client from section 2);
+   pick the listed owner account. Expected: the page shows the linked
+   email. Agent verifies: store_device.sh list shows google_email on the
+   new id.
+6. Promote (agent): store_device.sh promote <new dev id>. Expected HTTP
+   200, priority 200 (the Chrome rank of the P14 ladder; the Notifier
+   stays 10).
+7. Proof (agent): post a proof ask with a temporary agent key, wait for
+   the 90 s fallback window (the Notifier ranks first), the owner answers
+   in the new popup, the agent reads the record (surface browser_overlay,
+   device id = the new one), cancels nothing, revokes the key.
+8. Retire the old device (agent): store_device.sh revoke dev_ddea0aae
+   (the unpacked load's record). Expected HTTP 200 with revoked_at set.
+9. Remove the unpacked card (owner): chrome://extensions, the card
+   labelled "Unpacked extension" with the ~/hca-extension path, button
+   "Remove", confirm "Remove". Expected: one HCA card remains, ID
+   icaocoj....
+10. Drop the manifest key (agent, PR for the owner's merge): remove "key"
+   from extension/manifest.json, update extension/tests/pack.test.js
+   (the repo manifest no longer carries a key; --keep-key becomes a
+   no-op), bump "version" to 0.2.1 so the next store upload is accepted.
+   The private half ~/hca-extension-key.pem on the Mac and the folder
+   ~/hca-extension can be deleted after the proof. Old item
+   jmpjjfhgggjmbebejaapchodjacmbmpm never existed on the store; nothing
+   to unpublish. The old Chrome Extension OAuth client (item id
+   jmpjjf...) in the Console can be deleted by the owner once the proof
+   is recorded.
+11. Record: docs/deploys/<date>_p17_day3_store_install.md with the proof
+   request id, device ids, revision, and the dashboard status.
 
 ## 6. Updates after P17
 
