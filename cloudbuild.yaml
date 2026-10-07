@@ -8,6 +8,9 @@
 #   1b. smoke-local (HCA-P9): the golden path over real HTTP against a local
 #      uvicorn with the gate off: key, device, ask, signed inbox, signed
 #      answer, webhook, audit. scripts/smoke_golden_path.py --human
+#   1c. pack-extension (HCA-P17): zip extension/ for the Chrome Web Store
+#      (scripts/pack_extension.py), kept as a build artifact under
+#      gs://<project>_cloudbuild/extension/ once every step succeeds
 #   2. build the api image
 #   3. push it to Artifact Registry
 #   4. run alembic upgrade head as a Cloud Run job against Cloud SQL
@@ -95,6 +98,18 @@ steps:
         for i in $$(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
         python3 ../scripts/smoke_golden_path.py --base http://127.0.0.1:8080 --human
 
+  - id: pack-extension
+    name: python:3.12-slim
+    entrypoint: bash
+    env:
+      - COMMIT=${COMMIT_SHA}
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/pack_extension.py --out dist --commit "$$COMMIT" | tee dist-pack.json
+        ls -l dist
+
   - id: build
     name: gcr.io/cloud-builders/docker
     dir: api
@@ -167,6 +182,12 @@ steps:
         set -euo pipefail
         URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
         python3 scripts/smoke_golden_path.py --base "$$URL"
+
+artifacts:
+  objects:
+    location: gs://${PROJECT_ID}_cloudbuild/extension/
+    paths:
+      - dist/extension-*.zip
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
