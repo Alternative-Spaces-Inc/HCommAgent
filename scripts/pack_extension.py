@@ -9,13 +9,17 @@ options.html, options.js, lib/*.js, icons/*.png. What stays out: tests/,
 package.json, package-lock.json, anything dotfile. The manifest is copied
 unchanged except for "version_name", set to "<version>+<commit7>" when a
 commit is given, so a store listing shows which main commit built it.
-The "key" field is kept on purpose: it derives the extension ID the OAuth
-client and the registered device depend on (plan section "The one hard
-constraint"). Nothing here reads a private key.
+The "key" field is removed from the zipped manifest: the Chrome Web Store
+refuses an upload whose manifest carries one ("key field is not allowed in
+manifest", verified on the first draft upload, 2026-10-07). The repo
+manifest keeps the key so an unpacked load on the owner's Mac keeps its
+development ID; the store assigns its own ID to the published item (plan,
+Path B). Pass --keep-key only for a zip meant for an unpacked load.
+Nothing here reads a private key.
 
 Output: dist/extension-<version>-<commit7|local>.zip and one JSON line on
 stdout: {"zip": ..., "version": ..., "version_name": ..., "key_present":
-true, "files": N, "sha256": ...}. Exit 1 if a required file is missing or
+false, "files": N, "sha256": ...}. Exit 1 if a required file is missing or
 the manifest version is not a plain dotted number.
 """
 
@@ -50,6 +54,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="dist")
     ap.add_argument("--commit", default="")
+    ap.add_argument("--keep-key", action="store_true", help="keep the manifest key (unpacked loads only)")
     args = ap.parse_args()
 
     for req in REQUIRED:
@@ -64,6 +69,8 @@ def main():
         return 1
     short = args.commit[:7] if args.commit else "local"
     manifest["version_name"] = f"{version}+{short}"
+    if not args.keep_key:
+        manifest.pop("key", None)
 
     os.makedirs(args.out, exist_ok=True)
     zip_path = os.path.join(args.out, f"extension-{version}-{short}.zip")

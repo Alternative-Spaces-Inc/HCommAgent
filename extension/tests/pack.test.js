@@ -1,6 +1,7 @@
-// HCA-P17: the Web Store zip built by scripts/pack_extension.py keeps the
-// manifest key (the extension ID depends on it), bumps nothing but
-// version_name, and leaves tests and package files out.
+// HCA-P17: the Web Store zip built by scripts/pack_extension.py drops the
+// manifest key (the store refuses a manifest that carries one; the repo
+// manifest keeps it for unpacked loads), sets nothing but version_name,
+// and leaves tests and package files out.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
@@ -13,9 +14,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repo = join(here, "..", "..");
 const manifest = JSON.parse(readFileSync(join(here, "..", "manifest.json"), "utf8"));
 
-function pack(commit) {
+function pack(commit, extra = []) {
   const out = mkdtempSync(join(tmpdir(), "hca-pack-"));
-  const stdout = execFileSync("python3", [join(repo, "scripts", "pack_extension.py"), "--out", out, "--commit", commit], { encoding: "utf8" });
+  const stdout = execFileSync("python3", [join(repo, "scripts", "pack_extension.py"), "--out", out, "--commit", commit, ...extra], { encoding: "utf8" });
   return JSON.parse(stdout.trim().split("\n").pop());
 }
 
@@ -29,18 +30,25 @@ function zipManifest(zipPath) {
   return JSON.parse(stdout);
 }
 
-test("pack keeps the key, sets version_name, reports the version", () => {
+test("pack drops the key for the store, sets version_name, reports the version", () => {
+  assert.ok(manifest.key, "repo manifest keeps the key for unpacked loads");
   const r = pack("abcdef0123456789");
   assert.equal(r.version, manifest.version);
   assert.equal(r.version_name, `${manifest.version}+abcdef0`);
-  assert.equal(r.key_present, true);
+  assert.equal(r.key_present, false);
   assert.match(r.sha256, /^[0-9a-f]{64}$/);
   const m = zipManifest(r.zip);
-  assert.equal(m.key, manifest.key);
+  assert.equal(m.key, undefined);
   assert.equal(m.version, manifest.version);
   assert.equal(m.version_name, `${manifest.version}+abcdef0`);
   assert.deepEqual(m.permissions, manifest.permissions);
   assert.deepEqual(m.oauth2, manifest.oauth2);
+});
+
+test("pack --keep-key keeps the repo key for an unpacked load", () => {
+  const r = pack("abcdef0123456789", ["--keep-key"]);
+  assert.equal(r.key_present, true);
+  assert.equal(zipManifest(r.zip).key, manifest.key);
 });
 
 test("pack leaves tests and package files out and ships the runtime files", () => {

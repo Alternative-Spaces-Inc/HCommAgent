@@ -46,10 +46,22 @@ Click the "Package" tab (top row of tabs on the item page). It shows
 unpacked install at chrome://extensions; the agent reads that one from the
 device record, not the owner).
 
-- Match: Path A. Continue with step 3.
-- Different ID, or the upload was refused for the manifest "key" field:
-  Path B, stop, the agent presents the selection (new ID: OAuth client
-  item ID change, device re-registration, drop the manifest key).
+Verified 2026-10-07: the store refuses a manifest with a "key" field
+("key field is not allowed in manifest"), so the zip has no key and the
+Item ID is the store's own, never jmpjjfhgggjmbebejaapchodjacmbmpm. Read
+the new Item ID from the Package tab; the agent records it. Then (Path B):
+
+- Google Cloud Console, dedicated project, "APIs & Services", "Credentials",
+  section "OAuth 2.0 Client IDs", row of the Chrome Extension client:
+  click its name, change "Item ID" to the new store ID, "Save". If the
+  field is read-only, "+ Create credentials", "OAuth client ID", type
+  "Chrome Extension", the new Item ID; the agent then writes the new
+  client_id into extension/manifest.json oauth2 and adds it to the
+  trigger's _GOOGLE_CLIENT_IDS.
+- The store install (step 5) is a new extension with a fresh device key:
+  the agent registers it with the admin token from the Terminal, the
+  owner clicks "Sign in with Google" once on its options page, the agent
+  sets priority 200 and revokes the old device.
 
 ## 3. Listing (owner, item page tabs)
 
