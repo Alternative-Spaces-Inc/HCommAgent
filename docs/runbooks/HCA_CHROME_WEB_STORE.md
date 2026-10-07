@@ -48,8 +48,10 @@ device record, not the owner).
 
 Verified 2026-10-07: the store refuses a manifest with a "key" field
 ("key field is not allowed in manifest"), so the zip has no key and the
-Item ID is the store's own, never jmpjjfhgggjmbebejaapchodjacmbmpm. Read
-the new Item ID from the Package tab; the agent records it. Then (Path B):
+Item ID is the store's own, never jmpjjfhgggjmbebejaapchodjacmbmpm. The
+draft uploaded 2026-10-07 09:00 PT (zip extension-0.2.0-77b9264.zip) has
+Item ID icaocojldacopllkkjdhghkeoeghccfe (store item, Unlisted once published).
+Then (Path B):
 
 - Google Cloud Console, dedicated project, "APIs & Services", "Credentials",
   section "OAuth 2.0 Client IDs", row of the Chrome Extension client:

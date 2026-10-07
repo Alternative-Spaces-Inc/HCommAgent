@@ -39,6 +39,7 @@ owner selected Path B the same morning. Both paths as planned:
   flow from P6 and P7: register, Google link), the old device is revoked
   via the admin route, and the manifest "key" is dropped from the repo.
   Path B is a selection for the owner, not an automatic fallback.
+  Store Item ID assigned 2026-10-07: icaocojldacopllkkjdhghkeoeghccfe.
   As built: scripts/pack_extension.py drops "key" from the zipped
   manifest (--keep-key only for an unpacked load); the repo manifest keeps
   the key so the unpacked folder keeps its ID until Day 3 removes it.
