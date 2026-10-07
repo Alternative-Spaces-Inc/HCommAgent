@@ -120,6 +120,20 @@ Set and saved 2026-10-07 13:2x PT. Listing tab saved the same hour:
 description, category Productivity, language English, 128 icon, one
 1280x800 screenshot.
 
+## 4. Publisher email and submission (owner)
+
+The first "Submit for review" click (2026-10-07 13:3x PT) was refused:
+"You must provide a contact email before you can publish any item" and
+"You must verify the publisher's contact email". Fix, once per account:
+left sidebar "Account" (below "Items"), box "Contact email", enter the
+developer account address, click "Add email" / "Verify email", open the
+Google verification mail, click its link, reload the Account page until
+it reads Verified. Then item page, "Submit for review", dialog with
+"Publish automatically after it has passed review" ticked, confirm.
+Submitted 2026-10-07 13:4x PT; status "Pending review". Review outcome
+arrives by email to the contact address; Day 3 starts when the status
+reads Published.
+
 ## 4. Submit (owner, red gate)
 
 Top right "Submit for review". Dialog: leave "Publish automatically after
