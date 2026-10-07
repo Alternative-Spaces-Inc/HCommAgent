@@ -23,10 +23,10 @@ and the manifest "key" field is the public half of ~/hca-extension-key.pem
 (Mac only, never in the repo) which derives exactly that ID.
 
 Chrome's documentation (Manifest key reference) describes the reverse flow
-(upload first, copy the store's key into the manifest). Whether the new
-Developer Dashboard honours a "key" already present in a first upload is
-not documented and reports differ; this plan treats it as unverified and
-proves it on Day 2 with a draft upload that is never published:
+(upload first, copy the store's key into the manifest). Day 2 verified it
+on 2026-10-07 with the Day 1 zip: the Developer Dashboard refuses the
+upload with "key field is not allowed in manifest". Path A is closed; the
+owner selected Path B the same morning. Both paths as planned:
 
 - Path A (ID matches): nothing else changes. The existing install is
   replaced by the store install with the same ID, same storage, same
@@ -39,6 +39,9 @@ proves it on Day 2 with a draft upload that is never published:
   flow from P6 and P7: register, Google link), the old device is revoked
   via the admin route, and the manifest "key" is dropped from the repo.
   Path B is a selection for the owner, not an automatic fallback.
+  As built: scripts/pack_extension.py drops "key" from the zipped
+  manifest (--keep-key only for an unpacked load); the repo manifest keeps
+  the key so the unpacked folder keeps its ID until Day 3 removes it.
 
 ## Decisions proposed
 
