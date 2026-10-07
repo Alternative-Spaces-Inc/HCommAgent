@@ -65,6 +65,13 @@ Then (Path B):
   HCA_GOOGLE_CLIENT_ID plus HCA_GOOGLE_CLIENT_IDS). The old client
   (Item ID jmpjjfhgggjmbebejaapchodjacmbmpm) stays until Day 3; the
   unpacked device is already linked and never signs in again.
+  Trigger edit as done 2026-10-07: gcloud builds triggers update github
+  with --update-substitutions returns INVALID_ARGUMENT for this trigger
+  (the comma inside the value is not the cause; the escaped form fails
+  the same way). What works: gcloud beta builds triggers export to a
+  yaml file in /tmp, edit the one _GOOGLE_CLIENT_IDS line, gcloud beta
+  builds triggers import --source, describe to read it back, delete the
+  temp files. All other pinned values stay as exported.
 - The store install (step 5) is a new extension with a fresh device key:
   the agent registers it with the admin token from the Terminal, the
   owner clicks "Sign in with Google" once on its options page, the agent
