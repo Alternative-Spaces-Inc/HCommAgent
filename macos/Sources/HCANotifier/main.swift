@@ -11,7 +11,7 @@ import HCACore
 /// Day 1: menu, permission, test banners. Day 2: Keychain device key.
 /// Day 3: signed inbox read, SSE stream with poll fallback, signed answer,
 /// dedupe between stream and poll.
-final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
     private let connectionItem = NSMenuItem(title: "Server: not configured", action: nil, keyEquivalent: "")
@@ -23,6 +23,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let lastActionItem = NSMenuItem(title: "Last action: none", action: nil, keyEquivalent: "")
     private let deviceItem = NSMenuItem(title: "Device: loading", action: nil, keyEquivalent: "")
     private let priorityItem = NSMenuItem(title: "Priority: loading", action: nil, keyEquivalent: "")
+    // HCA-P18: liveness row and the launch-at-login toggle.
+    private let livenessItem = NSMenuItem(title: "Last inbox read: waiting for the first read", action: nil, keyEquivalent: "")
+    private let loginItem = NSMenuItem(title: "Launch at login", action: #selector(toggleLoginItem), keyEquivalent: "")
+    private var liveness = Liveness()
+    private var stalenessTask: Task<Void, Never>?
+    private let livenessLog = Logger(subsystem: "com.alternativespaces.hca.notifier", category: "liveness")
     private var priorityChoiceItems: [NSMenuItem] = []
 
     private var signer: DeviceSigner?
@@ -44,6 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         self.menu = menu
         menu.addItem(statusMenuItem)
         menu.addItem(connectionItem)
+        menu.addItem(livenessItem)
         menu.addItem(lastActionItem)
         menu.addItem(.separator())
         menu.addItem(pendingItem)
@@ -68,6 +75,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let priorityParent = NSMenuItem(title: "Set this Mac's surface priority", action: nil, keyEquivalent: "")
         priorityParent.submenu = prioritySub
         menu.addItem(priorityParent)
+        loginItem.target = self
+        menu.addItem(loginItem)
         menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
         menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
         menu.addItem(.separator())
@@ -77,7 +86,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(NSMenuItem(title: "Send test notification (3 options)", action: #selector(sendTestRadio), keyEquivalent: ""))
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit HCA Notifier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
+        menu.delegate = self
         statusItem.menu = menu
+        refreshLoginItemRow()
+        livenessLog.info("started pid \(ProcessInfo.processInfo.processIdentifier) login item \(String(describing: LoginItem.state))")
 
         do {
             let s = try KeychainKeyStore.loadOrCreate()
@@ -105,7 +117,63 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
 
         startNetwork()
+        startStalenessWatch()
         installSignalTrigger()
+    }
+
+    // MARK: HCA-P18 liveness and login item
+
+    private func recordRead() {
+        let wasStale = liveness.isStale(now: Date())
+        liveness.recordRead(at: Date())
+        if wasStale {
+            livenessLog.info("recovered: inbox read after staleness")
+            statusMenuItem.title = "Status: recovered, inbox read"
+        }
+        refreshLivenessRow()
+    }
+
+    private func refreshLivenessRow() { livenessItem.title = liveness.title(now: Date()) }
+
+    /// Every 30 s: if the last successful read is older than Liveness.staleAfter,
+    /// log it, flag the status line, restart the stream task and poll at once.
+    /// Recovery needs no relaunch; the proof blocks the API host for four minutes.
+    private func startStalenessWatch() {
+        stalenessTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30 * 1_000_000_000)
+                guard let self = self else { return }
+                await MainActor.run {
+                    self.refreshLivenessRow()
+                    if self.liveness.isStale(now: Date()) {
+                        self.livenessLog.error("stale: no inbox read for \(Int(Date().timeIntervalSince(self.liveness.lastRead ?? Date()))) s, reconnecting")
+                        self.statusMenuItem.title = "Status: stale, reconnecting"
+                        self.streamTask?.cancel()
+                        self.pollTask?.cancel()
+                        self.startNetwork()
+                    }
+                }
+            }
+        }
+    }
+
+    private func refreshLoginItemRow() {
+        let state = LoginItem.state
+        loginItem.title = LoginItem.menuTitle(state)
+        loginItem.state = state == .on ? .on : .off
+    }
+
+    @objc private func toggleLoginItem() {
+        let before = LoginItem.state
+        let (after, err) = LoginItem.toggle()
+        refreshLoginItemRow()
+        if let err = err {
+            lastActionItem.title = "Last action: launch at login failed (\(err))"
+            livenessLog.error("login item toggle failed from \(String(describing: before)): \(err, privacy: .public)")
+        } else {
+            lastActionItem.title = "Last action: launch at login \(after == .on ? "on" : after == .requiresApproval ? "needs approval in System Settings" : "off")"
+            livenessLog.info("login item \(String(describing: before)) -> \(String(describing: after))")
+        }
     }
 
     /// kill -USR1 <pid> runs the Google link flow (the agent triggers it over the bridge;
@@ -146,16 +214,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         opened = true
                         DispatchQueue.main.async {
                             self.streamConnected = true
+                            self.liveness.streamConnected = true
                             self.connectionItem.title = "Server: stream connected"
                         }
                         Task { await self.poll() }   // catch up on anything missed while reconnecting
                     }, onEvent: { env in
                         DispatchQueue.main.async { self.handle(event: env) }
                     })
-                    await MainActor.run { self.streamConnected = false; self.connectionItem.title = "Server: stream closed, reconnecting" }
+                    await MainActor.run { self.streamConnected = false; self.liveness.streamConnected = false; self.connectionItem.title = "Server: stream closed, reconnecting" }
                 } catch {
                     await MainActor.run {
                         self.streamConnected = false
+                        self.liveness.streamConnected = false
                         self.connectionItem.title = "Server: stream error, polling (\(error.localizedDescription))"
                     }
                 }
@@ -185,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         do {
             let items = try await client.inbox()
             await MainActor.run {
+                self.recordRead()
                 let delta = self.store.applyInbox(items)
                 self.apply(delta)
                 self.repostCleared()
@@ -198,6 +269,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private func handle(event: StreamEnvelope) {
+        recordRead()
         // HCA-P14: created and escalated envelopes name the devices they are
         // for; ignore the ones not addressed to this device.
         apply(store.apply(event: event, deviceId: signer?.deviceId))
@@ -577,3 +649,11 @@ let delegate = AppDelegate()
 app.delegate = delegate
 app.setActivationPolicy(.accessory)
 app.run()
+
+extension AppDelegate {
+    /// HCA-P18: the liveness age and the login item state are read when the menu opens.
+    func menuWillOpen(_ menu: NSMenu) {
+        refreshLivenessRow()
+        refreshLoginItemRow()
+    }
+}

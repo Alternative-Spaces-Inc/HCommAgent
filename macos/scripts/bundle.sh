@@ -14,8 +14,13 @@ cd "$HERE"
 swift build -c release --product HCANotifier
 BIN="$(swift build -c release --show-bin-path)/HCANotifier"
 if [ -d "$APP" ]; then rm -r "$APP"; fi
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 cp "$BIN" "$APP/Contents/MacOS/HCANotifier"
+# HCA-P18: the LaunchAgent the app registers through SMAppService when the owner
+# ticks "Launch at login" (RunAtLoad plus KeepAlive on crash; a clean Quit stays
+# quit). Shipping it inside the bundle keeps it under the code signature.
+cp "$HERE/scripts/launchagent.plist" "$APP/Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist"
+plutil -lint "$APP/Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist"
 VERSION="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo dev)"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
@@ -26,7 +31,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>com.alternativespaces.hca.notifier</string>
   <key>CFBundleExecutable</key><string>HCANotifier</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.1.0</string>
+  <key>CFBundleShortVersionString</key><string>0.2.0</string>
   <key>CFBundleVersion</key><string>${VERSION}</string>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
@@ -45,5 +50,6 @@ else
   echo "signing: ad-hoc (no HCA Notifier Local Signing identity found)"
 fi
 echo "requirement: $(codesign -d -r- "$APP" 2>&1 | grep '^designated' | cut -c1-160)"
+codesign --verify --deep --strict "$APP" && echo "codesign verify: ok"
 echo "bundle: $APP"
 echo "version: ${VERSION}"

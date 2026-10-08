@@ -35,3 +35,31 @@ re-signed launch (Always Allow) and never again. Check the identity with
 `security find-identity -v -p codesigning`; force one with HCA_SIGN_IDENTITY.
 Developer ID and notarization are not used: the app runs only on the Mac
 that builds it.
+
+## Launch at login and liveness (HCA-P18)
+
+The bundle carries `Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist`
+(source: `macos/scripts/launchagent.plist`, asserted equal to the Swift
+rendering by LivenessTests). Nothing registers by itself. Menu row "Launch
+at login" (above "Copy device public key") registers the agent through
+SMAppService: ticked means the app starts at login and is relaunched after
+a crash or kill (KeepAlive, SuccessfulExit false); "Quit HCA Notifier"
+stays quit. macOS lists it under System Settings, General, Login Items and
+Extensions, "Allow in the Background"; if the row reads "allow in System
+Settings", clicking it opens that pane. Unticking unregisters.
+
+Path B (only if macOS refuses the bundled agent because the bundle lives
+outside /Applications): copy the same plist to
+`~/Library/LaunchAgents/` with `BundleProgram` replaced by `Program` set to
+the executable's full path, then `launchctl bootstrap gui/$(id -u) <plist>`.
+
+Menu row "Last inbox read: 12 s ago, stream connected" is the liveness
+line (updated when the menu opens, after each poll and every 30 s). After
+180 s without a successful inbox read it reads "stale", the status line
+reads "Status: stale, reconnecting", the stream and poll tasks are
+restarted and the transition is in the unified log (subsystem
+com.alternativespaces.hca.notifier, category liveness):
+
+    log show --last 10m --predicate 'subsystem == "com.alternativespaces.hca.notifier" AND category == "liveness"'
+
+Inspect the agent: `launchctl print gui/$(id -u)/com.alternativespaces.hca.notifier`.
