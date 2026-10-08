@@ -50,6 +50,20 @@ public enum LaunchAgentPlist {
     public static let label = "com.alternativespaces.hca.notifier"
     public static let fileName = label + ".plist"
     public static let bundleProgram = "Contents/MacOS/HCANotifier"
+    /// Set by launchd for the agent instance (EnvironmentVariables in the plist), so
+    /// the app can tell the launchd-managed instance from one opened by hand.
+    public static let launchdMarker = "HCA_LAUNCHD_AGENT"
+
+    /// HCA-P18 Day 2 finding: registering the agent from a hand-opened instance
+    /// makes launchd start a second instance at once (RunAtLoad), so two menu bar
+    /// icons appear. Rule for a starting instance that finds another one running:
+    /// the launchd instance wins (it is the one launchd restarts after a crash);
+    /// a hand-opened instance exits with status 0.
+    public enum DuplicateAction: Equatable { case none, exitSelf, terminateOther }
+    public static func duplicateAction(otherRunning: Bool, selfIsLaunchd: Bool) -> DuplicateAction {
+        guard otherRunning else { return .none }
+        return selfIsLaunchd ? .terminateOther : .exitSelf
+    }
 
     public static func contents() -> String {
         """
@@ -61,6 +75,7 @@ public enum LaunchAgentPlist {
           <key>RunAtLoad</key><true/>
           <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
           <key>ProcessType</key><string>Interactive</string>
+          <key>EnvironmentVariables</key><dict><key>HCA_LAUNCHD_AGENT</key><string>1</string></dict>
         </dict></plist>
 
         """

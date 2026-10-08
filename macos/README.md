@@ -46,7 +46,17 @@ SMAppService: ticked means the app starts at login and is relaunched after
 a crash or kill (KeepAlive, SuccessfulExit false); "Quit HCA Notifier"
 stays quit. macOS lists it under System Settings, General, Login Items and
 Extensions, "Allow in the Background"; if the row reads "allow in System
-Settings", clicking it opens that pane. Unticking unregisters.
+Settings", clicking it opens that pane. Unticking unregisters, which stops
+the launchd job: the app quits and is reopened from the bundle by hand.
+
+One instance only (Day 2 finding: registering from a hand-opened instance
+made launchd start a second one, two icons). The plist sets
+HCA_LAUNCHD_AGENT=1 for the launchd instance; on start, a launchd instance
+terminates any hand-opened one and a hand-opened instance exits when another
+is running. After a successful registration the hand-opened instance hands
+over to launchd within 2 s. Restart the launchd instance after a rebuild:
+
+    launchctl kickstart -k gui/$(id -u)/com.alternativespaces.hca.notifier
 
 Path B (only if macOS refuses the bundled agent because the bundle lives
 outside /Applications): copy the same plist to

@@ -40,7 +40,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var streamConnected = false
     static let pollInterval: UInt64 = 60
 
+    private let isLaunchdInstance = ProcessInfo.processInfo.environment[LaunchAgentPlist.launchdMarker] == "1"
+
     func applicationDidFinishLaunching(_ notification: Notification) {
+        resolveDuplicateInstance()
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         if let button = statusItem.button {
             button.image = NSImage(systemSymbolName: "checkmark.bubble", accessibilityDescription: "HCA")
@@ -89,7 +92,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.delegate = self
         statusItem.menu = menu
         refreshLoginItemRow()
-        livenessLog.info("started pid \(ProcessInfo.processInfo.processIdentifier) login item \(String(describing: LoginItem.state))")
+        livenessLog.info("started pid \(ProcessInfo.processInfo.processIdentifier, privacy: .public) launchd \(self.isLaunchdInstance, privacy: .public) login item \(String(describing: LoginItem.state), privacy: .public)")
 
         do {
             let s = try KeychainKeyStore.loadOrCreate()
@@ -122,6 +125,26 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     // MARK: HCA-P18 liveness and login item
+
+    /// Two instances show two icons (Day 2 finding). The launchd instance wins.
+    private func resolveDuplicateInstance() {
+        let me = ProcessInfo.processInfo.processIdentifier
+        let others = NSWorkspace.shared.runningApplications.filter {
+            $0.bundleIdentifier == Bundle.main.bundleIdentifier && $0.processIdentifier != me
+        }
+        switch LaunchAgentPlist.duplicateAction(otherRunning: !others.isEmpty, selfIsLaunchd: isLaunchdInstance) {
+        case .none:
+            return
+        case .exitSelf:
+            livenessLog.info("duplicate instance: hand-opened pid \(me, privacy: .public) exits, \(others.first?.processIdentifier ?? 0, privacy: .public) keeps running")
+            exit(0)
+        case .terminateOther:
+            for app in others {
+                livenessLog.info("duplicate instance: launchd pid \(me, privacy: .public) terminates hand-opened pid \(app.processIdentifier, privacy: .public)")
+                app.terminate()
+            }
+        }
+    }
 
     private func recordRead() {
         let wasStale = liveness.isStale(now: Date())
@@ -165,14 +188,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     @objc private func toggleLoginItem() {
         let before = LoginItem.state
+        if before == .on, isLaunchdInstance {
+            // Unregistering stops the launchd job, which is this process. Say so first.
+            livenessLog.info("login item on -> off requested from the launchd instance; the app quits, reopen it from the bundle")
+        }
         let (after, err) = LoginItem.toggle()
         refreshLoginItemRow()
         if let err = err {
             lastActionItem.title = "Last action: launch at login failed (\(err))"
-            livenessLog.error("login item toggle failed from \(String(describing: before)): \(err, privacy: .public)")
+            livenessLog.error("login item toggle failed from \(String(describing: before), privacy: .public): \(err, privacy: .public)")
         } else {
             lastActionItem.title = "Last action: launch at login \(after == .on ? "on" : after == .requiresApproval ? "needs approval in System Settings" : "off")"
-            livenessLog.info("login item \(String(describing: before)) -> \(String(describing: after))")
+            livenessLog.info("login item \(String(describing: before), privacy: .public) -> \(String(describing: after), privacy: .public)")
+            if after == .on, !isLaunchdInstance {
+                // launchd starts its own instance now (RunAtLoad); hand over so one icon remains.
+                livenessLog.info("login item registered from a hand-opened instance; handing over to launchd in 2 s")
+                DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exit(0) }
+            }
         }
     }
 

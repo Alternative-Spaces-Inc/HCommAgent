@@ -6,4 +6,5 @@
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
   <key>ProcessType</key><string>Interactive</string>
+  <key>EnvironmentVariables</key><dict><key>HCA_LAUNCHD_AGENT</key><string>1</string></dict>
 </dict></plist>

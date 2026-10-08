@@ -44,6 +44,15 @@ final class LivenessTests: XCTestCase {
         let keepAlive = try XCTUnwrap(dict["KeepAlive"] as? [String: Any])
         XCTAssertEqual(keepAlive["SuccessfulExit"] as? Bool, false)
         XCTAssertEqual(dict["ProcessType"] as? String, "Interactive")
+        let env = try XCTUnwrap(dict["EnvironmentVariables"] as? [String: String])
+        XCTAssertEqual(env["HCA_LAUNCHD_AGENT"], "1")
+    }
+
+    func testDuplicateInstanceRule() {
+        XCTAssertEqual(LaunchAgentPlist.duplicateAction(otherRunning: false, selfIsLaunchd: false), .none)
+        XCTAssertEqual(LaunchAgentPlist.duplicateAction(otherRunning: false, selfIsLaunchd: true), .none)
+        XCTAssertEqual(LaunchAgentPlist.duplicateAction(otherRunning: true, selfIsLaunchd: false), .exitSelf)
+        XCTAssertEqual(LaunchAgentPlist.duplicateAction(otherRunning: true, selfIsLaunchd: true), .terminateOther)
     }
 
     /// bundle.sh copies macos/scripts/launchagent.plist into the bundle; keep
