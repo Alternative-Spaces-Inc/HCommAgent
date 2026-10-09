@@ -41,3 +41,4 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [platform/soul-renders/hca.md](../platform/soul-renders/hca.md): Soul render for the Base44 Personalization, Identity field
 - docs/deploys/2026-10-01_p6_device_proof.md: P6 device key proof, PR 20 inbox request_id fix, revision 00004
 - [docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md](plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md): Verified gap inventory and the P19 to P27 hardening program (agentic retail control plane)
+- [docs/plans/HCA_P20_DURABLE_DELIVERY_v1.md](plans/HCA_P20_DURABLE_DELIVERY_v1.md): P20 plan v1: durable delivery
