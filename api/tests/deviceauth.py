@@ -7,8 +7,6 @@ so the server's canonical string matches.
 """
 
 import base64
-import json
-import os
 import secrets
 import time
 from datetime import datetime, timezone

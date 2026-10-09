@@ -13,10 +13,10 @@ from sqlalchemy import select
 
 from app.main import app
 from app.db import Base, engine, SessionLocal
-from authhelper import agent_auth, ADMIN_AUTH
+from authhelper import agent_auth
 from app import models, webhooks
 from app.expiry import run_expiry_sweep
-from deviceauth import human_get, human_post
+from deviceauth import human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)

@@ -12,7 +12,6 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
 from app.expiry import run_expiry_sweep
-from app import models
 from authhelper import agent_auth
 from deviceauth import human_get, human_post
 

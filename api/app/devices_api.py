@@ -78,8 +78,8 @@ def _view(d: models.Device) -> DeviceView:
 def register_device(body: DeviceRegistration, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
     try:
         device_id = device_id_for_public_key_pem(body.public_key_pem)
-    except Exception:
-        raise HTTPException(status_code=422, detail="public_key_pem must be an ECDSA P-256 public key in SPKI PEM form")
+    except Exception as e:
+        raise HTTPException(status_code=422, detail="public_key_pem must be an ECDSA P-256 public key in SPKI PEM form") from e
     existing = db.get(models.Device, device_id)
     if existing is not None:
         if existing.revoked_at is not None:
@@ -152,7 +152,7 @@ def google_link(body: GoogleLink, db: Session = Depends(get_db), device: models.
     try:
         identity = googleauth.verify_access_token(body.access_token)
     except googleauth.GoogleAuthError as e:
-        raise HTTPException(status_code=e.status_code, detail=e.detail)
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     row = db.get(models.Device, device.id)
     row.google_sub = identity.sub
     row.google_email = identity.email

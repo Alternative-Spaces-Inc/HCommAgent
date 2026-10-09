@@ -18,7 +18,7 @@ from app.main import app
 from app.db import Base, engine
 from app import devicesig
 from authhelper import agent_auth, ADMIN_AUTH
-from deviceauth import DEVICE_ID, DEVICE_LABEL, PUBLIC_PEM, human_get, human_headers, human_post, ensure_registered
+from deviceauth import DEVICE_ID, DEVICE_LABEL, PUBLIC_PEM, human_get, human_headers, ensure_registered
 
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
@@ -100,10 +100,12 @@ def test_bad_signature_wrong_key_and_tampered_path_are_401():
     assert client.get("/v1/audit?agent=two", headers=h).status_code == 401
     assert client.get("/v1/audit?agent=one", headers=h).status_code == 200
     # garbage signature
-    h = human_headers("GET", "/v1/inbox"); h["X-HCA-Signature"] = "AAAA"
+    h = human_headers("GET", "/v1/inbox")
+    h["X-HCA-Signature"] = "AAAA"
     assert client.get("/v1/inbox", headers=h).status_code == 401
     # missing one header
-    h = human_headers("GET", "/v1/inbox"); del h["X-HCA-Nonce"]
+    h = human_headers("GET", "/v1/inbox")
+    del h["X-HCA-Nonce"]
     assert client.get("/v1/inbox", headers=h).status_code == 401
 
 
@@ -114,7 +116,8 @@ def test_stale_timestamp_is_401():
     assert r.status_code == 401 and "stale" in r.json()["detail"]
     future = int(time.time()) + devicesig.MAX_SKEW_SECONDS + 5
     assert client.get("/v1/inbox", headers=human_headers("GET", "/v1/inbox", timestamp=future)).status_code == 401
-    h = human_headers("GET", "/v1/inbox"); h["X-HCA-Timestamp"] = "yesterday"
+    h = human_headers("GET", "/v1/inbox")
+    h["X-HCA-Timestamp"] = "yesterday"
     assert client.get("/v1/inbox", headers=h).status_code == 401
 
 

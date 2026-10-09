@@ -2,6 +2,8 @@
 # HCA sandbox-bootstrap.sh - thin caller into HCA bootstrap source.
 set -u
 
+CLONE_TIMEOUT_SECONDS="${SANDBOX_CLONE_TIMEOUT:-120}"
+
 if [ "${1:-}" = "--selftest" ]; then
   echo "SANDBOX BOOTSTRAP THIN CALLER SELFTEST: GREEN - caller present, forwards to HCA seat_sandbox_bootstrap.sh"
   exit 0
@@ -34,8 +36,13 @@ if [ -z "$REPO_DIR" ]; then
       exit 1
     fi
   elif [ -n "$TOKEN" ]; then
-    git clone -q "https://x-access-token:${TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git" "$REPO_DIR" 2>/dev/null || {
-      echo "MISSING: repo checkout (clone failed)"
+    if ! mkdir -p "$(dirname "$REPO_DIR")" 2>/dev/null; then
+      echo "MISSING: repo checkout (cannot create $(dirname "$REPO_DIR"))"
+      echo "RESULT: something was missing (see MISSING lines above)"
+      exit 1
+    fi
+    timeout "$CLONE_TIMEOUT_SECONDS" git clone -q "https://x-access-token:${TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git" "$REPO_DIR" 2>/dev/null || {
+      echo "MISSING: repo checkout (clone failed or exceeded ${CLONE_TIMEOUT_SECONDS}s)"
       echo "RESULT: something was missing (see MISSING lines above)"
       exit 1
     }
@@ -47,7 +54,9 @@ if [ -z "$REPO_DIR" ]; then
 fi
 
 if git -C "$REPO_DIR" rev-parse --git-dir >/dev/null 2>&1; then
-  git -C "$REPO_DIR" fetch -q origin main 2>/dev/null || true
+  if ! timeout "$CLONE_TIMEOUT_SECONDS" git -C "$REPO_DIR" fetch -q origin main 2>/dev/null; then
+    echo "WARNING: fetch of origin main failed, continuing with the local checkout"
+  fi
 fi
 
 export SANDBOX_REPO_DIR="$REPO_DIR"

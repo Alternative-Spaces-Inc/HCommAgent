@@ -22,15 +22,17 @@ import httpx
 import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from deviceauth import DEVICE_ID, PUBLIC_PEM, human_headers as _human_headers
+from deviceauth import DEVICE_ID, PUBLIC_PEM
 
 
 def sign_only(method, path, body=b""):
     # The live server has its own database; registration happened over HTTP
     # above, so skip the helper's local ensure_registered by signing directly.
     from deviceauth import canonical_string, raw_signature, _private
-    import secrets, time
-    ts = str(int(time.time())); nonce = secrets.token_urlsafe(12)
+    import secrets
+    import time
+    ts = str(int(time.time()))
+    nonce = secrets.token_urlsafe(12)
     return {"X-HCA-Device": DEVICE_ID, "X-HCA-Timestamp": ts, "X-HCA-Nonce": nonce,
             "X-HCA-Signature": raw_signature(_private, canonical_string(ts, nonce, method, path, body))}
 

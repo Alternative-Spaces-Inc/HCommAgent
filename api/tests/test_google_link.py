@@ -1,7 +1,6 @@
 """HCA-P7: Google sign-in linked to a device (app/googleauth.py,
 POST /v1/devices/self/google-link, HCA_REQUIRE_GOOGLE_LINK)."""
 
-import os
 
 import pytest
 from fastapi.testclient import TestClient
@@ -9,7 +8,6 @@ from fastapi.testclient import TestClient
 from app import googleauth, models
 from app.db import SessionLocal
 from app.main import app
-from tests import authhelper
 from tests.deviceauth import DEVICE_ID, ensure_registered, human_get, human_post
 
 CLIENT = "123-test.apps.googleusercontent.com"

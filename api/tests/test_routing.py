@@ -23,7 +23,6 @@ from app.db import Base, engine, SessionLocal
 from app import models, routing
 from app.devicesig import device_id_for_public_key_pem
 from authhelper import agent_auth, ADMIN_AUTH
-import deviceauth
 from deviceauth import human_get, human_headers, ensure_registered, DEVICE_ID
 
 Base.metadata.drop_all(bind=engine)
@@ -161,7 +160,8 @@ def test_created_event_names_rank0_and_fire_escalation_names_later_rank(monkeypa
     ensure_registered()
     client.patch(f"/v1/devices/{DEVICE_ID}", json={"priority": 10}, headers=ADMIN_AUTH)
     _register_second(200)
-    human_get(client, "/v1/inbox"); _second_get("/v1/inbox")
+    human_get(client, "/v1/inbox")
+    _second_get("/v1/inbox")
     from app import requests_api
     seen = []
     monkeypatch.setattr(requests_api, "publish", lambda e, d: seen.append((e, d)) or {"event": e, "data": d})
@@ -180,7 +180,9 @@ def test_created_event_names_rank0_and_fire_escalation_names_later_rank(monkeypa
     assert d["request_id"] == rid and d["title"] == "event ask"
     # answered ask: no escalation
     with SessionLocal() as db:
-        ask = db.get(models.Ask, rid); ask.state = "answered"; db.commit()
+        ask = db.get(models.Ask, rid)
+        ask.state = "answered"
+        db.commit()
     assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d: (e, d)) is None
 
 
@@ -188,7 +190,8 @@ def test_default_priorities_keep_pre_p14_behaviour():
     ensure_registered()
     client.patch(f"/v1/devices/{DEVICE_ID}", json={"priority": 100}, headers=ADMIN_AUTH)
     _register_second(100)
-    human_get(client, "/v1/inbox"); _second_get("/v1/inbox")
+    human_get(client, "/v1/inbox")
+    _second_get("/v1/inbox")
     rid = _post_ask("everyone at once")
     assert rid in [i["request_id"] for i in human_get(client, "/v1/inbox").json()]
     assert rid in [i["request_id"] for i in _second_get("/v1/inbox").json()]
