@@ -103,7 +103,11 @@ def test_answer_race_loser_gets_409_not_500(monkeypatch):
     resp = human_post(client, f"/v1/requests/{request_id}/answer",
                       json={"control": "radio", "value": "blue", "surface": "browser_overlay"})
     assert resp.status_code == 409
-    assert resp.json()["detail"] == "request already answered"
+    # HCA-P19 Day 2: every losing transition gets the same 409 shape; the
+    # simulated race has no real second writer, so the re-read state is
+    # still queued.
+    detail = resp.json()["detail"]
+    assert detail["error"] == "request_terminal" and detail["request_id"] == request_id
     monkeypatch.undo()
     # the ask is untouched, so a real answer still lands
     resp = human_post(client, f"/v1/requests/{request_id}/answer",

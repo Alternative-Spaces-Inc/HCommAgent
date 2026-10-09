@@ -15,6 +15,8 @@ paths:
       summary: Create a collection request
       security:
         - AgentKey: []
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
       requestBody:
         required: true
         content:
@@ -55,6 +57,7 @@ paths:
       security:
         - DeviceSignature: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - in: path
           name: request_id
           required: true
@@ -72,14 +75,19 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/AnswerRecord'
-        '409': { description: "Request already answered, expired, withdrawn or cancelled" }
-        '422': { description: "Value does not fit the control or the option ids" }
+        '409':
+          description: Request already answered, expired, withdrawn or cancelled
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TerminalConflict' }
+        '422': { description: "Control does not match the request, value does not fit the control's rules or the option ids, or Idempotency-Key reused with another body" }
   /v1/requests/{request_id}/cancel:
     post:
       summary: Cancel a request with a reason
       security:
         - AgentKey: []
       parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
         - in: path
           name: request_id
           required: true
@@ -550,7 +558,30 @@ components:
         unknown or revoked device is 403. The answer route records the
         verified device id on the AnswerRecord, ignoring any device the
         body claims. Devices are registered with POST /v1/devices.
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      required: false
+      schema: { type: string, maxLength: 200 }
+      description: >
+        HCA-P19: a retry with the same key and the same body replays the first
+        response (same status, same body, header Idempotent-Replayed true)
+        instead of repeating the effect; the same key with a different body
+        is 422. Scoped to the caller (agent routes) or the device (answer).
   schemas:
+    TerminalConflict:
+      type: object
+      required: [detail]
+      properties:
+        detail:
+          type: object
+          required: [error, request_id, state]
+          properties:
+            error: { type: string, enum: [request_terminal] }
+            request_id: { type: string }
+            state: { type: string, enum: [queued, shown, answered, expired, withdrawn, cancelled] }
+      description: HCA-P19 Day 2 - the one 409 body every losing terminal transition gets (second answer, cancel after answer, answer after expiry, second cancel).
     DeviceRegistration:
       type: object
       required: [label, public_key_pem]

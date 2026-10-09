@@ -22,6 +22,7 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from .expiry import run_expiry_sweep
+from . import idempotency
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
 
@@ -40,4 +41,6 @@ def _require_sweep_bearer(authorization: str = Header(default=None)) -> None:
 @router.post("/expiry-sweep")
 def trigger_expiry_sweep(db: Session = Depends(get_db), _auth=Depends(_require_sweep_bearer)):
     results = run_expiry_sweep(db)
-    return {"swept": len(results), "results": results}
+    # HCA-P19 Day 2: the same scheduled call retires idempotency rows past their TTL.
+    idempotency_swept = idempotency.sweep(db)
+    return {"swept": len(results), "results": results, "idempotency_swept": idempotency_swept}
