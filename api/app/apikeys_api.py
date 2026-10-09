@@ -16,12 +16,16 @@ router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
 
 class ApiKeyIssueRequest(BaseModel):
     caller: str
+    # HCA-P19: the tenant the key acts for; omitted means the default tenant
+    # so pre-P19 callers keep working.
+    tenant_id: str = models.DEFAULT_TENANT_ID
 
 
 class ApiKeyIssueResponse(BaseModel):
     api_key: str
     prefix: str
     caller: str
+    tenant_id: str
     created_at: datetime
 
 
@@ -30,18 +34,21 @@ class ApiKeyView(BaseModel):
     handle, the hash is never returned."""
     prefix: str
     caller: str
+    tenant_id: str
     created_at: datetime
     revoked_at: Optional[datetime] = None
 
 
 def _view(row: models.ApiKey) -> ApiKeyView:
-    return ApiKeyView(prefix=row.key_prefix, caller=row.caller, created_at=row.created_at, revoked_at=row.revoked_at)
+    return ApiKeyView(prefix=row.key_prefix, caller=row.caller, tenant_id=row.tenant_id, created_at=row.created_at, revoked_at=row.revoked_at)
 
 
 @router.post("", response_model=ApiKeyIssueResponse, status_code=201)
 def issue_key(body: ApiKeyIssueRequest, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
-    result = issue_api_key(db, body.caller)
-    return result
+    try:
+        return issue_api_key(db, body.caller, body.tenant_id)
+    except ValueError as e:
+        raise HTTPException(status_code=422, detail=str(e)) from None
 
 
 @router.get("", response_model=list[ApiKeyView])

@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from . import models
-from .db import get_db
+from .db import get_db, SessionLocal
 from .events import subscribe, unsubscribe, format_sse
 from .requests_api import _ask_to_collection_request
 from .auth import require_linked_device, google_link_required
@@ -31,7 +31,7 @@ def _sort_key(ask: models.Ask):
 
 @router.get("")
 def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
-    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))).scalars().all()
+    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES)).where(models.Ask.tenant_id == device.tenant_id)).scalars().all()
     # HCA-P14: a device sees an ask only once its rank's window has opened
     # (app/routing.py). The poll path applies the same rule as the stream.
     now = datetime.now(timezone.utc)
@@ -45,13 +45,22 @@ def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(re
     return [_ask_to_collection_request(a) | {"request_id": a.id} for a in ordered]
 
 
-async def inbox_event_source(keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS):
+def _device_still_authorized(device_id: str) -> bool:
+    """Re-read the device row; a revoked device loses an open stream at the
+    next keep-alive tick instead of keeping it until it disconnects."""
+    with SessionLocal() as db:
+        d = db.get(models.Device, device_id)
+        return d is not None and d.revoked_at is None
+
+
+async def inbox_event_source(device: models.Device, keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS,
+                             authorized_fn=_device_still_authorized):
     """The SSE body generator for GET /v1/inbox/stream, factored out so tests
     can drive it directly with asyncio.wait_for instead of going through an
     HTTP client's streaming transport (TestClient does not stream an
     open-ended body incrementally; see tests/test_inbox_api.py for the note
     on why the HTTP layer is not exercised end-to-end for this route)."""
-    q = subscribe()
+    q = subscribe(device.id, device.tenant_id)
     try:
         yield ": connected\n\n"
         while True:
@@ -59,6 +68,9 @@ async def inbox_event_source(keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS
                 envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
                 yield format_sse(envelope)
             except asyncio.TimeoutError:
+                if not await asyncio.to_thread(authorized_fn, device.id):
+                    yield "event: stream.closed\ndata: {\"reason\": \"device revoked\"}\n\n"
+                    return
                 yield ": keep-alive\n\n"
     finally:
         unsubscribe(q)
@@ -66,4 +78,4 @@ async def inbox_event_source(keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS
 
 @router.get("/stream")
 async def stream_inbox(device: models.Device = Depends(require_linked_device)):
-    return StreamingResponse(inbox_event_source(), media_type="text/event-stream")
+    return StreamingResponse(inbox_event_source(device), media_type="text/event-stream")

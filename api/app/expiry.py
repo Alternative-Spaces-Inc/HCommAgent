@@ -16,7 +16,8 @@ Three expiry_policy values, from api/app/schemas.py:
     this sub-task's scope) decides what happens to a held, overdue ask.
 
 Only asks with a deadline_at in the past and a non-terminal state are
-swept; an ask with no deadline_at never expires on its own.
+swept at expires_at (deadline_at, or the default lifetime when the caller
+gave none; HCA-P19).
 """
 
 from datetime import datetime, timezone
@@ -41,11 +42,14 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
     reported but left untouched, matching the hold policy above)."""
     now = now or datetime.now(timezone.utc)
 
+    # HCA-P19: expires_at is always set on create (deadline_at or the default
+    # lifetime), so every ask eventually leaves the inbox. Rows created before
+    # P19 with no deadline have no expires_at and are left alone as before.
     overdue = db.execute(
         select(models.Ask).where(
             models.Ask.state.notin_(TERMINAL_STATES),
-            models.Ask.deadline_at.is_not(None),
-            models.Ask.deadline_at < now,
+            models.Ask.expires_at.is_not(None),
+            models.Ask.expires_at < now,
         )
     ).scalars().all()
 
@@ -58,6 +62,7 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
 
         if ask.expiry_policy == "auto_deny":
             row = models.AuditRow(
+                tenant_id=ask.tenant_id,
                 ask_id=ask.id,
                 control=ask.control,
                 value=dict(AUTO_DENY_VALUE),
@@ -69,13 +74,14 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
                 path_taken=None,
                 duration_ms=None,
                 voice_used=None,
-                passthrough={"swept_at": now.isoformat(), "deadline_at": ask.deadline_at.isoformat()},
+                passthrough={"swept_at": now.isoformat(), "deadline_at": ask.deadline_at.isoformat() if ask.deadline_at else None,
+                             "expires_at": ask.expires_at.isoformat()},
             )
             db.add(row)
             ask.state = "expired"
             db.commit()
             record = _audit_to_answer_record(row)
-            publish("request.expired", record)
+            publish("request.expired", record, tenant_id=ask.tenant_id)
             deliver_outcome(ask.id, "request.expired", ask.state, record, ask.deliver_to)
             results.append({"request_id": ask.id, "expiry_policy": "auto_deny", "action": "auto_denied"})
             continue
@@ -83,7 +89,7 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
         # expiry_policy == "expire": plain timeout, no answer recorded.
         ask.state = "expired"
         db.commit()
-        publish("request.expired", {"request_id": ask.id, "state": "expired"})
+        publish("request.expired", {"request_id": ask.id, "state": "expired"}, tenant_id=ask.tenant_id)
         deliver_outcome(ask.id, "request.expired", ask.state, None, ask.deliver_to)
         results.append({"request_id": ask.id, "expiry_policy": "expire", "action": "expired"})
 

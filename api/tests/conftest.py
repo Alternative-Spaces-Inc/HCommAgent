@@ -48,3 +48,14 @@ def webhook_recorder():
         yield rec
     finally:
         webhooks.set_transport_factory(None)
+
+
+@pytest.fixture(autouse=True)
+def default_tenant():
+    """HCA-P19: test modules rebuild the schema from metadata, which has no
+    default tenant row; every api key, device and ask needs one."""
+    from app.db import SessionLocal
+    from app import models
+    with SessionLocal() as db:
+        models.ensure_default_tenant(db)
+    yield
