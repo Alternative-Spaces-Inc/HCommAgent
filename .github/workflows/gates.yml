@@ -70,7 +70,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub official image via the AWS ECR Public mirror: the
+        # unauthenticated Docker Hub pull limit failed this job twice on
+        # 2026-10-09 before any test ran.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: hca
           POSTGRES_PASSWORD: hca
