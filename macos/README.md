@@ -38,16 +38,29 @@ that builds it.
 
 ## Launch at login and liveness (HCA-P18)
 
-The bundle carries `Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist`
-(source: `macos/scripts/launchagent.plist`, asserted equal to the Swift
-rendering by LivenessTests). Nothing registers by itself. Menu row "Launch
-at login" (above "Copy device public key") registers the agent through
-SMAppService: ticked means the app starts at login and is relaunched after
-a crash or kill (KeepAlive, SuccessfulExit false); "Quit HCA Notifier"
-stays quit. macOS lists it under System Settings, General, Login Items and
-Extensions, "Allow in the Background"; if the row reads "allow in System
-Settings", clicking it opens that pane. Unticking unregisters, which stops
-the launchd job: the app quits and is reopened from the bundle by hand.
+Nothing registers by itself. Menu row "Launch at login" (above "Copy device
+public key") writes `~/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist`
+(rendered by `LaunchAgentPlist.contents(program:)`, asserted by
+LivenessTests) with `Program` set to this bundle's executable path, then
+runs `launchctl bootstrap gui/<uid> <plist>`. Ticked means the app starts
+at login (RunAtLoad) and is relaunched after a crash or kill (KeepAlive,
+SuccessfulExit false); "Quit HCA Notifier" (exit 0) stays quit. macOS lists
+it under System Settings, General, Login Items and Extensions, "Allow in
+the Background"; if the row reads "allow in System Settings", clicking it
+opens that pane. Unticking runs `launchctl bootout` and removes the plist,
+which stops the launchd job: the app quits and is reopened from the bundle
+by hand.
+
+Why a user LaunchAgent and not the bundled SMAppService agent (Day 2 finding,
+2026-10-09): the Day 1 agent registered, spawned once, and then failed every
+start with `last exit code = 78: EX_CONFIG`, job state "spawn failed" (44
+attempts overnight). `launchctl print` showed the registration's
+lightweight code requirement as `cdhash $in [ ]`, an empty list no binary
+satisfies. The P16 identity is self-signed (`TeamIdentifier=not set`), and
+Apple's service builds a usable requirement only from a Team ID. A Team ID
+(Apple Development certificate via an Apple ID in Xcode) would allow the
+bundled agent again; until then Path B. The app unregisters a leftover
+bundled registration the first time the row is ticked.
 
 One instance only (Day 2 finding: registering from a hand-opened instance
 made launchd start a second one, two icons). The plist sets
@@ -56,19 +69,14 @@ terminates any hand-opened one and a hand-opened instance exits when another
 is running. After a successful registration the hand-opened instance hands
 over to launchd within 2 s.
 
-After a rebuild the registration is stale: launchd pinned the agent to the
-bundle version and code requirement it saw at registration (`launchctl
-print gui/$(id -u)/com.alternativespaces.hca.notifier` shows "parent bundle
-version" and "has LWCR"), and `launchctl kickstart -k` then fails with
-`last exit code = 78: EX_CONFIG`, job state "spawn failed". Fix: open the
-rebuilt bundle by hand once (`open ~/hca-notifier/HCA\ Notifier.app`); a
-hand-opened instance that finds the agent enabled re-registers it from the
-new bundle and hands over to launchd within 2 s.
+After a rebuild (`bundle.sh` replaces the app in place, same path) the
+loaded job restarts on the new binary with
 
-Path B (only if macOS refuses the bundled agent because the bundle lives
-outside /Applications): copy the same plist to
-`~/Library/LaunchAgents/` with `BundleProgram` replaced by `Program` set to
-the executable's full path, then `launchctl bootstrap gui/$(id -u) <plist>`.
+    launchctl kickstart -k gui/$(id -u)/com.alternativespaces.hca.notifier
+
+or by opening the bundle by hand once: a hand-opened instance that finds the
+agent configured but not running kickstarts it (or loads a present plist
+after a logout) and hands over within 2 s.
 
 Menu row "Last inbox read: 12 s ago, stream connected" is the liveness
 line (updated when the menu opens, after each poll and every 30 s). After

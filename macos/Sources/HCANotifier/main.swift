@@ -125,24 +125,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         healLoginItemAfterRebuild()
     }
 
-    /// A hand-opened instance that finds the agent enabled means launchd did not
-    /// start (or keep) its instance; after a rebuild that is the EX_CONFIG spawn
-    /// failure. Refresh the registration from this bundle and hand over.
+    /// A hand-opened instance that finds the agent configured: if the launchd job
+    /// is loaded but its instance is not running (the binary was rebuilt and the
+    /// job died, or launchd gave up), kickstart it; if the plist is present but
+    /// not loaded (after a logout), load it. Then hand over so one icon remains.
     private func healLoginItemAfterRebuild() {
-        guard !isLaunchdInstance, LoginItem.state == .on else { return }
-        livenessLog.info("login item enabled but this instance is hand-opened; re-registering from this bundle")
-        let (after, err) = LoginItem.reregister()
+        guard !isLaunchdInstance else { return }
+        let st = LoginItem.state
+        let action: String
+        var err: String?
+        switch st {
+        case .on:
+            if let pid = LaunchAgentPlist.runningPid(launchctlPrint: LoginItem.launchctl(["print", LoginItem.target]).output) {
+                livenessLog.info("login item on, launchd instance pid \(pid, privacy: .public) running; this hand-opened instance should have exited already")
+                return
+            }
+            action = "kickstart"; err = LoginItem.kickstart().1
+        case .notFound:
+            action = "load"; err = LoginItem.load().1
+        case .off, .requiresApproval:
+            return
+        }
         if let err = err {
-            livenessLog.error("re-register failed: \(err, privacy: .public)")
-            lastActionItem.title = "Last action: launch at login re-register failed (\(err))"
+            livenessLog.error("login item \(action, privacy: .public) failed: \(err, privacy: .public)")
+            lastActionItem.title = "Last action: launch at login \(action) failed (\(err))"
             return
         }
         refreshLoginItemRow()
-        lastActionItem.title = "Last action: launch at login refreshed after rebuild"
-        if after == .on {
-            livenessLog.info("re-registered; handing over to launchd in 2 s")
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exit(0) }
-        }
+        lastActionItem.title = "Last action: launch at login \(action) after relaunch"
+        livenessLog.info("login item \(action, privacy: .public) from a hand-opened instance; handing over to launchd in 2 s")
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exit(0) }
     }
 
     // MARK: HCA-P18 liveness and login item
@@ -210,7 +222,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc private func toggleLoginItem() {
         let before = LoginItem.state
         if before == .on, isLaunchdInstance {
-            // Unregistering stops the launchd job, which is this process. Say so first.
+            // bootout stops the launchd job, which is this process. Say so first.
             livenessLog.info("login item on -> off requested from the launchd instance; the app quits, reopen it from the bundle")
         }
         let (after, err) = LoginItem.toggle()
@@ -221,7 +233,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         } else {
             lastActionItem.title = "Last action: launch at login \(after == .on ? "on" : after == .requiresApproval ? "needs approval in System Settings" : "off")"
             livenessLog.info("login item \(String(describing: before), privacy: .public) -> \(String(describing: after), privacy: .public)")
-            if after == .on, !isLaunchdInstance {
+            if after == .on, before != .on, !isLaunchdInstance {
                 // launchd starts its own instance now (RunAtLoad); hand over so one icon remains.
                 livenessLog.info("login item registered from a hand-opened instance; handing over to launchd in 2 s")
                 DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exit(0) }

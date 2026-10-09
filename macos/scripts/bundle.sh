@@ -14,13 +14,11 @@ cd "$HERE"
 swift build -c release --product HCANotifier
 BIN="$(swift build -c release --show-bin-path)/HCANotifier"
 if [ -d "$APP" ]; then rm -r "$APP"; fi
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/HCANotifier"
 # HCA-P18: the LaunchAgent the app registers through SMAppService when the owner
 # ticks "Launch at login" (RunAtLoad plus KeepAlive on crash; a clean Quit stays
 # quit). Shipping it inside the bundle keeps it under the code signature.
-cp "$HERE/scripts/launchagent.plist" "$APP/Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist"
-plutil -lint "$APP/Contents/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist"
 VERSION="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo dev)"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>

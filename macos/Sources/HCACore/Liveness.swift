@@ -41,43 +41,69 @@ public struct Liveness: Equatable {
     }
 }
 
-/// HCA-P18: the LaunchAgent plist shipped inside the bundle and registered
-/// through SMAppService.agent(plistName:). Rendered here so a test can parse
-/// it and bundle.sh can print it (swift run is not used by bundle.sh; the
-/// script carries the same text, and the test guards both against drift by
-/// comparing with macos/scripts/launchagent.plist).
+/// HCA-P18 Path B (Day 2 selection, 2026-10-09): a user LaunchAgent written by the
+/// app to ~/Library/LaunchAgents/<label>.plist with the absolute executable path,
+/// loaded with launchctl bootstrap gui/<uid>. Chosen after the bundled
+/// SMAppService agent failed to spawn (EX_CONFIG): the P16 identity is
+/// self-signed with no Team ID, so Apple's service pinned an empty cdhash
+/// requirement that no binary satisfies. Pure rendering; the file write and the
+/// launchctl calls live in the app target.
 public enum LaunchAgentPlist {
     public static let label = "com.alternativespaces.hca.notifier"
     public static let fileName = label + ".plist"
-    public static let bundleProgram = "Contents/MacOS/HCANotifier"
     /// Set by launchd for the agent instance (EnvironmentVariables in the plist), so
     /// the app can tell the launchd-managed instance from one opened by hand.
     public static let launchdMarker = "HCA_LAUNCHD_AGENT"
 
-    /// HCA-P18 Day 2 finding: registering the agent from a hand-opened instance
-    /// makes launchd start a second instance at once (RunAtLoad), so two menu bar
-    /// icons appear. Rule for a starting instance that finds another one running:
-    /// the launchd instance wins (it is the one launchd restarts after a crash);
-    /// a hand-opened instance exits with status 0.
+    /// Registering the agent from a hand-opened instance makes launchd start a
+    /// second instance at once (RunAtLoad), so two menu bar icons appear. Rule for
+    /// a starting instance that finds another one running: the launchd instance
+    /// wins (it is the one launchd restarts after a crash); a hand-opened instance
+    /// exits with status 0.
     public enum DuplicateAction: Equatable { case none, exitSelf, terminateOther }
     public static func duplicateAction(otherRunning: Bool, selfIsLaunchd: Bool) -> DuplicateAction {
         guard otherRunning else { return .none }
         return selfIsLaunchd ? .terminateOther : .exitSelf
     }
 
-    public static func contents() -> String {
+    /// Where the agent plist lives for a given home directory.
+    public static func path(home: String) -> String {
+        home + "/Library/LaunchAgents/" + fileName
+    }
+
+    /// The plist text for an executable at `program` (absolute path). RunAtLoad
+    /// starts it at login; KeepAlive SuccessfulExit false relaunches after a
+    /// crash or kill while a clean Quit (exit 0) stays quit.
+    public static func contents(program: String) -> String {
         """
         <?xml version="1.0" encoding="UTF-8"?>
         <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
         <plist version="1.0"><dict>
           <key>Label</key><string>\(label)</string>
-          <key>BundleProgram</key><string>\(bundleProgram)</string>
+          <key>Program</key><string>\(xmlEscape(program))</string>
           <key>RunAtLoad</key><true/>
           <key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>
           <key>ProcessType</key><string>Interactive</string>
-          <key>EnvironmentVariables</key><dict><key>HCA_LAUNCHD_AGENT</key><string>1</string></dict>
+          <key>EnvironmentVariables</key><dict><key>\(launchdMarker)</key><string>1</string></dict>
         </dict></plist>
 
         """
+    }
+
+    static func xmlEscape(_ s: String) -> String {
+        s.replacingOccurrences(of: "&", with: "&amp;")
+         .replacingOccurrences(of: "<", with: "&lt;")
+         .replacingOccurrences(of: ">", with: "&gt;")
+    }
+
+    /// Interpret `launchctl print gui/<uid>/<label>` output: nil when the job is
+    /// not loaded (launchctl exits non-zero), else the pid when running.
+    public static func runningPid(launchctlPrint output: String?) -> Int? {
+        guard let output = output else { return nil }
+        for line in output.split(separator: "\n") {
+            let t = line.trimmingCharacters(in: .whitespaces)
+            if t.hasPrefix("pid = ") { return Int(t.dropFirst(6)) }
+        }
+        return nil
     }
 }
