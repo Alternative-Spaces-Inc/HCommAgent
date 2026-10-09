@@ -64,10 +64,13 @@ specific agent SDK in the core, naming any company's internal systems.
    gets its own hardening PR (exact command approvals with nonces,
    allowlists, scoped token, audit log). Declined: harden in place
    behind CODEOWNERS and an import gate, and deferring to the end.
-4. Apple Developer Program (99 USD per year, owner spend) for Developer
-   ID, hardened runtime and notarization in P24. Without it P24 ships
-   the hardening and documents the release path as blocked on the
-   membership, never as production ready.
+4. Apple Developer Program. Taken 2026-10-09 15:5x PT: the owner
+   enrols when P24 starts, not before. P24 then delivers Developer ID
+   signing, hardened runtime, notarization and a verification record.
+   Declined: enrol now, and never enrol (which would leave the release
+   path documented as blocked and not production ready).
+
+All four decisions are taken; P19 may start.
 
 ## 3. Phases
 
