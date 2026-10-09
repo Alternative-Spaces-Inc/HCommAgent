@@ -5,9 +5,10 @@ summary: Verified gap inventory against main fca6eb01 and a phased program (P19 
 
 # HCA production hardening program, plan v1 (2026-10-09)
 
-Source: an owner-supplied hardening brief received 2026-10-09 14:5x PT.
-Every claim in the brief was checked against main fca6eb01 before it
-entered this plan; the table below says which held. Positioning target:
+Source: an owner-supplied hardening brief received 2026-10-09 14:5x PT
+(the brief itself is not in the repo). Every claim in the brief was
+checked against main fca6eb01 before it entered this plan; the table
+below says which held. Positioning target:
 a secure human control plane for agentic retail, marketing, merchandising
 and creative operations workflows. Compatibility signals for a retailer's
 stack (Box, Figma, Google Workspace, content and campaign systems, webhook
@@ -45,8 +46,8 @@ specific agent SDK in the core, naming any company's internal systems.
    owner_scope on every record and every query, or full multi-tenant.
    Suggested: single owner per deployment, owner_scope enforced
    everywhere so a second tenant is a data change, not a rewrite.
-2. Public framing: generic "agentic retail operations" in the repo, the
-   named employer only in the application note. Suggested: generic.
+2. Public framing: generic "agentic retail operations" wording in the
+   repo, no company named anywhere. Suggested: generic.
 3. Bootstrap tooling: move bootstrap/, agents/ and platform/ to a
    separate operations repo (owner creates it) or harden in place.
    Suggested: separate repo; this repo keeps a README pointer.
