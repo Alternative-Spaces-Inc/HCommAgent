@@ -56,9 +56,14 @@ specific agent SDK in the core, naming any company's internal systems.
    orders are tenant scoped from the first migration.
 2. Public framing. Taken 2026-10-09: generic "agentic retail
    operations" wording, no company named anywhere in the repo.
-3. Bootstrap tooling: move bootstrap/, agents/ and platform/ to a
-   separate operations repo (owner creates it) or harden in place.
-   Suggested: separate repo; this repo keeps a README pointer.
+3. Bootstrap tooling. Taken 2026-10-09 15:2x PT: separate private
+   operations repo (hca-seat-ops, owner creates it). bootstrap/, agents/
+   and platform/ move there with history by PR; the seat boot command
+   and the manifest gate point at the new repo; this repo keeps a one
+   paragraph README pointer and no privileged tooling. The ops repo
+   gets its own hardening PR (exact command approvals with nonces,
+   allowlists, scoped token, audit log). Declined: harden in place
+   behind CODEOWNERS and an import gate, and deferring to the end.
 4. Apple Developer Program (99 USD per year, owner spend) for Developer
    ID, hardened runtime and notarization in P24. Without it P24 ships
    the hardening and documents the release path as blocked on the
