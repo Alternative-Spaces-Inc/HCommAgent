@@ -142,3 +142,20 @@ Secure Enclave, a Dock or window UI.
 4. The menu shows the last inbox read age and flags staleness within
    180 s of the last successful read; recovery needs no relaunch.
 5. Nothing registers on a Mac where the owner never ticked the row.
+
+## Status 2026-10-09 12:4x PT
+
+Merged to main dd9bf029 (PR 67), Cloud Build 8579464c SUCCESS, revision
+hca-api-service-00047-z2d at 100 percent. Design changed on Day 2 to Path B
+(user LaunchAgent via launchctl) after the bundled SMAppService agent failed
+to spawn without a Team ID; see
+[the Day 2 record](../deploys/2026-10-09_p18_day2_path_b_proofs.md).
+
+| Acceptance | State | Evidence |
+| --- | --- | --- |
+| 1 forced kill | proven | kill -9 71942 at 10:26:19, pid 72014 by 10:26:27 |
+| 2 login start | deferred by owner 2026-10-09 12:4x PT | taken at the next natural logout or restart; agent reads launchctl and the log |
+| 3 clean Quit | proven | exit 0, job state exited, no relaunch |
+| 4 staleness 180 s | pending owner step | needs a network cut (Ethernet unplugged and Wi-Fi off) for more than 180 s |
+| 5 nothing registers unticked | by construction | no plist is written until the row is ticked; Day 1 bundled registration removed |
+
