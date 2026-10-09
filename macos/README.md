@@ -54,9 +54,16 @@ made launchd start a second one, two icons). The plist sets
 HCA_LAUNCHD_AGENT=1 for the launchd instance; on start, a launchd instance
 terminates any hand-opened one and a hand-opened instance exits when another
 is running. After a successful registration the hand-opened instance hands
-over to launchd within 2 s. Restart the launchd instance after a rebuild:
+over to launchd within 2 s.
 
-    launchctl kickstart -k gui/$(id -u)/com.alternativespaces.hca.notifier
+After a rebuild the registration is stale: launchd pinned the agent to the
+bundle version and code requirement it saw at registration (`launchctl
+print gui/$(id -u)/com.alternativespaces.hca.notifier` shows "parent bundle
+version" and "has LWCR"), and `launchctl kickstart -k` then fails with
+`last exit code = 78: EX_CONFIG`, job state "spawn failed". Fix: open the
+rebuilt bundle by hand once (`open ~/hca-notifier/HCA\ Notifier.app`); a
+hand-opened instance that finds the agent enabled re-registers it from the
+new bundle and hands over to launchd within 2 s.
 
 Path B (only if macOS refuses the bundled agent because the bundle lives
 outside /Applications): copy the same plist to

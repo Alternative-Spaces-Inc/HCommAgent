@@ -122,6 +122,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startNetwork()
         startStalenessWatch()
         installSignalTrigger()
+        healLoginItemAfterRebuild()
+    }
+
+    /// A hand-opened instance that finds the agent enabled means launchd did not
+    /// start (or keep) its instance; after a rebuild that is the EX_CONFIG spawn
+    /// failure. Refresh the registration from this bundle and hand over.
+    private func healLoginItemAfterRebuild() {
+        guard !isLaunchdInstance, LoginItem.state == .on else { return }
+        livenessLog.info("login item enabled but this instance is hand-opened; re-registering from this bundle")
+        let (after, err) = LoginItem.reregister()
+        if let err = err {
+            livenessLog.error("re-register failed: \(err, privacy: .public)")
+            lastActionItem.title = "Last action: launch at login re-register failed (\(err))"
+            return
+        }
+        refreshLoginItemRow()
+        lastActionItem.title = "Last action: launch at login refreshed after rebuild"
+        if after == .on {
+            livenessLog.info("re-registered; handing over to launchd in 2 s")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { exit(0) }
+        }
     }
 
     // MARK: HCA-P18 liveness and login item

@@ -33,6 +33,20 @@ enum LoginItem {
         }
     }
 
+    /// Re-register after a rebuild. launchd pins the agent to the bundle version
+    /// and code requirement it saw at registration (launchctl print: "parent
+    /// bundle version", "has LWCR"); after bundle.sh replaces the app the spawn
+    /// fails with EX_CONFIG until the registration is refreshed (Day 2 finding).
+    static func reregister() -> (State, String?) {
+        do {
+            if state == .on { try service.unregister() }
+            try service.register()
+            return (state, nil)
+        } catch {
+            return (state, error.localizedDescription)
+        }
+    }
+
     /// Flip the registration. Returns the state after the call and the error text if any.
     static func toggle() -> (State, String?) {
         do {
