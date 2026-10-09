@@ -33,7 +33,22 @@ from .db import get_db
 router = APIRouter(prefix="/v1/tenants", tags=["tenants"])
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
-EMAIL = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def email_is_well_formed(value: str) -> bool:
+    """Linear time shape check (no regular expression over user input, which
+    CodeQL flagged as polynomial on this file): exactly one @, a non empty
+    local part, a domain with a dot that is not at either edge, no
+    whitespace, at most 320 characters. Ownership of the address is proven
+    by Google at link time, not here."""
+    if not value or len(value) > 320 or any(c.isspace() for c in value):
+        return False
+    local, sep, domain = value.partition("@")
+    if not sep or not local or "@" in domain:
+        return False
+    if "." not in domain or domain.startswith(".") or domain.endswith("."):
+        return False
+    return True
 
 
 class TenantCreate(BaseModel):
@@ -121,7 +136,7 @@ def disable_tenant(tenant_id: str, db: Session = Depends(get_db), _admin=Depends
 def add_owner(tenant_id: str, body: OwnerAdd, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
     t = _get(db, tenant_id)
     email = body.email.strip().lower()
-    if not EMAIL.match(email):
+    if not email_is_well_formed(email):
         raise HTTPException(status_code=422, detail="email is not well formed")
     live = db.execute(select(models.TenantOwner).where(
         models.TenantOwner.tenant_id == t.id, models.TenantOwner.email == email, models.TenantOwner.removed_at.is_(None))).scalar_one_or_none()
