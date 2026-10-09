@@ -9,7 +9,7 @@ from sqlalchemy.exc import IntegrityError
 
 from . import models
 from .db import get_db
-from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, Option, CancelRequestBody
+from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, CancelRequestBody
 from .events import publish
 from .webhooks import deliver_outcome
 from .auth import require_agent_key, require_linked_device, google_link_required
@@ -176,7 +176,7 @@ def answer_request(request_id: str, body: AnswerSubmission, background: Backgrou
         # audit_rows.ask_id keeps one decision per ask; the loser gets the
         # same 409 a late second answer gets, not a 500.
         db.rollback()
-        raise HTTPException(status_code=409, detail="request already answered")
+        raise HTTPException(status_code=409, detail="request already answered") from None
 
     record = _audit_to_answer_record(row)
     publish("request.answered", record)

@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Any, List, Optional, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 Surface = Literal["browser_overlay", "browser_notification", "macos_notification", "macos_app", "web"]
 RequestState = Literal["queued", "shown", "answered", "expired", "withdrawn", "cancelled"]

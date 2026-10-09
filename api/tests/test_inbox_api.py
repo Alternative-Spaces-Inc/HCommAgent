@@ -11,7 +11,7 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import Base, engine
-from authhelper import agent_auth, ADMIN_AUTH
+from authhelper import agent_auth
 from deviceauth import human_get, human_post
 
 Base.metadata.drop_all(bind=engine)
@@ -41,16 +41,16 @@ def test_inbox_lists_only_pending_sorted_by_deadline_and_impact():
     now = datetime.now(timezone.utc)
 
     resp = client.post("/v1/requests", json=_request("no deadline"), headers=agent_auth("test-agent"))
-    no_deadline_id = resp.json()["request_id"]
+    assert resp.status_code == 201
 
     resp = client.post("/v1/requests", json=_request("far deadline", deadline_at=now + timedelta(hours=5)), headers=agent_auth("test-agent"))
-    far_id = resp.json()["request_id"]
+    assert resp.status_code == 201
 
     resp = client.post("/v1/requests", json=_request("near deadline red gate", deadline_at=now + timedelta(hours=1), red_gate=True), headers=agent_auth("test-agent"))
-    near_red_gate_id = resp.json()["request_id"]
+    assert resp.status_code == 201
 
     resp = client.post("/v1/requests", json=_request("near deadline plain", deadline_at=now + timedelta(hours=1)), headers=agent_auth("test-agent"))
-    near_plain_id = resp.json()["request_id"]
+    assert resp.status_code == 201
 
     # answer one so it drops out of the pending inbox
     resp = client.post("/v1/requests", json=_request("already answered"), headers=agent_auth("test-agent"))
@@ -78,14 +78,15 @@ def test_inbox_stream_route_is_registered_as_sse():
     # open the connection for this endpoint), so the route contract is
     # checked without invoking the live generator over HTTP: the route
     # exists at the right path/method and declares text/event-stream.
-    matches = [r for r in app.routes if getattr(r, "path", None) == "/v1/inbox/stream"]
-    assert matches, "GET /v1/inbox/stream is not registered"
-    route = matches[0]
-    assert "GET" in route.methods
+    # Read the schema rather than app.routes: FastAPI 0.143 wraps included
+    # routers in a container object whose route list is not flat.
+    paths = app.openapi()["paths"]
+    assert "/v1/inbox/stream" in paths, "GET /v1/inbox/stream is not registered"
+    assert "get" in paths["/v1/inbox/stream"]
 
     import inspect
     from app import inbox_api
-    sig = inspect.signature(inbox_api.stream_inbox)
+    assert "device" in inspect.signature(inbox_api.stream_inbox).parameters
     src = inspect.getsource(inbox_api.stream_inbox)
     assert "text/event-stream" in src
 

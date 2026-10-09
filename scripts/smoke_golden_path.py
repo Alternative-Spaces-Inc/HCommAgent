@@ -180,7 +180,8 @@ def main():
     code, body = http("POST", f"{base}/v1/devices", {"label": "smoke device", "public_key_pem": pem}, {"Authorization": f"Bearer {admin}"})
     check("POST /v1/devices", code == 201 and body.get("device_id", "").startswith("dev_"), f"{code}")
     device_id = body["device_id"]
-    human = lambda m, p, b=b"": {"X-HCA-Device": device_id, **sign(m, p, b)}
+    def human(m, p, b=b""):
+        return {"X-HCA-Device": device_id, **sign(m, p, b)}
 
     hook_url = start_hook()
     code, body = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "webhook", "url": hook_url}), agent)

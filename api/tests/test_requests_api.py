@@ -9,8 +9,8 @@ from fastapi.testclient import TestClient
 
 from app.main import app
 from app.db import Base, engine
-from authhelper import agent_auth, ADMIN_AUTH
-from deviceauth import human_get, human_post
+from authhelper import agent_auth
+from deviceauth import human_post
 
 Base.metadata.drop_all(bind=engine)
 Base.metadata.create_all(bind=engine)

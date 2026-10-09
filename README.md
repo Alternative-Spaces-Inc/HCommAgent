@@ -6,4 +6,5 @@ Collects what a human must decide or supply, front and center over any UI, with 
 
 - Agents boot from this repo: run `bootstrap/sandbox-bootstrap.sh`, then read [agents/hca/HCA_BOOTSTRAP.md](agents/hca/HCA_BOOTSTRAP.md).
 - Every file, one line each: [docs/INDEX.md](docs/INDEX.md).
+- Gates and how to fix them: [CONTRIBUTING.md](CONTRIBUTING.md).
 - Decisions of record: [docs/decisions/DECISIONS_20260929.md](docs/decisions/DECISIONS_20260929.md).

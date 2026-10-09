@@ -103,7 +103,7 @@ def test_list_and_revoke_by_prefix_are_admin_only_and_idempotent():
     second = client.post(f"/v1/api-keys/{prefix}/revoke", headers=ADMIN_AUTH)
     assert second.status_code == 200 and second.json()["revoked_at"] == first.json()["revoked_at"]
 
-    assert client.post(f"/v1/api-keys/nosuchprefix/revoke", headers=ADMIN_AUTH).status_code == 404
+    assert client.post("/v1/api-keys/nosuchprefix/revoke", headers=ADMIN_AUTH).status_code == 404
 
     db = SessionLocal()
     try:

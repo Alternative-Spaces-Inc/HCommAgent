@@ -6,8 +6,10 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [.github/gates/check_manifest.py](../.github/gates/check_manifest.py): Gate script run by the CI workflow
 - [.github/gates/check_no_dashes.py](../.github/gates/check_no_dashes.py): Gate script run by the CI workflow
 - [.github/gates/client_data_denylist.txt](../.github/gates/client_data_denylist.txt): Client-data denylist, owner maintained
-- [.github/workflows/gates.yml](../.github/workflows/gates.yml): CI: dash, client-data, manifest and OpenAPI gates
+- [.github/workflows/gates.yml](../.github/workflows/gates.yml): CI: dash, client-data, manifest, OpenAPI, pytest, extension, ruff and pip-audit gates
+- [CONTRIBUTING.md](../CONTRIBUTING.md): Gates, how to fix each, local development commands
 - [README.md](../README.md): Repo front page and pointers
+- [ruff.toml](../ruff.toml): Lint profile for the Python parts (errors and bug-prone patterns only)
 - [agents/hca/CURRENT.md](../agents/hca/CURRENT.md): Current state of the seat and repo
 - [agents/hca/HCA_BOOTSTRAP.md](../agents/hca/HCA_BOOTSTRAP.md): Seat boot contract, long form, boot sequence
 - [agents/hca/IDENTITY.md](../agents/hca/IDENTITY.md): Seat identity: name, values, hard constraints

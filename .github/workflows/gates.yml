@@ -70,7 +70,10 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        # Docker Hub official image via the AWS ECR Public mirror: the
+        # unauthenticated Docker Hub pull limit failed this job twice on
+        # 2026-10-09 before any test ran.
+        image: public.ecr.aws/docker/library/postgres:16
         env:
           POSTGRES_USER: hca
           POSTGRES_PASSWORD: hca
@@ -114,3 +117,34 @@ jobs:
       - name: Run the extension unit tests
         working-directory: extension
         run: npm test
+
+  ruff:
+    name: Python Lint (ruff)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install ruff
+        run: pip install ruff==0.17.0
+      - name: Lint api, gate scripts and scripts (profile in ruff.toml)
+        run: ruff check api .github/gates scripts
+
+  pip-audit:
+    name: Python Dependency Audit (pip-audit)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install pip-audit
+        run: pip install pip-audit
+      - name: Audit the pinned API requirements
+        working-directory: api
+        run: pip-audit -r requirements.txt --progress-spinner off
