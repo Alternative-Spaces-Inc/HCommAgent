@@ -13,18 +13,24 @@ Nine pull requests merged to main between 17:37Z and 18:29Z, closing seven of th
 | 78 | The review itself, under docs/reviews | c73429b5 | 18:20 | record |
 | 86 | Dependabot: uvicorn 0.54.0, sqlalchemy 2.1.4, alembic 1.20.0, pydantic 2.13.5, httpx 0.28.1, psycopg2-binary 2.9.13, pytest-timeout 2.4.0 | ae3f18f2 | 18:27 | hygiene |
 | 83 | Dependabot: actions/setup-node 4 to 7 | a6c56c83 | 18:29 | hygiene |
-| 84 | Dependabot: actions/setup-python 5 to 7 | see note | | hygiene |
-| 85 | Dependabot: actions/checkout 4 to 7 | see note | | hygiene |
-
-Note: 84 and 85 were approved by the owner in the same selection as 83 and 86; their merge shas are recorded in the follow-up section when the owner's clicks land.
+| 84 | Dependabot: actions/setup-python 5 to 7 | bff50c9c | 18:44 | hygiene |
+| 85 | Dependabot: actions/checkout 4 to 7 | b5c07a0d | 18:5x | hygiene |
+| 89 | Hotfix: bounded database connection pool (3 plus 3 per process, 10 s timeout, 300 s recycle, HCA_DB_* overrides) | 07cda84c | 19:08 | incident below |
 
 ## Builds on main
 
 | Build | main | Outcome | Live revision |
 | --- | --- | --- | --- |
 | 3ae39c11 | c73429b5 (PR 78) | SUCCESS | hca-api-service-00061 |
-| 92d896c9 | ae3f18f2 (PR 86, seven package bumps) | recorded in the follow-up section | |
-| f0679f3e | a6c56c83 (PR 83) | recorded in the follow-up section | |
+| 92d896c9 | ae3f18f2 (PR 86, seven package bumps) | FAILURE at smoke-live: GET after cancel 500 | 00061 deployed before the smoke step |
+| f0679f3e | a6c56c83 (PR 83) | FAILURE at migrate | none |
+| 2a52c57a | bff50c9c (PR 84) | SUCCESS, smoke-live PASS | 00062 |
+| 50a4650c | b5c07a0d (PR 85) | SUCCESS, smoke-live PASS | 00063 |
+| c02bb4ae | 07cda84c (PR 89) | SUCCESS, smoke-live PASS including GET after cancel 200 | 00064 |
+
+## Incident: connection slots exhausted
+
+The service log for revision 00061 shows psycopg2 OperationalError: connection to the Cloud SQL socket failed, FATAL remaining connection slots are reserved for roles with privileges of the pg_use_reserved_connections role. The instance is the smallest shared-core tier with 25 slots. SQLAlchemy defaults (5 pooled plus 10 overflow per process, no recycle) across the draining revision, the new revision, the migrate job and the smoke test exceeded them during the burst of five deploys in one hour; the next two builds on the same packages passed, so the bumps themselves were not the cause. Two fixes, both landed: PR 89 bounds the pool (3 plus 3, 10 s timeout, 300 s recycle, tunable by HCA_DB_POOL_SIZE, HCA_DB_MAX_OVERFLOW, HCA_DB_POOL_TIMEOUT, HCA_DB_POOL_RECYCLE), and the owner raised the database flag max_connections to 50 from the Mac Terminal (gcloud sql instances patch, instance restart, verified RUNNABLE with the flag at 19:0x). Lesson: read the smoke-live lines and the service log, not the deploy step; a deploy step SUCCESS left a 500-answering revision live for the twenty minutes until the next build.
 
 Earlier builds of the block (PR 80, 81, 82, 87): all SUCCESS, revisions 00057 through 00060, smoke-live PASS on each. Docs-only merges still run the full pipeline because the trigger is on main, so each produced a revision with identical code.
 
