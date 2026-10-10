@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("WEBHOOK_RETRY_DELAYS", "0,0")
 os.environ.setdefault("HCA_ADMIN_TOKEN", "test-admin-token")
+os.environ.setdefault("HCA_API_KEY_PEPPER", "test-pepper-0123456789abcdef")
 
 import httpx
 import pytest

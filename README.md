@@ -55,7 +55,7 @@ Without `DATABASE_URL` the service uses a local SQLite file; CI and production r
 
 ## Security model
 
-- **Agents** authenticate with an API key (`Authorization: Bearer hca_live_...`), one live key per caller, stored as a SHA-256 hash of a 192-bit random secret, scoped to a tenant (`api/app/apikeys.py`, `api/app/auth.py`).
+- **Agents** authenticate with an API key (`Authorization: Bearer hca_live_...`), one live key per caller, stored as an HMAC-SHA256 hash of a 192-bit random secret under a Secret Manager pepper, scoped to a tenant (`api/app/apikeys.py`, `api/app/auth.py`).
 - **Humans** authenticate as devices: a P-256 key generated on the device, registered once by an administrator, then every call to a human route carries `X-HCA-Device`, `X-HCA-Timestamp`, `X-HCA-Nonce` and `X-HCA-Signature` over method, path, body hash and timestamp; the server checks freshness and signature (`api/app/devicesig.py`, `api/app/auth.py`). Shared test vectors keep the Swift and JavaScript signers in step with the Python verifier.
 - **Owner gate**: a device must link a Google account that is on the tenant's owner allowlist before it can read or answer asks (`api/app/googleauth.py`, `api/app/tenancy.py`).
 - **Tenancy**: every ask, device, key, audit row, webhook attempt and event carries a `tenant_id`; reads, streams and writes are filtered on it from authenticated server state, never from the client.

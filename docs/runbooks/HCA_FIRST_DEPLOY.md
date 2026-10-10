@@ -10,7 +10,7 @@ What this runbook stands up, matching `docs/plans/HCA_CLOUD_RUN_PLAN_v1.md` sect
 | Runtime service account | `sa-hca-api` | identity of the service and the migrate job |
 | Cloud SQL instance | `hca-pg` (Postgres 16, Enterprise edition, `db-f1-micro`) | the database; resize later, the tier is not a code fact |
 | Database and user | `hca` / `hca` | the app's schema |
-| Secrets | `hca-database-url`, `hca-sweep-trigger-token`, `hca-admin-token` | mounted as env vars, never in code |
+| Secrets | `hca-database-url`, `hca-sweep-trigger-token`, `hca-admin-token`, `hca-api-key-pepper` | mounted as env vars, never in code |
 | Cloud Run job | `hca-migrate` | `alembic upgrade head` before each deploy |
 | Cloud Run service | `hca-api-service` | the API, min 1 instance, max 1 (see note) |
 | Cloud Scheduler job | `hca-expiry-sweep` | hits the bearer-guarded sweep every 5 minutes |
@@ -73,7 +73,13 @@ Generated inside the block, never printed.
 P=<PROJECT_ID> && openssl rand -hex 32 | tr -d '\n' | gcloud secrets create hca-sweep-trigger-token --project="$P" --replication-policy=automatic --data-file=- && openssl rand -hex 32 | tr -d '\n' | gcloud secrets create hca-admin-token --project="$P" --replication-policy=automatic --data-file=- && gcloud secrets list --project="$P" --filter="name~hca-" --format="value(name)"
 ```
 
-Expected: three names, `hca-admin-token`, `hca-database-url`, `hca-sweep-trigger-token`.
+Expected: three names, `hca-admin-token`, `hca-database-url`, `hca-sweep-trigger-token`. Then the api key pepper (added 2026-10-10, decision 5), one block, Terminal:
+
+```bash
+P=<PROJECT_ID> && openssl rand -hex 32 | tr -d '\n' | gcloud secrets create hca-api-key-pepper --project="$P" --replication-policy=automatic --data-file=- && gcloud secrets versions list hca-api-key-pepper --project="$P" --format="value(name,state)"
+```
+
+Expected: one line, `1 ENABLED`. The runtime service account already holds secretAccessor project wide.
 
 ## Step 6: let Cloud Build deploy
 
