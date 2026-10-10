@@ -96,3 +96,32 @@ def test_api_key_issue_fails_closed_when_admin_token_unset(monkeypatch):
     resp = client.post("/v1/api-keys", json={"caller": "x"}, headers=ADMIN_AUTH)
     assert resp.status_code == 403
     assert "not configured" in resp.json()["detail"]
+
+
+def test_device_dependency_leaves_no_open_transaction():
+    """HCA-P19 hotfix: after require_device commits last_seen_at, reading the
+    device's attributes (require_linked_device, the SSE stream) must not
+    re-select the row and open a transaction the stream then holds for
+    hours (it blocked the P19 Day 1 ALTER TABLE on 2026-10-10)."""
+    import asyncio
+    from app.db import SessionLocal
+    from app.auth import require_device
+    from app import models
+    from deviceauth import ensure_registered, human_headers
+    from starlette.requests import Request
+    ensure_registered()
+    headers = human_headers("GET", "/v1/inbox", b"")
+    scope = {"type": "http", "method": "GET", "path": "/v1/inbox", "query_string": b"", "headers": [(k.lower().encode(), v.encode()) for k, v in headers.items()]}
+
+    async def receive():
+        return {"type": "http.request", "body": b"", "more_body": False}
+
+    db = SessionLocal()
+    try:
+        device = asyncio.run(require_device(Request(scope, receive), db, None))
+        assert not db.in_transaction()
+        _ = (device.google_sub, device.tenant_id, device.id)
+        assert not db.in_transaction(), "attribute reads after commit must not start a transaction"
+        assert isinstance(device, models.Device)
+    finally:
+        db.close()
