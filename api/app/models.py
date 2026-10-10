@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Integer, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, JSON, Integer, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -145,6 +145,24 @@ class AuditRow(Base):
     passthrough = Column(JSON, nullable=True)
 
     ask = relationship("Ask", back_populates="answer")
+
+
+class IdempotencyKey(Base):
+    """HCA-P19 Day 2 (app/idempotency.py): one stored response per
+    (tenant, scope, route, key) so a retried POST replays instead of
+    repeating its effect."""
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (UniqueConstraint("tenant_id", "scope", "route", "key", name="uq_idempotency_scope_key"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    scope = Column(String, nullable=False)
+    route = Column(String, nullable=False)
+    key = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=False)
+    response = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
 
 
 class WebhookAttempt(Base):

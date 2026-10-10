@@ -55,7 +55,13 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
 
     results: List[dict] = []
 
-    for ask in overdue:
+    for candidate in overdue:
+        # HCA-P19 Day 2: re-read under a row lock so an answer or cancel
+        # that landed since the list was built wins and the sweep skips.
+        ask = db.execute(select(models.Ask).where(models.Ask.id == candidate.id).with_for_update()).scalar_one_or_none()
+        if ask is None or ask.state in TERMINAL_STATES:
+            db.rollback()
+            continue
         if ask.expiry_policy == "hold":
             results.append({"request_id": ask.id, "expiry_policy": "hold", "action": "held"})
             continue
