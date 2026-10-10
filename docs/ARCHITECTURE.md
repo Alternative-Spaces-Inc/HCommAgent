@@ -111,7 +111,7 @@ From `routing.py`: devices eligible for an ask are the tenant's non-revoked, Goo
 
 - **Pipeline** (`cloudbuild.yaml`): guard, pytest, smoke-local, pack-extension, build, push, migrate, deploy, smoke-live. The migrate step runs `alembic upgrade head` as a Cloud Run job and then `scripts/check_migrated.py`, which fails the build unless the database reports the expected head and every model table exists. A green step status is never read as proof; the job's own log and the live revision are.
 - **Smoke-live** (`scripts/`): mints a key, posts an ask, answers it with a test device, reads audit and webhook, revokes the key.
-- **Configuration**: all by environment variables and Secret Manager (database URL, admin bearer, sweep bearer, Google client ids, owner allowlist fallback, webhook retry settings, idempotency TTL). No project id or hostname is committed.
+- **Configuration**: all by environment variables and Secret Manager (database URL, admin bearer, sweep bearer, Google client ids, owner allowlist fallback, webhook retry settings, idempotency TTL, connection pool bounds HCA_DB_POOL_SIZE 3, HCA_DB_MAX_OVERFLOW 3, HCA_DB_POOL_TIMEOUT 10, HCA_DB_POOL_RECYCLE 300, sized for a 25 slot database). No project id or hostname is committed.
 - **Records**: every deploy and every proof has a dated file under `docs/deploys/`; every design decision and the alternatives declined under `docs/decisions/`.
 
 ## Roadmap
