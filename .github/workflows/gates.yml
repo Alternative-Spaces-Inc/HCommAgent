@@ -100,6 +100,9 @@ jobs:
       - name: Run migrations
         working-directory: api
         run: alembic upgrade head
+      - name: Check the database is at head (catches a rolled back upgrade)
+        working-directory: api
+        run: python3 scripts/check_migrated.py
       - name: Run pytest
         working-directory: api
         run: pytest -v

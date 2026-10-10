@@ -79,11 +79,18 @@ def run_migrations_online():
     connectable = engine_from_config(config.get_section(config.config_ini_section), prefix="sqlalchemy.", poolclass=pool.NullPool)
     with connectable.connect() as connection:
         if _is_postgres(connection):
+            # One committed transaction for the setup. The SET must sit inside
+            # it: executed on its own it autobegins a transaction (SQLAlchemy
+            # 2.0) that Alembic then joins instead of opening its own, and the
+            # whole upgrade is rolled back when the connection closes while
+            # the log still reads "Running upgrade" (build 2eb3986f,
+            # 2026-10-10: migrate step green, tenants table absent, revision
+            # 00051 failed to start). SET without LOCAL is session scoped and
+            # survives the commit, so lock_timeout still applies to the DDL.
             with connection.begin():
                 _terminate_idle_in_transaction(connection)
-            # Fail fast with a readable blocker list instead of hanging until
-            # the Cloud Run job timeout.
-            connection.execute(text(f"SET lock_timeout = '{LOCK_TIMEOUT}'"))
+                connection.execute(text(f"SET lock_timeout = '{LOCK_TIMEOUT}'"))
+            assert not connection.in_transaction(), "migration setup left a transaction open"
         context.configure(connection=connection, target_metadata=target_metadata)
         try:
             with context.begin_transaction():
