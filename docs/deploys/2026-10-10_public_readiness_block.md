@@ -2,7 +2,7 @@
 
 ## Result
 
-Nine pull requests merged to main between 17:37Z and 18:29Z, closing eight of the ten gaps of the public-readiness review (docs/reviews/2026-10-10_public_readiness_review.md). Every merge went through the full CI gate set; every build on main succeeded or is recorded below with its outcome.
+Nine pull requests merged to main between 17:37Z and 18:29Z, closing nine of the ten gaps of the public-readiness review (docs/reviews/2026-10-10_public_readiness_review.md). Every merge went through the full CI gate set; every build on main succeeded or is recorded below with its outcome.
 
 | PR | Content | main | Merged (UTC) | Review gaps closed |
 | --- | --- | --- | --- | --- |
@@ -16,6 +16,7 @@ Nine pull requests merged to main between 17:37Z and 18:29Z, closing eight of th
 | 84 | Dependabot: actions/setup-python 5 to 7 | bff50c9c | 18:44 | hygiene |
 | 85 | Dependabot: actions/checkout 4 to 7 | b5c07a0d | 18:5x | hygiene |
 | 89 | Hotfix: bounded database connection pool (3 plus 3 per process, 10 s timeout, 300 s recycle, HCA_DB_* overrides) | 07cda84c | 19:08 | incident below |
+| 90 | Security: api key hashes HMAC-SHA256 under the Secret Manager pepper hca-api-key-pepper (HCA_API_KEY_PEPPER), legacy rows re-hashed on first verify; decision 5 | 520f6713 | 19:37 | gap 7 closed by construction plus dismissal |
 
 ## Builds on main
 
@@ -27,6 +28,7 @@ Nine pull requests merged to main between 17:37Z and 18:29Z, closing eight of th
 | 2a52c57a | bff50c9c (PR 84) | SUCCESS, smoke-live PASS | 00062 |
 | 50a4650c | b5c07a0d (PR 85) | SUCCESS, smoke-live PASS | 00063 |
 | c02bb4ae | 07cda84c (PR 89) | SUCCESS, smoke-live PASS including GET after cancel 200 | 00064 |
+| 8a411435 | 520f6713 (PR 90) | SUCCESS, smoke-live PASS, HCA_API_KEY_PEPPER mounted on the service (1 env entry) | 00065 |
 
 ## Incident: connection slots exhausted
 
@@ -44,7 +46,7 @@ Earlier builds of the block (PR 80, 81, 82, 87): all SUCCESS, revisions 00057 th
 
 ## Branch protection on main (gap 1, closed 19:1x)
 
-Applied through the GitHub API on the owner's selection and read back: pull request required before merge (0 approvals, the owner merges his own PRs), nine required status checks (API Tests (Postgres), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), Validate OpenAPI Specification, Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity) with the branch required up to date with main before merge, the four CodeQL analyses advisory so Dependabot branches are not blocked, conversation resolution required, force pushes and deletions refused, enforced for administrators. Eight of the ten review gaps are now closed; the two below remain.
+Applied through the GitHub API on the owner's selection and read back: pull request required before merge (0 approvals, the owner merges his own PRs), nine required status checks (API Tests (Postgres), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), Validate OpenAPI Specification, Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity) with the branch required up to date with main before merge, the four CodeQL analyses advisory so Dependabot branches are not blocked, conversation resolution required, force pushes and deletions refused, enforced for administrators. Nine of the ten review gaps are now closed (gap 7, CodeQL alert 11: owner chose the peppered HMAC over dismissal, PR 90; CodeQL re-raised the identifier heuristic as alerts 11 to 14 on the HMAC, legacy and test lines, dismissed as false positive with the reasoning in each comment; repo wide open alerts 0). The one below remains.
 
 ## Still open from the review
 
