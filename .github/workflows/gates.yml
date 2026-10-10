@@ -106,6 +106,8 @@ jobs:
       - name: Run pytest
         working-directory: api
         run: pytest -v
+      - name: Check OpenAPI parity (yaml versus generated schema)
+        run: pip install pyyaml && python3 .github/gates/check_openapi_parity.py
 
   extension:
     name: Extension Tests (Node 20)
