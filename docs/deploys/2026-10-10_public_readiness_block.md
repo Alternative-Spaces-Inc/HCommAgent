@@ -2,7 +2,7 @@
 
 ## Result
 
-Nine pull requests merged to main between 17:37Z and 18:29Z, closing seven of the ten gaps of the public-readiness review (docs/reviews/2026-10-10_public_readiness_review.md). Every merge went through the full CI gate set; every build on main succeeded or is recorded below with its outcome.
+Nine pull requests merged to main between 17:37Z and 18:29Z, closing eight of the ten gaps of the public-readiness review (docs/reviews/2026-10-10_public_readiness_review.md). Every merge went through the full CI gate set; every build on main succeeded or is recorded below with its outcome.
 
 | PR | Content | main | Merged (UTC) | Review gaps closed |
 | --- | --- | --- | --- | --- |
@@ -42,11 +42,14 @@ Earlier builds of the block (PR 80, 81, 82, 87): all SUCCESS, revisions 00057 th
 - README and architecture statements were each checked against the module they cite before PR 87 opened; the dash gate and link-target check passed.
 - Dependabot PRs 83 to 86: all ten CI jobs success on each head (CodeQL neutral: it does not run on Dependabot branches).
 
+## Branch protection on main (gap 1, closed 19:1x)
+
+Applied through the GitHub API on the owner's selection and read back: pull request required before merge (0 approvals, the owner merges his own PRs), nine required status checks (API Tests (Postgres), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), Validate OpenAPI Specification, Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity) with the branch required up to date with main before merge, the four CodeQL analyses advisory so Dependabot branches are not blocked, conversation resolution required, force pushes and deletions refused, enforced for administrators. Eight of the ten review gaps are now closed; the two below remain.
+
 ## Still open from the review
 
 | Gap | State | Next action |
 | --- | --- | --- |
-| 1 branch protection on main | GET branches/main/protection still 404 at 18:3x | Owner selection: required status checks (the nine gate jobs), pull request before merge, no force push, no deletion; applied by the owner in Settings or by the agent through the API on approval |
 | 5 CodeQL alert 11, py/weak-sensitive-data-hashing, api/app/apikeys.py line 39 | open, high | The hashed value is a 192-bit random secret, so a key derivation function adds no security over SHA-256 (preimage resistance is the only property needed). Owner selection pending: dismiss as false positive with that justification (as alert 7 was), or switch to HMAC-SHA256 with a server-side pepper to satisfy the rule |
 | 10 hardening program P20 to P27 | open by design | P20 plan v1 is PR 73 |
 
