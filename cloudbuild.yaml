@@ -141,8 +141,8 @@ steps:
           --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --set-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
           --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest \
-          --command=alembic \
-          --args=upgrade,head \
+          --command=sh \
+          --args=-c,"alembic upgrade head && python3 scripts/check_migrated.py" \
           --max-retries=0 \
           --task-timeout=10m \
           --quiet
