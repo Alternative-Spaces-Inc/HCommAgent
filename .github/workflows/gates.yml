@@ -96,16 +96,16 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         working-directory: api
-        run: pip install -r requirements.txt psycopg2-binary
+        run: pip install -r requirements.txt psycopg2-binary pytest-cov
       - name: Run migrations
         working-directory: api
         run: alembic upgrade head
       - name: Check the database is at head (catches a rolled back upgrade)
         working-directory: api
         run: python3 scripts/check_migrated.py
-      - name: Run pytest
+      - name: Run pytest with coverage (fails under 85 percent of app/)
         working-directory: api
-        run: pytest -v
+        run: pytest -v --cov=app --cov-report=term-missing --cov-fail-under=85
       - name: Check OpenAPI parity (yaml versus generated schema)
         run: pip install pyyaml && python3 .github/gates/check_openapi_parity.py
 
@@ -122,6 +122,16 @@ jobs:
       - name: Run the extension unit tests
         working-directory: extension
         run: npm test
+
+  swift-tests:
+    name: Swift Tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+      - name: Run the HCACore and HCANotifier XCTests
+        working-directory: macos
+        run: swift test 2>&1 | tail -40
 
   ruff:
     name: Python Lint (ruff)

@@ -2,3 +2,4 @@ api/.venv/
 api/__pycache__/
 api/**/__pycache__/
 api/*.db
+.coverage
