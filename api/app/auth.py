@@ -124,6 +124,16 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
         raise _device_401("device signature replayed")
 
     device.last_seen_at = datetime.now(timezone.utc)
+    # HCA-P19 hotfix: keep the loaded device readable after this commit. With
+    # the default expire-on-commit, the next attribute read (google_sub in
+    # require_linked_device, id and tenant_id in the SSE stream) re-selected
+    # the row and opened a transaction the stream then held for its whole
+    # life: one "idle in transaction" backend per connected device, each with
+    # an ACCESS SHARE lock on devices, behind which the P19 Day 1 ALTER TABLE
+    # waited until the Cloud Run job timeout killed it (build 736bf82f,
+    # execution hca-migrate-mmnrp, 2026-10-10). Session scoped, so response
+    # datetimes elsewhere keep their database shape.
+    db.expire_on_commit = False
     db.commit()
     return device
 
