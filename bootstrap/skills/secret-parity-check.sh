@@ -54,7 +54,7 @@ sm_id_for() {
     BASE44_WORKSPACE_PAT)      echo "base44-workspace-pat" ;;
     GITHUB_READONLY_TOKEN)     echo "github-readonly-token" ;;   # fine-grained factory-seats-readonly, stored 2026-09-22
     # MARKER_GITHUB_TOKENS_20260915. Two GitHub tokens issued by the owner on 2026-09-15, both for
-    # login alfarmer, both expiring 2026-12-14. GITHUB_ACCESS_TOKEN (also held as GITHUB_TOKEN on the
+    # login: the owner account, both expiring 2026-12-14. GITHUB_ACCESS_TOKEN (also held as GITHUB_TOKEN on the
     # Andy seat) is FINE-GRAINED: contents, pull requests, actions, metadata; it cannot read check
     # runs, code-scanning alerts or Actions administration, so it has no vault copy and is the
     # everyday branch-and-PR token. GITHUB_CLASSIC_TOKEN is CLASSIC, scopes repo and workflow, and

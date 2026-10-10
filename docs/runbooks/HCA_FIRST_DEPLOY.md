@@ -123,7 +123,7 @@ Expected: the final status line `STATUS: SUCCESS`. Any `FAILURE` stops here; pas
 P=<PROJECT_ID> && R=<REGION> && URL="$(gcloud run services describe hca-api-service --project="$P" --region="$R" --format='value(status.url)')" && echo "SERVICE_URL=$URL" && curl -sS -w '\nHTTP %{http_code}\n' "$URL/health"
 ```
 
-Expected: `SERVICE_URL=https://...run.app`, then `{"status":"ok","db":"ok"}` and `HTTP 200`. Paste the SERVICE_URL line; I take the verification from there (/health, an unauthenticated 401 on POST /v1/requests, the SSE stream opening). Use /health, not /healthz, from outside: Cloud Run's Google frontend answers exactly /healthz with its own HTML 404 and never forwards it; the in-container probe still uses /healthz.
+Expected: `SERVICE_URL=https://<the Cloud Run service hostname>`, then `{"status":"ok","db":"ok"}` and `HTTP 200`. Paste the SERVICE_URL line; I take the verification from there (/health, an unauthenticated 401 on POST /v1/requests, the SSE stream opening). Use /health, not /healthz, from outside: Cloud Run's Google frontend answers exactly /healthz with its own HTML 404 and never forwards it; the in-container probe still uses /healthz.
 
 ## Step 10: the expiry sweep on a schedule
 
