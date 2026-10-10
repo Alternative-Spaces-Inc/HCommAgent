@@ -32,11 +32,16 @@ def _hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def issue_api_key(db: Session, caller: str) -> dict:
-    """Mints a new key for caller, replacing any existing one (the
-    api_keys.caller column is unique: one live key per caller, matching a
-    single-integration-per-caller model). Returns the plaintext key once;
-    only its hash is persisted."""
+def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENANT_ID) -> dict:
+    """Mints a new key for caller inside tenant_id, replacing any existing one
+    (the api_keys.caller column is unique: one live key per caller, matching
+    a single-integration-per-caller model; the caller name is global, the
+    key's tenant is not, so re-issuing an existing caller under another
+    tenant is refused). Returns the plaintext key once; only its hash is
+    persisted. The tenant must exist and not be disabled."""
+    tenant = db.get(models.Tenant, tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise ValueError("unknown or disabled tenant")
     prefix = secrets.token_hex(PREFIX_BYTES)
     secret = secrets.token_urlsafe(SECRET_BYTES)
     plaintext = f"{KEY_SCHEME}_{prefix}_{secret}"
@@ -44,17 +49,19 @@ def issue_api_key(db: Session, caller: str) -> dict:
     existing = db.execute(select(models.ApiKey).where(models.ApiKey.caller == caller)).scalar_one_or_none()
     now = datetime.now(timezone.utc)
     if existing:
+        if existing.tenant_id != tenant_id:
+            raise ValueError("caller already belongs to another tenant")
         existing.key_prefix = prefix
         existing.key_hash = _hash_secret(secret)
         existing.created_at = now
         existing.revoked_at = None
         row = existing
     else:
-        row = models.ApiKey(caller=caller, key_prefix=prefix, key_hash=_hash_secret(secret), created_at=now)
+        row = models.ApiKey(tenant_id=tenant_id, caller=caller, key_prefix=prefix, key_hash=_hash_secret(secret), created_at=now)
         db.add(row)
     db.commit()
 
-    return {"api_key": plaintext, "prefix": prefix, "caller": caller, "created_at": row.created_at}
+    return {"api_key": plaintext, "prefix": prefix, "caller": caller, "tenant_id": row.tenant_id, "created_at": row.created_at}
 
 
 def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:

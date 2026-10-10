@@ -7,6 +7,7 @@ from .apikeys_api import router as apikeys_router
 from .sweep_api import router as sweep_router
 from .devices_api import router as devices_router
 from .privacy import router as privacy_router
+from .tenancy import router as tenants_router
 
 app = FastAPI(title="Human Collections Agent (HCA) API")
 app.include_router(requests_router)
@@ -15,7 +16,16 @@ app.include_router(inbox_router)
 app.include_router(apikeys_router)
 app.include_router(sweep_router)
 app.include_router(devices_router)
+app.include_router(tenants_router)
 app.include_router(privacy_router)
+
+
+@app.on_event("startup")
+async def _ensure_default_tenant():
+    from .db import SessionLocal
+    from . import models
+    with SessionLocal() as db:
+        models.ensure_default_tenant(db)
 
 
 @app.on_event("startup")

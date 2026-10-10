@@ -164,17 +164,17 @@ def test_created_event_names_rank0_and_fire_escalation_names_later_rank(monkeypa
     _second_get("/v1/inbox")
     from app import requests_api
     seen = []
-    monkeypatch.setattr(requests_api, "publish", lambda e, d: seen.append((e, d)) or {"event": e, "data": d})
+    monkeypatch.setattr(requests_api, "publish", lambda e, d, **kw: seen.append((e, d)) or {"event": e, "data": d})
     rid = _post_ask("event ask")
     created = [d for e, d in seen if e == "request.created" and d["request_id"] == rid][0]
     assert created["visible_to"] == [DEVICE_ID]
     # before the window: nothing to escalate to
-    assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d: (e, d)) is None
+    assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d, **kw: (e, d)) is None
     with SessionLocal() as db:
         ask = db.get(models.Ask, rid)
         ask.created_at = datetime.now(timezone.utc) - timedelta(seconds=91)
         db.commit()
-    e, d = routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d: (e, d))
+    e, d = routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d, **kw: (e, d))
     assert e == "request.escalated"
     assert d["visible_to"] == [DEVICE_ID, SECOND_ID]
     assert d["request_id"] == rid and d["title"] == "event ask"
@@ -183,7 +183,7 @@ def test_created_event_names_rank0_and_fire_escalation_names_later_rank(monkeypa
         ask = db.get(models.Ask, rid)
         ask.state = "answered"
         db.commit()
-    assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d: (e, d)) is None
+    assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d, **kw: (e, d)) is None
 
 
 def test_default_priorities_keep_pre_p14_behaviour():

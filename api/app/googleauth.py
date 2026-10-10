@@ -86,7 +86,10 @@ def owner_emails() -> set[str]:
     return {e.strip().lower() for e in raw.split(",") if e.strip()}
 
 
-def verify_access_token(access_token: str) -> GoogleIdentity:
+def verify_access_token(access_token: str, allowed_emails: Optional[set] = None) -> GoogleIdentity:
+    """allowed_emails is the tenant's owner list (HCA-P19, tenant_owners
+    table). None means: fall back to the deployment wide HCA_OWNER_EMAILS,
+    which only the default tenant may do; an empty set refuses everyone."""
     expected = client_ids()
     if not expected:
         raise GoogleAuthError(503, "google client id is not configured")
@@ -118,7 +121,9 @@ def verify_access_token(access_token: str) -> GoogleIdentity:
     if not sub or not email:
         raise GoogleAuthError(401, "google token carries no account")
 
-    allowed = owner_emails()
+    allowed = owner_emails() if allowed_emails is None else {e.lower() for e in allowed_emails}
+    if allowed_emails is not None and email not in allowed:
+        raise GoogleAuthError(403, "google account is not an owner of this tenant")
     if allowed and email not in allowed:
         raise GoogleAuthError(403, "google account is not an owner of this deployment")
 

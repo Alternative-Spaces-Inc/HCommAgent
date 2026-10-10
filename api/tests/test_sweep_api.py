@@ -8,6 +8,8 @@ os.environ["SWEEP_TRIGGER_TOKEN"] = "test-sweep-token"
 
 from datetime import datetime, timedelta, timezone
 
+from overdue import backdate
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -21,7 +23,7 @@ client = TestClient(app)
 
 
 def _overdue_request():
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
+    soon = datetime.now(timezone.utc) + timedelta(hours=1)
     resp = client.post("/v1/requests", json={
         "caller": "agent-sweep-trigger",
         "audience": "owner",
@@ -30,9 +32,12 @@ def _overdue_request():
         "options_or_fields": [{"id": "a", "label": "A"}],
         "suggested": {"option_id": "a", "why": "only option"},
         "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
-        "deadline_at": past.isoformat(),
+        "deadline_at": soon.isoformat(),
     }, headers=agent_auth("agent-sweep-trigger"))
-    return resp.json()["request_id"]
+    assert resp.status_code == 201, resp.text
+    request_id = resp.json()["request_id"]
+    backdate(request_id)
+    return request_id
 
 
 def test_missing_bearer_is_401():

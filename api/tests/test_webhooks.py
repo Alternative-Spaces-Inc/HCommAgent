@@ -3,6 +3,8 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
+from overdue import backdate
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_test_webhooks.db")
@@ -82,8 +84,9 @@ def test_cancel_posts_request_cancelled(webhook_recorder):
 
 
 def test_auto_deny_expiry_posts_request_expired_with_deny_answer(webhook_recorder):
-    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    request_id = client.post("/v1/requests", json=_sample(deadline_at=past), headers=agent_auth("loop-agent")).json()["request_id"]
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    request_id = client.post("/v1/requests", json=_sample(deadline_at=soon), headers=agent_auth("loop-agent")).json()["request_id"]
+    backdate(request_id)
 
     with SessionLocal() as db:
         results = run_expiry_sweep(db)
@@ -98,8 +101,9 @@ def test_auto_deny_expiry_posts_request_expired_with_deny_answer(webhook_recorde
 
 
 def test_plain_expire_posts_request_expired_with_null_answer(webhook_recorder):
-    past = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()
-    request_id = client.post("/v1/requests", json=_sample(deadline_at=past, expiry_policy="expire"), headers=agent_auth("loop-agent")).json()["request_id"]
+    soon = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+    request_id = client.post("/v1/requests", json=_sample(deadline_at=soon, expiry_policy="expire"), headers=agent_auth("loop-agent")).json()["request_id"]
+    backdate(request_id)
 
     with SessionLocal() as db:
         run_expiry_sweep(db)

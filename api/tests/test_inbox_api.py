@@ -10,7 +10,9 @@ from datetime import datetime, timedelta, timezone
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine
+from app.models import DEFAULT_TENANT_ID
+from app.db import Base, engine, SessionLocal
+from app import models
 from authhelper import agent_auth
 from deviceauth import human_get, human_post
 
@@ -91,12 +93,22 @@ def test_inbox_stream_route_is_registered_as_sse():
     assert "text/event-stream" in src
 
 
+def _stream_device():
+    """HCA-P19: the stream generator is bound to an authenticated device."""
+    from deviceauth import ensure_registered, DEVICE_ID
+    ensure_registered()
+    with SessionLocal() as db:
+        d = db.get(models.Device, DEVICE_ID)
+        db.expunge(d)
+        return d
+
+
 def test_inbox_event_source_first_chunk_is_a_connected_comment():
     import asyncio
     from app.inbox_api import inbox_event_source
 
     async def run():
-        gen = inbox_event_source(keepalive_seconds=5)
+        gen = inbox_event_source(_stream_device(), keepalive_seconds=5)
         first = await asyncio.wait_for(gen.__anext__(), timeout=1)
         assert first == ": connected\n\n"
         await gen.aclose()
@@ -110,9 +122,9 @@ def test_inbox_event_source_delivers_a_published_event():
     from app.events import publish
 
     async def run():
-        gen = inbox_event_source(keepalive_seconds=5)
+        gen = inbox_event_source(_stream_device(), keepalive_seconds=5)
         await gen.__anext__()  # the ": connected" comment
-        publish("request.cancelled", {"request_id": "xyz"})
+        publish("request.cancelled", {"request_id": "xyz"}, tenant_id=DEFAULT_TENANT_ID)
         chunk = await asyncio.wait_for(gen.__anext__(), timeout=1)
         assert chunk.startswith("event: request.cancelled\n")
         assert "xyz" in chunk

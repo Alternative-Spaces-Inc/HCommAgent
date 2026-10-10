@@ -7,6 +7,8 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_test_expiry.db")
 
 from datetime import datetime, timedelta, timezone
 
+from overdue import backdate
+
 from fastapi.testclient import TestClient
 
 from app.main import app
@@ -30,13 +32,19 @@ def _create(caller, deadline_at, expiry_policy=None):
         "options_or_fields": [{"id": "a", "label": "A"}],
         "suggested": {"option_id": "a", "why": "only option"},
         "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
-        "deadline_at": deadline_at.isoformat(),
     }
+    overdue = deadline_at < datetime.now(timezone.utc)
+    # The API refuses past deadlines since HCA-P19: create such an ask with
+    # a deadline an hour out, then age it in place.
+    body["deadline_at"] = (deadline_at + timedelta(hours=2) if overdue else deadline_at).isoformat()
     if expiry_policy:
         body["expiry_policy"] = expiry_policy
     resp = client.post("/v1/requests", json=body, headers=agent_auth(caller))
-    assert resp.status_code == 201
-    return resp.json()["request_id"]
+    assert resp.status_code == 201, resp.text
+    request_id = resp.json()["request_id"]
+    if overdue:
+        backdate(request_id)
+    return request_id
 
 
 def test_default_auto_deny_writes_a_deny_answer_record_and_expires():

@@ -186,6 +186,107 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ControlSpec' }
+  /v1/tenants:
+    post:
+      summary: Create a tenant (HCA-P19)
+      security:
+        - AdminToken: []
+      description: >
+        Platform admin only. Every ask, device, api key and audit row belongs
+        to exactly one tenant; a key acts for its tenant and a device answers
+        for its tenant, taken from server state, never from the request.
+        The default tenant exists from the P19 migration.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TenantCreate' }
+      responses:
+        '201':
+          description: The tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantView' }
+        '401': { description: Missing bearer }
+        '403': { description: Wrong admin token }
+        '409': { description: Slug already exists }
+        '422': { description: Slug or name malformed }
+    get:
+      summary: List tenants (HCA-P19)
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: All tenants, disabled included
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/TenantView' }
+  /v1/tenants/{tenant_id}:
+    get:
+      summary: One tenant with its owner allowlist (HCA-P19)
+      security:
+        - AdminToken: []
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The tenant
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantView' }
+        '404': { description: Unknown tenant }
+  /v1/tenants/{tenant_id}/disable:
+    post:
+      summary: Disable a tenant, revoking every key and device of it (HCA-P19)
+      security:
+        - AdminToken: []
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The tenant, disabled_at set
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantView' }
+        '404': { description: Unknown tenant }
+        '409': { description: The default tenant cannot be disabled }
+  /v1/tenants/{tenant_id}/owners:
+    post:
+      summary: Allow a Google account to link devices of this tenant (HCA-P19)
+      security:
+        - AdminToken: []
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OwnerAdd' }
+      responses:
+        '201':
+          description: The tenant with the updated allowlist
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantView' }
+        '404': { description: Unknown tenant }
+        '422': { description: Email malformed }
+  /v1/tenants/{tenant_id}/owners/{email}:
+    delete:
+      summary: Remove a Google account from the tenant allowlist (HCA-P19)
+      security:
+        - AdminToken: []
+      parameters:
+        - { name: tenant_id, in: path, required: true, schema: { type: string } }
+        - { name: email, in: path, required: true, schema: { type: string } }
+      responses:
+        '200':
+          description: The tenant with the updated allowlist
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/TenantView' }
+        '404': { description: Unknown tenant or email not on the list }
   /v1/devices:
     post:
       summary: Register a human surface device by its ECDSA P-256 public key (HCA-P6)
@@ -457,11 +558,13 @@ components:
         label: { type: string, description: Human name for the device, recorded as answered_by when the answer body gives none }
         public_key_pem: { type: string, description: ECDSA P-256 public key, SubjectPublicKeyInfo PEM }
         surface: { type: string, default: browser_overlay }
+        tenant_id: { type: string, default: default, description: The tenant the device answers for (HCA-P19); the default tenant when omitted }
     DeviceView:
       type: object
-      required: [device_id, label, surface, created_at]
+      required: [device_id, tenant_id, label, surface, created_at]
       properties:
         device_id: { type: string }
+        tenant_id: { type: string }
         label: { type: string }
         surface: { type: string }
         priority: { type: integer, default: 100, description: Surface ladder position, lower is earlier (HCA-P14) }
@@ -472,15 +575,16 @@ components:
         google_linked_at: { type: string, format: date-time, nullable: true }
     ApiKeyView:
       type: object
-      required: [prefix, caller, created_at]
+      required: [prefix, caller, tenant_id, created_at]
       properties:
         prefix: { type: string }
         caller: { type: string }
+        tenant_id: { type: string }
         created_at: { type: string, format: date-time }
         revoked_at: { type: string, format: date-time, nullable: true }
     ApiKeyIssueResponse:
       type: object
-      required: [api_key, prefix, caller, created_at]
+      required: [api_key, prefix, caller, tenant_id, created_at]
       properties:
         api_key:
           type: string
@@ -490,9 +594,33 @@ components:
           description: The non-secret lookup prefix, stored in the clear
         caller:
           type: string
+        tenant_id:
+          type: string
+          description: The tenant the key acts for (HCA-P19)
         created_at:
           type: string
           format: date-time
+    TenantCreate:
+      type: object
+      required: [slug, name]
+      properties:
+        slug: { type: string, pattern: '^[a-z0-9][a-z0-9-]{1,62}$' }
+        name: { type: string, maxLength: 200 }
+    OwnerAdd:
+      type: object
+      required: [email]
+      properties:
+        email: { type: string, format: email, description: Google account allowed to link a device of this tenant }
+    TenantView:
+      type: object
+      required: [tenant_id, slug, name, created_at, owner_emails]
+      properties:
+        tenant_id: { type: string }
+        slug: { type: string }
+        name: { type: string }
+        created_at: { type: string, format: date-time }
+        disabled_at: { type: string, format: date-time, nullable: true, description: 'Set by POST /v1/tenants/{tenant_id}/disable; every key and device of the tenant is revoked at the same instant' }
+        owner_emails: { type: array, items: { type: string } }
 
     Surface:
       type: string

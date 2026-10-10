@@ -36,6 +36,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .auth import require_admin_bearer, require_device, require_linked_device
 from . import googleauth
+from . import tenancy
 from .db import get_db
 from .devicesig import device_id_for_public_key_pem
 
@@ -46,6 +47,9 @@ class DeviceRegistration(BaseModel):
     label: str
     public_key_pem: str
     surface: str = "browser_overlay"
+    # HCA-P19: the tenant the device answers for; omitted means the default
+    # tenant so pre-P19 registrations keep working.
+    tenant_id: str = models.DEFAULT_TENANT_ID
 
 
 class GoogleLink(BaseModel):
@@ -58,6 +62,7 @@ class DevicePatch(BaseModel):
 
 class DeviceView(BaseModel):
     device_id: str
+    tenant_id: str
     label: str
     surface: str
     priority: int = 100
@@ -69,7 +74,7 @@ class DeviceView(BaseModel):
 
 
 def _view(d: models.Device) -> DeviceView:
-    return DeviceView(device_id=d.id, label=d.label, surface=d.surface, priority=d.priority if d.priority is not None else 100, created_at=d.created_at,
+    return DeviceView(device_id=d.id, tenant_id=d.tenant_id, label=d.label, surface=d.surface, priority=d.priority if d.priority is not None else 100, created_at=d.created_at,
                       revoked_at=d.revoked_at, last_seen_at=d.last_seen_at,
                       google_email=d.google_email, google_linked_at=d.google_linked_at)
 
@@ -80,14 +85,21 @@ def register_device(body: DeviceRegistration, db: Session = Depends(get_db), _ad
         device_id = device_id_for_public_key_pem(body.public_key_pem)
     except Exception as e:
         raise HTTPException(status_code=422, detail="public_key_pem must be an ECDSA P-256 public key in SPKI PEM form") from e
+    tenant = db.get(models.Tenant, body.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise HTTPException(status_code=422, detail="unknown or disabled tenant")
     existing = db.get(models.Device, device_id)
     if existing is not None:
         if existing.revoked_at is not None:
             raise HTTPException(status_code=409, detail="device key was revoked; generate a new key")
+        if existing.tenant_id != body.tenant_id:
+            # A key is one device in one tenant; moving it would carry its
+            # audit history across the boundary.
+            raise HTTPException(status_code=409, detail="device key is registered under another tenant")
         existing.label = body.label
         db.commit()
         return _view(existing)
-    device = models.Device(id=device_id, label=body.label, surface=body.surface,
+    device = models.Device(id=device_id, tenant_id=body.tenant_id, label=body.label, surface=body.surface,
                            public_key_pem=body.public_key_pem.strip() + "\n",
                            created_at=datetime.now(timezone.utc))
     db.add(device)
@@ -150,7 +162,7 @@ def self_view(device: models.Device = Depends(require_device)):
 @router.post("/self/google-link", response_model=DeviceView)
 def google_link(body: GoogleLink, db: Session = Depends(get_db), device: models.Device = Depends(require_device)):
     try:
-        identity = googleauth.verify_access_token(body.access_token)
+        identity = googleauth.verify_access_token(body.access_token, tenancy.owner_emails_for(db, device.tenant_id))
     except googleauth.GoogleAuthError as e:
         raise HTTPException(status_code=e.status_code, detail=e.detail) from e
     row = db.get(models.Device, device.id)
