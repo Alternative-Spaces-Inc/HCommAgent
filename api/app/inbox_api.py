@@ -1,13 +1,15 @@
 import asyncio
 
-from fastapi import APIRouter, Depends
+from typing import Optional
+
+from fastapi import APIRouter, Depends, Header, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from . import models
 from .db import get_db, SessionLocal
-from .events import subscribe, unsubscribe, format_sse
+from .events import subscribe, unsubscribe, format_sse, replay, parse_last_event_id
 from .requests_api import _ask_to_collection_request
 from .auth import require_linked_device, google_link_required
 from . import routing
@@ -53,19 +55,38 @@ def _device_still_authorized(device_id: str) -> bool:
         return d is not None and d.revoked_at is None
 
 
+def _replay_for(device: models.Device, after_id: int):
+    with SessionLocal() as db:
+        return replay(db, tenant_id=device.tenant_id, device_id=device.id, after_id=after_id)
+
+
 async def inbox_event_source(device: models.Device, keepalive_seconds: float = STREAM_KEEPALIVE_SECONDS,
-                             authorized_fn=_device_still_authorized):
+                             authorized_fn=_device_still_authorized, last_event_id: Optional[int] = None):
     """The SSE body generator for GET /v1/inbox/stream, factored out so tests
     can drive it directly with asyncio.wait_for instead of going through an
     HTTP client's streaming transport (TestClient does not stream an
     open-ended body incrementally; see tests/test_inbox_api.py for the note
-    on why the HTTP layer is not exercised end-to-end for this route)."""
+    on why the HTTP layer is not exercised end-to-end for this route).
+
+    HCA-P20 Day 1: with last_event_id (the SSE Last-Event-ID a reconnecting
+    client sends back) the rows the device missed are replayed first, in id
+    order, each with its id line. The live queue is subscribed before the
+    replay query runs so nothing published in between is lost; an envelope
+    that arrives both ways is sent once (its id is not above the replay high
+    water mark)."""
     q = subscribe(device.id, device.tenant_id)
     try:
         yield ": connected\n\n"
+        high_water = -1
+        if last_event_id is not None:
+            for envelope in await asyncio.to_thread(_replay_for, device, last_event_id):
+                high_water = max(high_water, envelope["id"])
+                yield format_sse(envelope)
         while True:
             try:
                 envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
+                if envelope.get("id") is not None and envelope["id"] <= high_water:
+                    continue
                 yield format_sse(envelope)
             except asyncio.TimeoutError:
                 if not await asyncio.to_thread(authorized_fn, device.id):
@@ -77,5 +98,11 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
 
 
 @router.get("/stream")
-async def stream_inbox(device: models.Device = Depends(require_linked_device)):
-    return StreamingResponse(inbox_event_source(device), media_type="text/event-stream")
+async def stream_inbox(device: models.Device = Depends(require_linked_device),
+                       last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
+                       since: Optional[str] = Query(default=None, description="Last event id seen, for clients that cannot set the Last-Event-ID header")):
+    # The browser EventSource API sets Last-Event-ID itself on reconnect; a
+    # client that reconnects by hand (the Mac app's URLSession) may pass the
+    # same value as ?since=. The header wins when both are present.
+    last_event_id = parse_last_event_id(last_event_id_header if last_event_id_header is not None else since)
+    return StreamingResponse(inbox_event_source(device, last_event_id=last_event_id), media_type="text/event-stream")

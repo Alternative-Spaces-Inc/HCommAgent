@@ -121,3 +121,13 @@ Verified against repo files on branch origin/p19/day1-tenancy (head 37c0282):
 - ReplayGuard nonces persist across process restarts in the `nonces` table.
 - Escalation and expiry execute reliably via leased database jobs without duplicate processing.
 - `_MAX_INSTANCES` updated to `"3"` in `cloudbuild.yaml`.
+
+## 9 Status
+
+| Day | State | Evidence |
+| --- | --- | --- |
+| Day 1 | built, PR open | Branch p20/day1-events: migration d4e5f6a7b8c9 (events table, index tenant_id plus id), publish() writes the row before any queue and the envelope carries the row id as the SSE id line, replay() returns the rows a device missed (same tenant and routing set rule as live delivery, 24 h or 1,000 rows, env HCA_EVENT_REPLAY_WINDOW_SECONDS and HCA_EVENT_REPLAY_MAX_EVENTS), GET /v1/inbox/stream reads Last-Event-ID (header) or ?since= and replays before going live with no duplicate at the seam. Stream payloads are JSON-encoded once (ISO 8601 datetimes, matching the HTTP responses; before P20 the stream wrote str(datetime)). Proofs: tests/test_events.py (row written, monotonic ids, replay order, device and tenant filter, window and cap, header parsing), tests/test_inbox_api.py (reconnect replays missed events then live, no replay without the header, route parameters in the schema); 119 passed locally, alembic upgrade and downgrade on SQLite, check_migrated.py OK with 11 tables, openapi parity OK. Day 1 contributes nothing to fan-out yet: the queue set is still per instance (Day 2). |
+| Day 2 | pending | LISTEN/NOTIFY plus 2 s poll (selection 1), nonces table |
+| Day 3 | pending | leased jobs for escalation and expiry |
+| Day 4 | pending | two process test, metrics, _MAX_INSTANCES 3 (selection 3) |
+| Day 5 | pending | deploy, restart proof, record |

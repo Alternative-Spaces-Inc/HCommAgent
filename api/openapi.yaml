@@ -141,6 +141,25 @@ paths:
         data.visible_to, the device ids the event applies to at that moment; a
         surface ignores envelopes that do not name its device. Envelopes without
         visible_to (older servers) are treated as visible.
+        Since HCA-P20 every envelope carries an SSE id line (the events row id,
+        monotonic per deployment). A reconnecting client sends the last id it saw
+        as Last-Event-ID (the browser EventSource API does this itself) or as
+        ?since= and receives the envelopes it missed, oldest first, within the
+        replay window (24 hours or 1,000 events per tenant), before live events
+        resume. Replay applies the same server side device authorization as live
+        delivery. A client away longer than the window gets a shorter replay and
+        should re-read GET /v1/inbox, which every client does on connect anyway.
+      parameters:
+        - in: header
+          name: Last-Event-ID
+          required: false
+          schema: { type: string }
+          description: Id of the last envelope received; non-numeric values are ignored.
+        - in: query
+          name: since
+          required: false
+          schema: { type: string }
+          description: Same as Last-Event-ID for clients that cannot set the header; the header wins when both are present.
       responses:
         '200':
           description: SSE event stream
@@ -780,8 +799,11 @@ components:
         passthrough: { type: object }
     InboxStreamEvent:
       type: object
-      required: [event, data, timestamp]
+      required: [id, event, data, timestamp]
       properties:
+        id:
+          type: integer
+          description: Events row id (HCA-P20); also sent as the SSE id line, so Last-Event-ID replay can resume from it.
         event:
           type: string
           enum: [request.created, request.escalated, request.answered, request.cancelled, request.expired]
