@@ -29,6 +29,20 @@ async def _ensure_default_tenant():
 
 
 @app.on_event("startup")
+async def _start_event_listener():
+    # HCA-P20 Day 2: on Postgres, LISTEN for rows other instances publish;
+    # on SQLite this is a no-op and the 2 s poll plus in-process wake deliver.
+    from . import events
+    events.start_listener()
+
+
+@app.on_event("shutdown")
+async def _stop_event_listener():
+    from . import events
+    events.stop_listener()
+
+
+@app.on_event("startup")
 async def _bind_routing_loop():
     # HCA-P14: escalation timers (app/routing.py) run on the server loop.
     import asyncio
@@ -55,4 +69,10 @@ def healthz():
         ok = False
     if not ok:
         return JSONResponse(status_code=503, content={"status": "degraded", "db": "down"})
-    return {"status": "ok", "db": "ok"}
+    # HCA-P20 Day 2: the fan-out listener's state, so a deploy can prove the
+    # instance really is on LISTEN (poll fallback keeps delivery either way).
+    from . import events
+    ls = events.listener_state
+    return {"status": "ok", "db": "ok",
+            "events": {"listener": "connected" if ls["connected"] else ("poll" if not ls["running"] else "reconnecting"),
+                       "notifications": ls["notifications"], "errors": ls["errors"]}}

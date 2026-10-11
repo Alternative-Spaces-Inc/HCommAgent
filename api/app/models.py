@@ -185,6 +185,18 @@ class Event(Base):
     created_at = Column(DateTime, nullable=False, index=True)
 
 
+class Nonce(Base):
+    """HCA-P20 Day 2 (app/nonces.py): one row per (device, nonce) seen inside
+    the signature skew window, so a signed request replayed against another
+    API instance, or after a restart, is refused like one replayed against
+    the same process. Rows older than the window are pruned on the way in."""
+    __tablename__ = "nonces"
+
+    device_id = Column(String, primary_key=True)
+    nonce = Column(String, primary_key=True)
+    seen_at = Column(DateTime, nullable=False, index=True)
+
+
 class WebhookAttempt(Base):
     """One HTTP attempt to deliver an outcome to the caller's deliver_to
     webhook (app/webhooks.py). attempt 0 with ok False records a skip
