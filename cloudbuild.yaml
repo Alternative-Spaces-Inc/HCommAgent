@@ -99,8 +99,21 @@ steps:
         pip install --no-cache-dir -q -r requirements.txt
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
+        echo $$! > /tmp/uvicorn.pid
         for i in $$(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && break; sleep 1; done
         python3 ../scripts/smoke_golden_path.py --base http://127.0.0.1:8080 --human
+        # HCA-P20 Day 5: restart proof. Asks are created while no client
+        # listens, the API is killed and started again in the gap, and the
+        # client's reconnect with the last id it saw replays every one of
+        # them exactly once (scripts/restart_proof.py).
+        cat > /tmp/restart_api.sh <<'EOS'
+        kill $$(cat /tmp/uvicorn.pid); sleep 1
+        nohup uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning >/tmp/uvicorn2.log 2>&1 &
+        echo $$! > /tmp/uvicorn.pid
+        for i in $$(seq 1 30); do curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && exit 0; sleep 1; done
+        exit 1
+        EOS
+        python3 ../scripts/restart_proof.py --base http://127.0.0.1:8080 --gap 1 --gap-cmd "bash /tmp/restart_api.sh"
 
   - id: pack-extension
     name: python:3.12-slim
