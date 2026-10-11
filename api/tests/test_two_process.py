@@ -221,6 +221,16 @@ def test_two_processes_two_subscribers_two_workers(servers):
             return all(db.get(models.Ask, rid).state == "expired" for rid in job_ids)
     assert _wait(all_expired, 20), "workers did not expire every due ask"
 
+    # The ask turns expired in the job's transaction and done_at lands in the
+    # worker's next write, so wait for the rows to settle before judging them
+    # (the first live build of Day 4 read one row in that gap).
+    def all_jobs_done():
+        with SessionLocal() as db:
+            rows = db.execute(select(models.ScheduledJob).where(models.ScheduledJob.ask_id.in_(job_ids),
+                                                                 models.ScheduledJob.kind == "expire")).scalars().all()
+            return len(rows) == N_JOBS and all(j.done_at is not None for j in rows)
+    assert _wait(all_jobs_done, 10), "an expire job did not settle after its ask expired"
+
     with SessionLocal() as db:
         jobs_rows = db.execute(select(models.ScheduledJob).where(models.ScheduledJob.ask_id.in_(job_ids),
                                                                   models.ScheduledJob.kind == "expire")).scalars().all()
