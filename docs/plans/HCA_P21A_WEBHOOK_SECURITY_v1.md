@@ -47,6 +47,6 @@ Verified against main bcb1a18a:
 | --- | --- |
 | Plan v1 | this file |
 | Decision 7 | docs/decisions/DECISIONS_20261011.md |
-| Day 1 | not started |
+| Day 1 | live 2026-10-11 16:2x PT: PR 110 merged main 2a7d7093, Cloud Build 347d1e33 SUCCESS, migrate job hca-migrate-lvfvj asserted head a7b8c9d0e1f2 (15 tables), revision hca-api-service-00076, smoke-live PASS, live GET /v1/webhooks without a key 401 |
 | Day 2 | not started |
 | Day 3 | not started |
