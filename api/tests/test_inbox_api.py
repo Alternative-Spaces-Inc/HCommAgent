@@ -1,3 +1,4 @@
+import pytest
 import os
 import sys
 
@@ -210,3 +211,65 @@ def test_stream_route_reads_last_event_id_header_and_since_query():
     names = {(p["in"], p["name"]) for p in spec.get("parameters", [])}
     assert ("header", "last-event-id") in names or ("header", "Last-Event-ID") in names, names
     assert ("query", "since") in names
+
+
+# HCA-P20 Day 5: a device keeps at most STREAM_MAX_PER_DEVICE open streams on
+# an instance; the oldest is closed with stream.closed reason superseded. Found
+# live: one extension device held 46 streams on one instance (metrics page).
+
+def test_fifth_stream_of_a_device_supersedes_the_oldest(monkeypatch):
+    import asyncio
+    from app import events
+    from app.inbox_api import inbox_event_source
+    from deviceauth import DEVICE_ID
+
+    monkeypatch.setattr(events, "STREAM_MAX_PER_DEVICE", 4)
+    before = events.stream_state["superseded"]
+
+    async def run():
+        gens = []
+        for _ in range(4):
+            g = inbox_event_source(_stream_device(), keepalive_seconds=5)
+            assert await asyncio.wait_for(g.__anext__(), timeout=1) == ": connected\n\n"
+            gens.append(g)
+        assert sum(1 for p in events.stream_positions() if p["device_id"] == DEVICE_ID) == 4
+
+        fifth = inbox_event_source(_stream_device(), keepalive_seconds=5)
+        assert await asyncio.wait_for(fifth.__anext__(), timeout=1) == ": connected\n\n"
+
+        # the oldest stream is told to close and its generator ends
+        closing = await asyncio.wait_for(gens[0].__anext__(), timeout=1)
+        assert "event: stream.closed" in closing and "superseded" in closing
+        with pytest.raises(StopAsyncIteration):
+            await asyncio.wait_for(gens[0].__anext__(), timeout=1)
+
+        # the other four stay open and still receive events
+        events.publish("request.cancelled", {"request_id": "cap-1"}, tenant_id=DEFAULT_TENANT_ID)
+        for g in gens[1:] + [fifth]:
+            chunk = await asyncio.wait_for(g.__anext__(), timeout=1)
+            assert "cap-1" in chunk
+        assert sum(1 for p in events.stream_positions() if p["device_id"] == DEVICE_ID) == 4
+        assert events.stream_state["superseded"] == before + 1
+        for g in gens[1:] + [fifth]:
+            await g.aclose()
+
+    asyncio.run(run())
+
+
+def test_stream_lag_starts_at_the_dispatcher_cursor_not_zero():
+    import asyncio
+    from app import events
+    from app.inbox_api import inbox_event_source
+    from deviceauth import DEVICE_ID
+
+    events.publish("request.cancelled", {"request_id": "lag-0"}, tenant_id=DEFAULT_TENANT_ID)
+    newest = events.max_event_id()
+
+    async def run():
+        g = inbox_event_source(_stream_device(), keepalive_seconds=5)
+        await asyncio.wait_for(g.__anext__(), timeout=1)
+        mine = [p for p in events.stream_positions() if p["device_id"] == DEVICE_ID]
+        assert mine and all(p["last_sent_id"] >= newest for p in mine), mine
+        await g.aclose()
+
+    asyncio.run(run())
