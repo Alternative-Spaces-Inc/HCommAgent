@@ -48,6 +48,12 @@ First pipeline run (Cloud Build 4e3d5175 on main 98f77087, PR 102) FAILED at exa
 
 Second pipeline run (Cloud Build cf3315c5 on main 46339e25, PR 105) FAILED at the first check, `stream connects and delivers a live frame: baseline id None`: the marker ask's frame reached the stream before the posting thread had parsed its 201 and recorded the request id, so the reader compared the frame against an empty marker and dropped it, then waited 20 s for nothing. The fast health wait made this race likely (the API was ready in 2.1 s instead of after a 30 s timeout). Fix: the reader keeps every request.created frame it sees and matches once the marker id is known. Five consecutive local runs with API restarts: 12 of 12 PASS each.
 
+## Deploy (12:1x PT)
+
+- PR 106 merged by the owner, main cdda65de. Cloud Build cba52eac SUCCESS: smoke-local ran the golden path and the restart proof (`{"restart_proof": "PASS", "asks_missed": 3, "checks": 12, "failed": []}`, baseline id 3, uvicorn killed and restarted in the gap), then pack, build, push, migrate (no new revision, head f6a7b8c9d0e1), deploy, smoke-live PASS (`OK agent path`).
+- Revision hca-api-service-00073 serving 100 percent.
+- Live GET /v1/internal/metrics on 00073 (19:22 UTC): events newest_id 12, dispatcher cursor 12, lag 0; streams open 4 from the owner's extension device, all at last_sent_id 12, max_per_device 4, superseded 0; drops 0; replay replays 0, gaps 0, truncated 0; listener connected, errors 0; jobs worker running, due_backlog 0, pending_total 3; db_pool size 2, checked out 1. The 46 stream pile-up seen on 00072 is gone: the cap holds the device at four. The extension's own reconnect guard takes effect when the unpacked load is refreshed from main.
+
 ## Live
 
 A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 (P7), so the live proof is read from the linked clients and the metrics page rather than from a temporary device:
@@ -55,6 +61,19 @@ A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 
 - API restart: the Day 4 rollover to revision 00072 restarted every instance while the owner's Mac Notifier and extension held streams; after the rollover the metrics page showed replay gaps 0, truncated 0 and drops 0, and the listener reconnected (connected true, errors 0). Replays 0 means no client had missed an event across the rollover (newest_id 10 was already delivered before it).
 - Pending owner proof: an ask created while the Mac Notifier is stopped (`launchctl bootout` of the P18 agent, then `launchctl bootstrap`), expected to appear as one banner on restart with replay replays 1, replayed_events 1, gaps 0 on the metrics page. Recorded here when run.
 
+## Live owner proof (12:3x PT, revision 00073)
+
+Run from the owner's Mac by the agent over the bridge: `launchctl bootout` of the P18 login agent (no Notifier process after 3 s), one ask created with a temporary api key while nothing listened (request 2d91eb3a, event id 13, title "P20 restart proof: did this banner appear once?", radio Once / Twice or more / Never), `launchctl bootstrap` 5 s later (Notifier pid 76764 running under launchd), key revoked.
+
+- Metrics 20 s after the restart: the Mac device's stream open at last_sent_id 13, drops 0, gaps 0.
+- The owner answered on the banner: state answered, value `twice`, answered_by "Al MacBook Notifier", surface macos_notification, path [macos_notification, banner, option_1], duration 306 s. Audit row carries the Mac device id.
+- Delivery after a process restart is proven: an ask created while the Notifier was down reached the owner and was answered through HCA itself.
+
+Two findings:
+
+1. The owner saw the banner more than once over the 306 s. The store dedupes the inbox read against the stream (`shown` set), so a startup double post is excluded by code; the P14 repost of a cleared banner every 90 s is the expected cause, but the Notifier writes no log line per post, so this run cannot distinguish the two. Follow-up: a per-post log line (request id, reason: added, repost) in the Notifier.
+2. Metrics replay counters stayed at 0: the Mac app keeps its Last-Event-ID in memory only, so a fresh process reconnects without one and the ask arrived through the startup inbox read, not through SSE replay. The server side replay is proven by the pipeline proof; the Mac client does not yet use it across a restart. Follow-up: persist the last event id (UserDefaults) and send it on the first connect.
+
 ## Status
 
-Day 4 live on revision 00072 with max instances 3. Day 5 proof script, pipeline step and stream cap on this PR; the live owner proof is the last open item of P20.
+Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live, live owner proof done (answered on the banner after a Notifier restart). Two Mac client follow-ups recorded above.
