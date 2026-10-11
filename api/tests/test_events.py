@@ -13,6 +13,19 @@ from app.events import subscribe, unsubscribe, publish, replay, format_sse, pars
 Base.metadata.create_all(bind=engine)
 
 
+def _tenant(tenant_id: str) -> None:
+    """events.tenant_id is a foreign key; Postgres enforces it where SQLite
+    does not, so every made-up tenant these tests publish for gets a row."""
+    with SessionLocal() as db:
+        if db.get(models.Tenant, tenant_id) is None:
+            db.add(models.Tenant(id=tenant_id, slug=tenant_id, name=tenant_id, created_at=datetime.now(timezone.utc)))
+            db.commit()
+
+
+for _t in ("tenant-a", "tenant-b", "tenant-d", "tenant-m", "tenant-r", "tenant-s", "tenant-w"):
+    _tenant(_t)
+
+
 def _clear(tenant_id):
     """The suite shares one SQLite file across runs; start each replay test
     from an empty log for its tenant."""
