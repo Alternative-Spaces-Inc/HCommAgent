@@ -69,7 +69,7 @@ case "$cmd" in
     ;;
   get)
     # HCA-P20 Day 5: read any admin page, e.g. get /v1/internal/metrics
-    admin_call GET "$2"
+    admin_call GET "${1:?store_device: get needs a path, e.g. /v1/internal/metrics}"
     ;;
   list)
     out="$(admin_call GET /v1/devices)"
