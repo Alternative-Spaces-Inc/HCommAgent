@@ -38,8 +38,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var streamTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var streamConnected = false
-    /// HCA-P20: last SSE id seen, handed back as Last-Event-ID on reconnect.
-    private var lastEventId: String?
+    /// HCA-P20: last SSE id seen, handed back as Last-Event-ID on every connect,
+    /// the first one after a relaunch included (persisted in UserDefaults).
+    private let cursor = EventCursor()
+    private var lastEventId: String? { cursor.value }
+    /// HCA-P20 Day 5 follow-up: one line per banner post with its reason, so a
+    /// repeated banner can be told apart (added vs repost) in Console.app.
+    private let postLog = Logger(subsystem: "com.alternativespaces.hca.notifier", category: "posts")
     static let pollInterval: UInt64 = 60
 
     private let isLaunchdInstance = ProcessInfo.processInfo.environment[LaunchAgentPlist.launchdMarker] == "1"
@@ -277,8 +282,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 guard let self = self, let client = self.client else { return }
                 var opened = false
                 do {
-                    try await client.stream(lastEventId: self.lastEventId, onOpen: {
+                    let sinceId = self.lastEventId
+                    try await client.stream(lastEventId: sinceId, onOpen: {
                         opened = true
+                        self.postLog.notice("stream open lastEventId=\(sinceId ?? "none", privacy: .public)")
                         DispatchQueue.main.async {
                             self.streamConnected = true
                             self.liveness.streamConnected = true
@@ -287,7 +294,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                         Task { await self.poll() }   // catch up on anything missed while reconnecting
                     }, onEvent: { env, id in
                         DispatchQueue.main.async {
-                            if let id = id { self.lastEventId = id }
+                            if let id = id { self.cursor.advance(to: id) }
                             self.handle(event: env)
                         }
                     })
@@ -355,13 +362,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             DispatchQueue.main.async {
                 let stillShown = Set(self.store.pending.keys.filter { ids.contains(NotificationShaper.notificationIdentifier(for: $0)) })
                 let due = self.store.repostDue(delivered: stillShown, shownAt: self.shownAt, now: Date(), window: Self.repostWindow)
-                for item in due { self.post(item: item) }
+                for item in due { self.post(item: item, reason: "repost") }
             }
         }
     }
 
     private func apply(_ delta: InboxStore.Delta) {
-        for item in delta.added { post(item: item) }
+        for item in delta.added { post(item: item, reason: "added") }
         if !delta.removed.isEmpty {
             UNUserNotificationCenter.current().removeDeliveredNotifications(
                 withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
@@ -557,7 +564,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         return id
     }
 
-    private func post(item: InboxItem) {
+    private func post(item: InboxItem, reason: String) {
+        postLog.notice("post \(item.request_id, privacy: .public) \(reason, privacy: .public)")
         let summary = item.summary
         let shape = NotificationShaper.shape(for: summary)
         let content = UNMutableNotificationContent()
@@ -607,7 +615,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         let item = InboxItem(request_id: ask.requestId, caller: "test", title: ask.title, control: ask.control,
                              options_or_fields: ask.options.map { InboxItem.Option(id: $0.value, label: $0.label) },
                              suggested: nil)
-        post(item: item)
+        post(item: item, reason: "test")
     }
 
     @objc func sendTestApproveDeny() {
