@@ -50,6 +50,7 @@ def read_stream(base: str, path_and_query: str, headers: dict, want: set, timeou
     """Read SSE frames; return (frames seen for the wanted request ids, highest id seen)."""
     req = urllib.request.Request(base + path_and_query, headers={"Accept": "text/event-stream", **headers})
     seen = []
+    created = []  # marker mode: every request.created frame, matched once the marker id is known
     highest = 0
     deadline = time.monotonic() + timeout
     with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -68,9 +69,15 @@ def read_stream(base: str, path_and_query: str, headers: dict, want: set, timeou
                     rid = (env.get("data") or {}).get("request_id")
                     if cur_id is not None:
                         highest = max(highest, int(cur_id))
-                    if marker is not None and cur_event == "request.created" and rid == marker.get("rid"):
-                        seen.append((int(cur_id) if cur_id is not None else None, rid))
-                        break
+                    if marker is not None and cur_event == "request.created":
+                        # the frame can arrive before the posting thread has parsed its
+                        # 201 and filled marker["rid"]; keep every created frame and match
+                        # once the id is known (first pipeline run lost the frame this way)
+                        created.append((int(cur_id) if cur_id is not None else None, rid))
+                        if marker.get("rid") and marker["rid"] in {r for _, r in created}:
+                            seen.extend(f for f in created if f[1] == marker["rid"])
+                            break
+                        continue
                     if cur_event == "request.created" and rid in want:
                         seen.append((int(cur_id) if cur_id is not None else None, rid))
                         if {r for _, r in seen} == want:
@@ -85,6 +92,8 @@ def read_stream(base: str, path_and_query: str, headers: dict, want: set, timeou
                 cur_event = line[6:].strip()
             elif line.startswith("data:"):
                 cur_data = line[5:].strip()
+    if marker is not None and not seen and marker.get("rid"):
+        seen.extend(f for f in created if f[1] == marker["rid"])
     return seen, highest
 
 

@@ -46,6 +46,8 @@ The smoke-local step of cloudbuild.yaml now runs the proof after the golden path
 
 First pipeline run (Cloud Build 4e3d5175 on main 98f77087, PR 102) FAILED at exactly one of the twelve checks, `gap command (API restart): exit 1`: the gap script waited for /healthz with curl, which the python:3.12-slim step image does not ship, so the wait timed out although the restarted API was up (the replay checks after it all passed). The step's first health wait had the same silent problem and spent its 30 s budget on every build. Fix on the follow-up PR: scripts/wait_healthz.py (urllib) replaces both curl loops, and restart_proof.py prints the gap command's last output lines when it fails.
 
+Second pipeline run (Cloud Build cf3315c5 on main 46339e25, PR 105) FAILED at the first check, `stream connects and delivers a live frame: baseline id None`: the marker ask's frame reached the stream before the posting thread had parsed its 201 and recorded the request id, so the reader compared the frame against an empty marker and dropped it, then waited 20 s for nothing. The fast health wait made this race likely (the API was ready in 2.1 s instead of after a 30 s timeout). Fix: the reader keeps every request.created frame it sees and matches once the marker id is known. Five consecutive local runs with API restarts: 12 of 12 PASS each.
+
 ## Live
 
 A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 (P7), so the live proof is read from the linked clients and the metrics page rather than from a temporary device:
