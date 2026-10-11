@@ -115,12 +115,23 @@ final class APIClient {
             throw ClientError.http(code, String(decoding: body, as: UTF8.self))
         }
         onOpen()
+        // Read raw bytes, not `bytes.lines`: AsyncLineSequence drops empty
+        // lines (probed on macOS 27 on 2026-10-11: "a\n\nb\n" yields a, b), and
+        // the empty line is the SSE frame boundary. With `.lines` the parser
+        // never dispatched an event, so every ask reached this app through the
+        // 60 s inbox poll and Last-Event-ID never advanced (P20 live proof:
+        // replays 0, 306 s to the banner).
         let parser = SSEParser()
-        for try await line in bytes.lines {
-            for ev in parser.feed(line: line) {
-                if let env = try? JSONDecoder().decode(StreamEnvelope.self, from: Data(ev.data.utf8)) {
-                    onEvent(env, ev.id)
+        var chunk = Data()
+        for try await byte in bytes {
+            chunk.append(byte)
+            if byte == 0x0A {
+                for ev in parser.feed(chunk) {
+                    if let env = try? JSONDecoder().decode(StreamEnvelope.self, from: Data(ev.data.utf8)) {
+                        onEvent(env, ev.id)
+                    }
                 }
+                chunk.removeAll(keepingCapacity: true)
             }
         }
     }

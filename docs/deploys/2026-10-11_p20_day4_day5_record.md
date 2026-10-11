@@ -74,6 +74,23 @@ Two findings:
 1. The owner saw the banner more than once over the 306 s. The store dedupes the inbox read against the stream (`shown` set), so a startup double post is excluded by code; the P14 repost of a cleared banner every 90 s is the expected cause, but the Notifier writes no log line per post, so this run cannot distinguish the two. Follow-up: a per-post log line (request id, reason: added, repost) in the Notifier.
 2. Metrics replay counters stayed at 0: the Mac app keeps its Last-Event-ID in memory only, so a fresh process reconnects without one and the ask arrived through the startup inbox read, not through SSE replay. The server side replay is proven by the pipeline proof; the Mac client does not yet use it across a restart. Follow-up: persist the last event id (UserDefaults) and send it on the first connect.
 
+## Mac client follow-up (14:1x PT, Mac build ede2bf3, version 0.2.1)
+
+Repeating the proof on the rebuilt Notifier exposed the root cause behind both findings: the Mac app read the stream with `URLSession.AsyncBytes.lines`, and AsyncLineSequence drops empty lines (probed on the owner's Mac: `"id: 1\nevent: x\ndata: {}\n\nid: 2\n\n"` yields four lines, no empty one). The empty line is the SSE frame boundary, so the parser never dispatched an event: since P13 Day 3 every ask reached the Mac through the 60 s inbox poll, Last-Event-ID never advanced, and the first proof's 306 s and replays 0 follow from that. The repost finding is explained the same way: with no live `request.answered` event the banner was cleared only on the next poll.
+
+Fix (PR 108): the app reads raw bytes and feeds the parser per newline, the last event id persists in UserDefaults (`EventCursor`, sent on the first connect after a relaunch), one log line per post with its reason (`posts` category). Four parser tests pin the live frame shape, including the no-empty-lines case that must yield nothing. 47 Swift tests pass on the Mac.
+
+Proof on the fixed build, same procedure (bootout, ask while down, bootstrap):
+
+| Check | Result |
+| --- | --- |
+| Primer ask posted live | `post 8a9984c3 added` 0.9 s after creation, cursor stored 29 |
+| First connect after relaunch | `stream open lastEventId=29` |
+| Server replay | metrics replays 1, replayed_events 1, gaps 0, truncated 0, drops 0 |
+| Ask created while down | `post ff3c70b8 added` once, 0.1 s after the stream opened |
+
+Owner answer on the ff3c70b8 banner (expected Once) is recorded in the next record.
+
 ## Status
 
-Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live, live owner proof done (answered on the banner after a Notifier restart). Two Mac client follow-ups recorded above.
+Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live, live owner proof done (answered on the banner after a Notifier restart). Root cause (AsyncLineSequence drops the SSE frame boundary) fixed in PR 108, replay 1 of 1 proven on the rebuilt Mac app.
