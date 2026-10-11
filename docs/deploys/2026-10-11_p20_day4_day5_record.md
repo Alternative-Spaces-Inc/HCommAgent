@@ -48,6 +48,12 @@ First pipeline run (Cloud Build 4e3d5175 on main 98f77087, PR 102) FAILED at exa
 
 Second pipeline run (Cloud Build cf3315c5 on main 46339e25, PR 105) FAILED at the first check, `stream connects and delivers a live frame: baseline id None`: the marker ask's frame reached the stream before the posting thread had parsed its 201 and recorded the request id, so the reader compared the frame against an empty marker and dropped it, then waited 20 s for nothing. The fast health wait made this race likely (the API was ready in 2.1 s instead of after a 30 s timeout). Fix: the reader keeps every request.created frame it sees and matches once the marker id is known. Five consecutive local runs with API restarts: 12 of 12 PASS each.
 
+## Deploy (12:1x PT)
+
+- PR 106 merged by the owner, main cdda65de. Cloud Build cba52eac SUCCESS: smoke-local ran the golden path and the restart proof (`{"restart_proof": "PASS", "asks_missed": 3, "checks": 12, "failed": []}`, baseline id 3, uvicorn killed and restarted in the gap), then pack, build, push, migrate (no new revision, head f6a7b8c9d0e1), deploy, smoke-live PASS (`OK agent path`).
+- Revision hca-api-service-00073 serving 100 percent.
+- Live GET /v1/internal/metrics on 00073 (19:22 UTC): events newest_id 12, dispatcher cursor 12, lag 0; streams open 4 from the owner's extension device, all at last_sent_id 12, max_per_device 4, superseded 0; drops 0; replay replays 0, gaps 0, truncated 0; listener connected, errors 0; jobs worker running, due_backlog 0, pending_total 3; db_pool size 2, checked out 1. The 46 stream pile-up seen on 00072 is gone: the cap holds the device at four. The extension's own reconnect guard takes effect when the unpacked load is refreshed from main.
+
 ## Live
 
 A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 (P7), so the live proof is read from the linked clients and the metrics page rather than from a temporary device:
@@ -57,4 +63,4 @@ A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 
 
 ## Status
 
-Day 4 live on revision 00072 with max instances 3. Day 5 proof script, pipeline step and stream cap on this PR; the live owner proof is the last open item of P20.
+Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live. Open: the live owner proof (Notifier stopped, ask created, banner on restart).
