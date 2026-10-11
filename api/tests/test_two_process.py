@@ -151,7 +151,7 @@ def _wait(predicate, timeout=20.0, step=0.1):
 def _post_ask(server: Server, key: str, title: str, deadline_minutes=60):
     body = {"caller": "two-proc-agent", "audience": "owner", "title": title, "control": "radio",
             "options_or_fields": [{"id": "a", "label": "A"}], "suggested": {"option_id": "a", "why": "w"},
-            "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
+            "deliver_to": {"mode": "poll"},  # HCA-P21a: real processes resolve webhook urls for real
             "deadline_at": (datetime.now(timezone.utc) + timedelta(minutes=deadline_minutes)).isoformat()}
     r = httpx.post(server.base + "/v1/requests", json=body, headers={"Authorization": f"Bearer {key}"}, timeout=10)
     assert r.status_code == 201, r.text

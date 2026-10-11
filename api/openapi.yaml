@@ -540,6 +540,106 @@ paths:
         '404':
           description: No key with that prefix
 
+  /v1/webhooks:
+    post:
+      summary: Register a webhook destination; the signing secret is returned once (HCA-P21a)
+      description: >
+        The url must be https (no userinfo, port 443 or above 1023) and must
+        not point at a loopback, private, link local, multicast, reserved or
+        cloud metadata address, by literal or by resolution (IPv4 mapped, 6to4
+        and Teredo IPv6 forms are judged by the inner address). The addresses
+        it resolved to are pinned on the row and re-checked at every send. The
+        same url cannot be registered twice while active; rotate or revoke.
+        Each registration writes a registry audit row.
+      security:
+        - AgentKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+      responses:
+        '201':
+          description: The destination with its secret (whsec_...), shown once
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSecretResponse'
+        '400':
+          description: url rejected by the destination rules, or already registered
+        '401':
+          description: Missing or invalid agent key
+    get:
+      summary: The caller's webhook destinations, no secret material (HCA-P21a)
+      security:
+        - AgentKey: []
+      parameters:
+        - name: include_revoked
+          in: query
+          required: false
+          schema: { type: boolean, default: false }
+      responses:
+        '200':
+          description: Destinations of this caller in this tenant, oldest first
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/WebhookDestinationView'
+  /v1/webhooks/{destination_id}/rotate:
+    post:
+      summary: Rotate the destination's secret; the new secret is returned once (HCA-P21a)
+      description: >
+        The previous secret stays valid for 24 hours (previous_valid_until)
+        so the receiver can switch; deliveries carry signatures under both
+        during the overlap. Writes a registry audit row.
+      security:
+        - AgentKey: []
+      parameters:
+        - name: destination_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The destination with its new secret
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookSecretResponse'
+        '400':
+          description: The destination is revoked
+        '404':
+          description: Not a destination of this caller
+  /v1/webhooks/{destination_id}:
+    delete:
+      summary: Revoke a webhook destination (HCA-P21a)
+      description: >
+        Idempotent. New asks naming its url are rejected with 400; deliveries
+        still owed to it fail dead with the reason recorded. Writes a
+        registry audit row.
+      security:
+        - AgentKey: []
+      parameters:
+        - name: destination_id
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: The destination with revoked_at set
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WebhookDestinationView'
+        '404':
+          description: Not a destination of this caller
+
   /v1/internal/metrics:
     get:
       summary: Per-instance delivery metrics (HCA-P20 Day 4)
@@ -648,6 +748,35 @@ components:
         last_seen_at: { type: string, format: date-time, nullable: true }
         google_email: { type: string, nullable: true, description: Google account linked through /v1/devices/self/google-link (HCA-P7) }
         google_linked_at: { type: string, format: date-time, nullable: true }
+    WebhookDestinationView:
+      type: object
+      required: [id, url, caller, tenant_id, secret_prefix, created_at]
+      properties:
+        id: { type: string, description: whd_ prefixed destination id }
+        url: { type: string, format: uri }
+        caller: { type: string }
+        tenant_id: { type: string }
+        secret_prefix:
+          type: string
+          description: First 14 characters of the secret in use, so a receiver can tell which it holds
+        pinned_addresses:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: Addresses the url resolved to at registration
+        created_at: { type: string, format: date-time }
+        rotated_at: { type: string, format: date-time, nullable: true }
+        previous_valid_until: { type: string, format: date-time, nullable: true }
+        revoked_at: { type: string, format: date-time, nullable: true }
+    WebhookSecretResponse:
+      allOf:
+        - $ref: '#/components/schemas/WebhookDestinationView'
+        - type: object
+          required: [secret]
+          properties:
+            secret:
+              type: string
+              description: whsec_ prefixed HMAC-SHA256 signing secret, returned only here
     ApiKeyView:
       type: object
       required: [prefix, caller, tenant_id, created_at]
@@ -757,10 +886,19 @@ components:
               state: { type: string }
         deliver_to:
           type: object
-          description: Where the answer goes back
+          description: >
+            Where the answer goes back. HCA-P21a (decision 7): with mode
+            webhook, url must equal a registered, non revoked destination of
+            the caller (POST /v1/webhooks), otherwise the ask is rejected with
+            400. The server records the destination id on the ask.
           properties:
             mode: { type: string, enum: [webhook, poll, websocket] }
             url: { type: string }
+            destination_id:
+              type: string
+              nullable: true
+              readOnly: true
+              description: Set by the server from the registry; a caller value is ignored
     Option:
       type: object
       required: [id, label]

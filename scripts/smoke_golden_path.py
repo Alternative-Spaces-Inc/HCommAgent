@@ -184,8 +184,16 @@ def main():
         return {"X-HCA-Device": device_id, **sign(m, p, b)}
 
     hook_url = start_hook()
+    # HCA-P21a decision 7: a webhook ask may only name a registered
+    # destination; the loopback receiver passes the SSRF rules only because
+    # the smoke-local step sets HCA_WEBHOOK_ALLOW_INSECURE=1 (never the deploy).
     code, body = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "webhook", "url": hook_url}), agent)
-    check("POST /v1/requests (webhook)", code == 201 and body.get("state") == "queued", f"{code}")
+    check("unregistered webhook url is 400", code == 400, f"{code}")
+    code, body = http("POST", f"{base}/v1/webhooks", {"url": hook_url}, agent)
+    check("POST /v1/webhooks", code == 201 and body.get("id", "").startswith("whd_") and body.get("secret", "").startswith("whsec_"), f"{code} {body if code != 201 else ''}")
+    destination_id = body["id"]
+    code, body = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "webhook", "url": hook_url}), agent)
+    check("POST /v1/requests (webhook)", code == 201 and body.get("state") == "queued", f"{code} {body if code != 201 else ''}")
     rid = body["request_id"]
 
     code, body = http("GET", f"{base}/v1/inbox", headers=human("GET", "/v1/inbox"))
@@ -219,6 +227,8 @@ def main():
 
     code, body = http("POST", f"{base}/v1/devices/{device_id}/revoke", {}, {"Authorization": f"Bearer {admin}"})
     check("revoke smoke device", code == 200 and body.get("revoked_at"), f"{code}")
+    code, body = http("DELETE", f"{base}/v1/webhooks/{destination_id}", None, agent)
+    check("revoke smoke webhook destination", code == 200 and body.get("revoked_at"), f"{code}")
     revoke_key()
     print(f"[{elapsed()}] OK golden path, request {rid}, device {device_id}", flush=True)
 

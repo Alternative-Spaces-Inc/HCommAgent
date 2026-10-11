@@ -222,6 +222,44 @@ class Nonce(Base):
     seen_at = Column(DateTime, nullable=False, index=True)
 
 
+class WebhookDestination(Base):
+    """HCA-P21a: a webhook URL a caller registered once. Asks may only name a
+    registered, non revoked destination of the same caller and tenant
+    (decision 7). secret_hash is hmac256$<hex> under the api key pepper, the
+    secret itself is returned once; previous_secret_hash keeps the prior
+    secret valid for 24 h after a rotation so the receiver can switch.
+    pinned_addresses are the addresses the URL resolved to at registration;
+    the send re-resolves and re-checks (app/ssrf.py)."""
+    __tablename__ = "webhook_destinations"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    caller = Column(String, nullable=False, index=True)
+    url = Column(String, nullable=False)
+    secret_prefix = Column(String, nullable=False)
+    secret_hash = Column(String, nullable=False)
+    previous_secret_hash = Column(String, nullable=True)
+    previous_valid_until = Column(DateTime, nullable=True)
+    pinned_addresses = Column(JSON, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    rotated_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+
+class WebhookDestinationEvent(Base):
+    """HCA-P21a audit trail of the destination registry: one row per
+    registration, rotation and revocation, with the acting caller."""
+    __tablename__ = "webhook_destination_events"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    destination_id = Column(String, ForeignKey("webhook_destinations.id"), nullable=False, index=True)
+    action = Column(String, nullable=False)
+    actor = Column(String, nullable=False)
+    detail = Column(JSON, nullable=True)
+    at = Column(DateTime, nullable=False)
+
+
 class WebhookAttempt(Base):
     """One HTTP attempt to deliver an outcome to the caller's deliver_to
     webhook (app/webhooks.py). attempt 0 with ok False records a skip

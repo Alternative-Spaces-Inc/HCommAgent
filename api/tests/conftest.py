@@ -26,7 +26,7 @@ os.environ.setdefault("HCA_API_KEY_PEPPER", "test-pepper-0123456789abcdef")
 import httpx
 import pytest
 
-from app import webhooks
+from app import ssrf, webhooks
 
 
 class WebhookRecorder:
@@ -60,3 +60,19 @@ def default_tenant():
     with SessionLocal() as db:
         models.ensure_default_tenant(db)
     yield
+
+
+PUBLIC_TEST_ADDRESS = "93.184.216.34"
+
+
+@pytest.fixture(autouse=True)
+def fake_resolver():
+    """HCA-P21a: destination URLs pass the SSRF rules without DNS. Every
+    host resolves to one public address (the documentation ranges count as
+    non global for the ipaddress module, so a real one is used); tests of
+    the rules install their own resolver on top."""
+    ssrf.set_resolver(lambda host: [PUBLIC_TEST_ADDRESS])
+    try:
+        yield
+    finally:
+        ssrf.set_resolver(None)
