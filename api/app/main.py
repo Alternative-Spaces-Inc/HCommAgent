@@ -8,6 +8,7 @@ from .sweep_api import router as sweep_router
 from .metrics_api import router as metrics_router
 from .devices_api import router as devices_router
 from .privacy import router as privacy_router
+from .webhooks_api import router as webhooks_router
 from .tenancy import router as tenants_router
 
 app = FastAPI(title="Human Collections Agent (HCA) API")
@@ -20,6 +21,7 @@ app.include_router(metrics_router)
 app.include_router(devices_router)
 app.include_router(tenants_router)
 app.include_router(privacy_router)
+app.include_router(webhooks_router)
 
 
 @app.on_event("startup")
