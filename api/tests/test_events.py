@@ -4,6 +4,7 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import asyncio
+import pytest
 from datetime import datetime, timedelta, timezone
 
 from app.db import Base, engine, SessionLocal
@@ -22,8 +23,12 @@ def _tenant(tenant_id: str) -> None:
             db.commit()
 
 
-for _t in ("tenant-a", "tenant-b", "tenant-d", "tenant-m", "tenant-r", "tenant-s", "tenant-w"):
-    _tenant(_t)
+@pytest.fixture(autouse=True)
+def _test_tenants():
+    # At test time, not import time: other modules drop and recreate the
+    # schema while pytest collects, which would wipe rows made on import.
+    for t in ("tenant-a", "tenant-b", "tenant-d", "tenant-m", "tenant-r", "tenant-s", "tenant-w"):
+        _tenant(t)
 
 
 def _clear(tenant_id):
