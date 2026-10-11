@@ -22,6 +22,20 @@ async function getApiBase() {
   return stored[API_BASE_KEY] || null;
 }
 
+// HCA-P20: last SSE id seen on the stream, sent as Last-Event-ID on the
+// next connect so the server replays the envelopes missed in between
+// (24 h or 1,000 events); the poll alarm remains the fallback beyond that.
+const LAST_EVENT_ID_KEY = "hca_last_event_id";
+
+async function getLastEventId() {
+  const stored = await chrome.storage.local.get(LAST_EVENT_ID_KEY);
+  return stored[LAST_EVENT_ID_KEY] || null;
+}
+
+async function setLastEventId(id) {
+  if (id) await chrome.storage.local.set({ [LAST_EVENT_ID_KEY]: String(id) });
+}
+
 async function getCache() {
   const stored = await chrome.storage.local.get(CACHE_KEY);
   return stored[CACHE_KEY] || {};
@@ -138,7 +152,9 @@ async function connectStream() {
   streamAbortController = new AbortController();
 
   try {
-    const resp = await signedFetch(`${apiBase}/v1/inbox/stream`, { signal: streamAbortController.signal });
+    const lastEventId = await getLastEventId();
+    const headers = lastEventId ? { "Last-Event-ID": lastEventId } : {};
+    const resp = await signedFetch(`${apiBase}/v1/inbox/stream`, { signal: streamAbortController.signal, headers });
     if (!resp.ok || !resp.body) {
       throw new Error(`stream connect failed: ${resp.status}`);
     }
@@ -153,6 +169,7 @@ async function connectStream() {
       buffer = parsed.buffer;
       for (const evt of parsed.events) {
         await handleStreamEvent(evt);
+        if (evt.id) await setLastEventId(evt.id);
       }
     }
   } catch (e) {

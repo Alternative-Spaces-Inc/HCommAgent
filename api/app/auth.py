@@ -40,6 +40,7 @@ Two guards:
     require_device, so a device can always sign in.
 """
 
+import asyncio
 import hmac
 import os
 from typing import Optional
@@ -53,7 +54,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .apikeys import verify_api_key
 from .db import get_db
-from . import devicesig
+from . import devicesig, nonces
 
 
 # auto_error=False so a missing header is our own 401 (with WWW-Authenticate)
@@ -121,6 +122,10 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     if not devicesig.verify_signature(device.public_key_pem, canonical, signature):
         raise _device_401("device signature does not verify")
     if not devicesig.replay_guard.check_and_record(device_id, nonce):
+        raise _device_401("device signature replayed")
+    # HCA-P20 Day 2: the same check against the nonces table, which every
+    # instance shares and which survives a restart (app/nonces.py).
+    if not await asyncio.to_thread(nonces.check_and_record, device_id, nonce):
         raise _device_401("device signature replayed")
 
     device.last_seen_at = datetime.now(timezone.utc)

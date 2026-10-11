@@ -95,9 +95,16 @@ final class APIClient {
 
     /// Opens the SSE stream and yields parsed envelopes until the server
     /// closes it or the task is cancelled. Throws on a non-200 open.
-    func stream(onOpen: @escaping () -> Void, onEvent: @escaping (StreamEnvelope) -> Void) async throws {
+    /// HCA-P20: `lastEventId` is the `id:` line of the last envelope this
+    /// client saw; sent as Last-Event-ID so the server replays what was
+    /// missed while reconnecting (24 h or 1,000 events), then goes live.
+    /// `onEvent` receives the envelope and its id line (nil on old servers).
+    func stream(lastEventId: String? = nil, onOpen: @escaping () -> Void,
+                onEvent: @escaping (StreamEnvelope, String?) -> Void) async throws {
+        var extra = ["Accept": "text/event-stream"]
+        if let last = lastEventId, !last.isEmpty { extra["Last-Event-ID"] = last }
         let request = try signer.signedRequest(method: "GET", url: try url("v1/inbox/stream"), body: nil,
-                                               extraHeaders: ["Accept": "text/event-stream"])
+                                               extraHeaders: extra)
         var cfg = request
         cfg.timeoutInterval = 3600
         let (bytes, response) = try await session.bytes(for: cfg)
@@ -112,7 +119,7 @@ final class APIClient {
         for try await line in bytes.lines {
             for ev in parser.feed(line: line) {
                 if let env = try? JSONDecoder().decode(StreamEnvelope.self, from: Data(ev.data.utf8)) {
-                    onEvent(env)
+                    onEvent(env, ev.id)
                 }
             }
         }

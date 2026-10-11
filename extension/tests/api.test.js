@@ -54,6 +54,15 @@ test("parseSSEChunk parses one full event block", () => {
   assert.equal(buffer, "");
 });
 
+test("parseSSEChunk carries the id line (HCA-P20 Last-Event-ID) and null without it", () => {
+  const withId = 'id: 57\nevent: request.cancelled\ndata: {"id":57,"event":"request.cancelled","data":{"request_id":"r9"},"timestamp":"2026-10-10T19:00:00+00:00"}\n\n';
+  const { events } = parseSSEChunk("", withId);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].id, "57");
+  const legacy = parseSSEChunk("", 'event: request.cancelled\ndata: {"event":"request.cancelled","data":{"request_id":"r9"}}\n\n');
+  assert.equal(legacy.events[0].id, null);
+});
+
 test("parseSSEChunk buffers a partial block across two chunks", () => {
   const first = 'event: request.answered\ndata: {"event":"request.answered","data":{"reque';
   const second = 'st_id":"r2"},"timestamp":"2026-09-30T12:00:00+00:00"}\n\n';

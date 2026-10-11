@@ -31,6 +31,14 @@ def _test_tenants():
         _tenant(t)
 
 
+async def _settled(q, expected: int, timeout: float = 2.0):
+    """Wait until the dispatcher has filled q to expected items."""
+    deadline = asyncio.get_running_loop().time() + timeout
+    while q.qsize() < expected and asyncio.get_running_loop().time() < deadline:
+        await asyncio.sleep(0.01)
+    return q.qsize()
+
+
 def _clear(tenant_id):
     """The suite shares one SQLite file across runs; start each replay test
     from an empty log for its tenant."""
@@ -117,7 +125,9 @@ def test_queue_overflow_is_counted_not_silent():
             before = dropped.get("dev-full", 0)
             for _ in range(QUEUE_MAXSIZE + 3):
                 publish("request.answered", {"request_id": "x"}, tenant_id="tenant-a")
-            assert dropped["dev-full"] == before + 3
+            # Day 2: delivery is the dispatcher's, so let it run one pass.
+            await _settled(q, QUEUE_MAXSIZE)
+            assert dropped.get("dev-full", 0) == before + 3
         finally:
             unsubscribe(q)
 

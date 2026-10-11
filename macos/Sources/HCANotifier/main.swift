@@ -38,6 +38,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private var streamTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
     private var streamConnected = false
+    /// HCA-P20: last SSE id seen, handed back as Last-Event-ID on reconnect.
+    private var lastEventId: String?
     static let pollInterval: UInt64 = 60
 
     private let isLaunchdInstance = ProcessInfo.processInfo.environment[LaunchAgentPlist.launchdMarker] == "1"
@@ -275,7 +277,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 guard let self = self, let client = self.client else { return }
                 var opened = false
                 do {
-                    try await client.stream(onOpen: {
+                    try await client.stream(lastEventId: self.lastEventId, onOpen: {
                         opened = true
                         DispatchQueue.main.async {
                             self.streamConnected = true
@@ -283,8 +285,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                             self.connectionItem.title = "Server: stream connected"
                         }
                         Task { await self.poll() }   // catch up on anything missed while reconnecting
-                    }, onEvent: { env in
-                        DispatchQueue.main.async { self.handle(event: env) }
+                    }, onEvent: { env, id in
+                        DispatchQueue.main.async {
+                            if let id = id { self.lastEventId = id }
+                            self.handle(event: env)
+                        }
                     })
                     await MainActor.run { self.streamConnected = false; self.liveness.streamConnected = false; self.connectionItem.title = "Server: stream closed, reconnecting" }
                 } catch {

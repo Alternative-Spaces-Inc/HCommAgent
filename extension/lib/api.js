@@ -120,20 +120,25 @@ export function parseSSEChunk(buffer, chunkText) {
     }
     let eventName = null;
     let dataLine = null;
+    let id = null;
     for (const line of block.split("\n")) {
       if (line.startsWith("event:")) {
         eventName = line.slice("event:".length).trim();
       } else if (line.startsWith("data:")) {
         dataLine = line.slice("data:".length).trim();
+      } else if (line.startsWith("id:")) {
+        // HCA-P20: the events row id; handed back as Last-Event-ID on
+        // reconnect so the server replays what this device missed.
+        id = line.slice("id:".length).trim();
       }
     }
     if (eventName && dataLine !== null) {
       try {
-        events.push({ event: eventName, data: JSON.parse(dataLine) });
+        events.push({ event: eventName, data: JSON.parse(dataLine), id });
       } catch (e) {
         // A malformed data line is dropped, not thrown, so one bad event
         // does not take down the whole stream reader.
-        events.push({ event: eventName, data: null, parseError: String(e) });
+        events.push({ event: eventName, data: null, parseError: String(e), id });
       }
     }
   }

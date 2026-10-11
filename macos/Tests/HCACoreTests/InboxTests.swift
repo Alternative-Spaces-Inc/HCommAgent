@@ -21,6 +21,15 @@ final class InboxTests: XCTestCase {
         XCTAssertEqual(events[1].data, "line1\nline2")
     }
 
+    func testSSEParserCarriesTheIdLineForLastEventIdReplay() {
+        // HCA-P20: the server sends "id: <row id>" before every event; the
+        // id persists across events per the SSE spec until replaced.
+        let p = SSEParser()
+        var events = p.feed(Data("id: 41\nevent: request.created\ndata: {}\n\n".utf8))
+        events += p.feed(Data("event: request.answered\ndata: {}\n\nid: 42\nevent: request.cancelled\ndata: {}\n\n".utf8))
+        XCTAssertEqual(events.map { $0.id }, ["41", "41", "42"])
+    }
+
     func testStreamEnvelopeDecodesCreatedAndAnswered() throws {
         let created = try JSONDecoder().decode(StreamEnvelope.self, from: Data(createdJSON.utf8))
         XCTAssertEqual(created.event, "request.created")
