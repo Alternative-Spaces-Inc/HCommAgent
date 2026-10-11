@@ -50,15 +50,23 @@ QUEUE_MAXSIZE = 100
 REPLAY_WINDOW_SECONDS = int(os.environ.get("HCA_EVENT_REPLAY_WINDOW_SECONDS", str(24 * 3600)))
 REPLAY_MAX_EVENTS = int(os.environ.get("HCA_EVENT_REPLAY_MAX_EVENTS", "1000"))
 POLL_SECONDS = float(os.environ.get("HCA_EVENT_POLL_SECONDS", "2"))
+# HCA-P20 Day 5: open streams per device. The live metrics page showed 46
+# streams from one extension device on one instance: each alarm tick opened
+# a new fetch while the proxy kept the old ones alive. Beyond this many, the
+# oldest stream of the device is told to close (event stream.closed, reason
+# superseded) and the client keeps its newest one.
+STREAM_MAX_PER_DEVICE = int(os.environ.get("HCA_STREAM_MAX_PER_DEVICE", "4"))
+SUPERSEDED_ENVELOPE = {"event": "stream.closed", "data": {"reason": "superseded"}, "id": None}
 NOTIFY_CHANNEL = "hca_events"
 
 
-@dataclass(frozen=True)
+@dataclass
 class Subscriber:
     queue: asyncio.Queue
     device_id: str
     tenant_id: str
     loop: Optional[asyncio.AbstractEventLoop]
+    closed: bool = False
 
 
 @dataclass
@@ -83,6 +91,7 @@ dropped: dict[str, int] = {}
 # newest events row (app/metrics.py). Replay counters for the same page.
 _last_sent: dict[asyncio.Queue, int] = {}
 replay_state: Dict[str, int] = {"replays": 0, "replayed_events": 0, "gaps": 0, "truncated": 0}
+stream_state: Dict[str, int] = {"superseded": 0}
 
 # Listener state for /healthz and the Day 4 metrics.
 listener_state: Dict[str, Any] = {"running": False, "connected": False, "notifications": 0, "errors": 0, "last_error": None}
@@ -107,11 +116,34 @@ def subscribe(device_id: str, tenant_id: str) -> asyncio.Queue:
     except RuntimeError:
         loop = None
     q: asyncio.Queue = asyncio.Queue(maxsize=QUEUE_MAXSIZE)
+    evict: List[Subscriber] = []
     with _lock:
+        mine = [s for s in _subscribers.values() if s.device_id == device_id and not s.closed]
+        while len(mine) >= STREAM_MAX_PER_DEVICE:
+            oldest = mine.pop(0)  # _subscribers keeps insertion order
+            oldest.closed = True
+            evict.append(oldest)
+            stream_state["superseded"] += 1
         _subscribers[q] = Subscriber(queue=q, device_id=device_id, tenant_id=tenant_id, loop=loop)
+    for old in evict:
+        try:
+            old.queue.put_nowait(dict(SUPERSEDED_ENVELOPE))
+        except asyncio.QueueFull:
+            pass  # the generator also checks is_closed on every keep-alive tick
     if loop is not None:
-        ensure_dispatcher(loop)
+        d = ensure_dispatcher(loop)
+        with _lock:
+            # Lag is measured from here: a stream that connects after the
+            # newest row has nothing to send and must not read as behind.
+            _last_sent[q] = d.cursor
     return q
+
+
+def is_closed(q: asyncio.Queue) -> bool:
+    """True once subscribe() superseded this stream for a newer one of the same device."""
+    with _lock:
+        s = _subscribers.get(q)
+        return bool(s and s.closed)
 
 
 def unsubscribe(q: asyncio.Queue) -> None:

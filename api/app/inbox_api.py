@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from . import models
 from .db import get_db, SessionLocal
-from .events import subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
+from .events import SUPERSEDED_ENVELOPE, is_closed, subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
 from .requests_api import _ask_to_collection_request
 from .auth import require_linked_device, google_link_required
 from . import routing
@@ -86,11 +86,19 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
         while True:
             try:
                 envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
+                if envelope.get("event") == "stream.closed":
+                    # HCA-P20 Day 5: a newer stream of this device took our
+                    # slot (STREAM_MAX_PER_DEVICE); tell the client and stop.
+                    yield format_sse(envelope)
+                    return
                 if envelope.get("id") is not None and envelope["id"] <= high_water:
                     continue
                 mark_sent(q, envelope.get("id"))
                 yield format_sse(envelope)
             except asyncio.TimeoutError:
+                if is_closed(q):
+                    yield format_sse(dict(SUPERSEDED_ENVELOPE))
+                    return
                 if not await asyncio.to_thread(authorized_fn, device.id):
                     yield "event: stream.closed\ndata: {\"reason\": \"device revoked\"}\n\n"
                     return

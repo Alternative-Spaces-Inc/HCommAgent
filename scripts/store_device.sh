@@ -20,6 +20,8 @@
 #                                           google_email revoked
 #   store_device.sh revoke <DEVICE_ID>      revoke a device (the old
 #                                           unpacked load's record)
+#   store_device.sh get <PATH>              read an admin page, for example
+#                                           get /v1/internal/metrics (P20)
 #
 # Exit codes: 0 on the expected HTTP code (201, 200), 1 otherwise. A 409 on
 # register means the key is already registered; run list to find its id.
@@ -64,6 +66,10 @@ case "$cmd" in
     out="$(admin_call PATCH "/v1/devices/$id" '{"priority": 200}')"
     printf '%s\n' "$out"
     expect_code "$out" 200
+    ;;
+  get)
+    # HCA-P20 Day 5: read any admin page, e.g. get /v1/internal/metrics
+    admin_call GET "${1:?store_device: get needs a path, e.g. /v1/internal/metrics}"
     ;;
   list)
     out="$(admin_call GET /v1/devices)"

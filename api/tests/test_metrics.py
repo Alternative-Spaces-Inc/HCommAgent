@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
 from app import events, metrics, models
-from authhelper import ADMIN_AUTH
+from authhelper import ADMIN_AUTH, agent_auth
 
 Base.metadata.create_all(bind=engine)
 client = TestClient(app)
@@ -36,14 +36,22 @@ def test_stream_position_and_lag_follow_what_was_sent():
     async def run():
         q = events.subscribe("dev_metrics", TENANT)
         try:
-            events.mark_sent(q, 5)
-            events.mark_sent(q, 3)  # never goes backwards
+            # HCA-P20 Day 5: a position starts at the dispatcher cursor (the
+            # newest id when the stream connected), so an idle stream reads
+            # as caught up rather than as newest_id events behind.
+            start = events.stream_positions()
+            pos = [p for p in start if p["device_id"] == "dev_metrics"]
+            cursor = events.max_event_id()
+            assert pos and pos[0]["last_sent_id"] == cursor
+            events.mark_sent(q, cursor + 5)
+            events.mark_sent(q, cursor + 3)  # never goes backwards
             pos = [p for p in events.stream_positions() if p["device_id"] == "dev_metrics"]
-            assert pos and pos[0]["last_sent_id"] == 5
+            assert pos and pos[0]["last_sent_id"] == cursor + 5
             with SessionLocal() as db:
                 page = metrics.collect(db)
             assert page["streams"]["open"] >= 1
-            assert page["streams"]["lag_events_max"] >= page["events"]["newest_id"] - 5
+            assert page["streams"]["max_per_device"] == events.STREAM_MAX_PER_DEVICE
+            assert "superseded" in page["streams"]
         finally:
             events.unsubscribe(q)
         assert not [p for p in events.stream_positions() if p["device_id"] == "dev_metrics"]
@@ -91,8 +99,15 @@ def test_replay_counts_a_gap_when_the_window_aged_rows_out():
 
 
 def test_jobs_backlog_counts_due_undone_rows():
+    # own ask row, so the test does not depend on an earlier module having posted one
+    body = {"caller": "metrics-agent", "audience": "owner", "title": "backlog ask", "control": "radio",
+            "options_or_fields": [{"id": "a", "label": "A"}], "suggested": {"option_id": "a", "why": "w"},
+            "deliver_to": {"mode": "poll"}}
+    r = client.post("/v1/requests", json=body, headers=agent_auth("metrics-agent"))
+    assert r.status_code == 201, r.text
+    rid = r.json()["request_id"]
     with SessionLocal() as db:
-        ask = db.execute(events.select(models.Ask)).scalars().first()
+        ask = db.get(models.Ask, rid)
         assert ask is not None
         past = (datetime.now(timezone.utc) - timedelta(seconds=120)).replace(tzinfo=None)
         job = models.ScheduledJob(tenant_id=ask.tenant_id, ask_id=ask.id, kind="expire", run_at=past, created_at=past)

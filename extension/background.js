@@ -16,6 +16,13 @@ const CACHE_KEY = "hca_inbox_cache";
 const API_BASE_KEY = "hca_api_base";
 
 let streamAbortController = null;
+// HCA-P20 Day 5: true while a stream fetch is being read. The poll alarm used
+// to call connectStream() on every tick, which opened a fresh stream while the
+// proxy kept the previous one alive: the live metrics page showed 46 streams
+// from one device on one instance. The alarm now reconnects only when no
+// stream is live; the server also caps streams per device and closes the
+// oldest with event stream.closed, reason superseded.
+let streamActive = false;
 
 async function getApiBase() {
   const stored = await chrome.storage.local.get(API_BASE_KEY);
@@ -161,16 +168,26 @@ async function connectStream() {
     const reader = resp.body.getReader();
     const decoder = new TextDecoder();
     let buffer = "";
+    streamActive = true;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       const chunkText = decoder.decode(value, { stream: true });
       const parsed = parseSSEChunk(buffer, chunkText);
       buffer = parsed.buffer;
+      let superseded = false;
       for (const evt of parsed.events) {
+        if (evt.event === "stream.closed") {
+          // the server closed this stream (device revoked, or a newer
+          // stream of ours took its slot); do not reopen from here, the
+          // next alarm tick or the newer stream carries on
+          superseded = true;
+          continue;
+        }
         await handleStreamEvent(evt);
         if (evt.id) await setLastEventId(evt.id);
       }
+      if (superseded) break;
     }
   } catch (e) {
     // The stream drops when the service worker suspends, on a network
@@ -178,6 +195,8 @@ async function connectStream() {
     // poll alarm below is the fallback that guarantees we do not miss
     // anything for longer than POLL_INTERVAL_MINUTES.
     console.warn("HCA stream ended", e);
+  } finally {
+    streamActive = false;
   }
 }
 
@@ -232,10 +251,11 @@ chrome.runtime.onStartup.addListener(() => {
 chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === POLL_ALARM_NAME) {
     pollInbox();
-    // Re-establish the stream too: if the service worker was suspended,
-    // any previous fetch reader is already gone, so this is a normal
-    // fresh connect rather than a true reconnect.
-    connectStream();
+    // Re-establish the stream only when none is live: if the service worker
+    // was suspended the previous reader is gone (streamActive reset with the
+    // module), so this is a fresh connect; while a stream is being read,
+    // opening another would leave the old one hanging on the server.
+    if (!streamActive) connectStream();
   }
 });
 
