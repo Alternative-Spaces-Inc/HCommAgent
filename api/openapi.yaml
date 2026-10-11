@@ -540,6 +540,31 @@ paths:
         '404':
           description: No key with that prefix
 
+  /v1/internal/metrics:
+    get:
+      summary: Per-instance delivery metrics (HCA-P20 Day 4)
+      description: >
+        Operational metrics for durable delivery, computed on request for the
+        instance that answers: newest events row id and dispatcher lag, open
+        streams with the last id written to each client and the largest lag,
+        queue drops per device, reconnect replays served and replay gaps,
+        LISTEN/NOTIFY listener state, the jobs worker counters with the shared
+        due backlog and the age of the oldest due job, database pool
+        occupancy, and the instance identity (hostname, pid, Cloud Run
+        revision and instance id). Platform admin bearer.
+      security:
+        - AdminToken: []
+      responses:
+        '200':
+          description: The metrics page
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+        '401': { description: Missing bearer }
+        '403': { description: Wrong admin token or admin token not configured }
+
 components:
   securitySchemes:
     AgentKey:
