@@ -75,6 +75,8 @@ Verified against repo files on branch origin/p19/day1-tenancy (head 37c0282):
 
 ## 6 Owner decisions
 
+All four taken 2026-10-10 18:2x PT, recorded as decision 6 in docs/decisions/DECISIONS_20261010.md: 1 LISTEN/NOTIFY plus 2 s poll, 2 24 h or 1,000 events, 3 _MAX_INSTANCES 3, 4 dual mode.
+
 ### Selection 1: Event Fan-Out Mechanism
 - Title: LISTEN/NOTIFY versus Poll-Only Fan-Out
 - Suggested option: Postgres LISTEN/NOTIFY with 2-second polling fallback.
