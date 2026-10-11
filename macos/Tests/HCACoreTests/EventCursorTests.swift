@@ -2,11 +2,23 @@ import XCTest
 @testable import HCACore
 
 final class EventCursorTests: XCTestCase {
+    private var suites: [String] = []
+
+    /// A throwaway suite per test, removed in tearDown so no hca.tests.* plist
+    /// is left in ~/Library/Preferences (four were, after the first run).
     private func fresh() -> UserDefaults {
         let suite = "hca.tests.\(UUID().uuidString)"
-        let d = UserDefaults(suiteName: suite)!
-        d.removePersistentDomain(forName: suite)
-        return d
+        suites.append(suite)
+        return UserDefaults(suiteName: suite)!
+    }
+
+    override func tearDown() {
+        for suite in suites {
+            UserDefaults(suiteName: suite)?.removePersistentDomain(forName: suite)
+            UserDefaults.standard.removeSuite(named: suite)
+        }
+        suites.removeAll()
+        super.tearDown()
     }
 
     func testEmptyByDefault() {
