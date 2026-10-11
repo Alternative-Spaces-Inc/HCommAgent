@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Integer, Boolean, ForeignKey, UniqueConstraint
+from sqlalchemy import Column, String, DateTime, JSON, Integer, BigInteger, Boolean, ForeignKey, UniqueConstraint, Index
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -162,6 +162,26 @@ class IdempotencyKey(Base):
     request_hash = Column(String, nullable=False)
     status_code = Column(Integer, nullable=False)
     response = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
+
+
+class Event(Base):
+    """HCA-P20 Day 1 (app/events.py): one row per inbox stream envelope.
+    publish() writes the row before any in-process delivery, so an envelope
+    survives the instance that produced it; a reconnecting stream sends the
+    last id it saw (SSE Last-Event-ID) and gets the rows it missed, within
+    the replay window, before live events resume. The id is the database's
+    own sequence, so it is monotonic per table and usable as the SSE id.
+    device_ids null means every device of the tenant (terminal events);
+    otherwise the server side routing set of a created or escalated ask."""
+    __tablename__ = "events"
+    __table_args__ = (Index("ix_events_tenant_id_id", "tenant_id", "id"),)
+
+    id = Column(Integer().with_variant(BigInteger(), "postgresql"), primary_key=True, autoincrement=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    event = Column(String, nullable=False)
+    data = Column(JSON, nullable=False)
+    device_ids = Column(JSON, nullable=True)
     created_at = Column(DateTime, nullable=False, index=True)
 
 
