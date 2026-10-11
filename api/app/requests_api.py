@@ -14,8 +14,7 @@ from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, Answer
 from .events import publish
 from .webhooks import deliver_outcome
 from .auth import require_agent_key, require_linked_device, google_link_required
-from .db import SessionLocal
-from . import routing
+from . import routing, jobs
 from . import controls
 from . import idempotency
 
@@ -156,16 +155,21 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
     for d in body.deliveries or []:
         db.add(models.AskDelivery(ask_id=ask.id, surface=d.surface, delivered_at=d.delivered_at, state=d.state))
 
-    db.commit()
-    receipt = {"request_id": ask.id, "state": ask.state}
     # HCA-P14: the created event names the rank 0 devices; later ranks get a
-    # request.escalated envelope when their window opens (app/routing.py).
+    # request.escalated envelope when their window opens. HCA-P20 Day 3: those
+    # windows and the expiry are scheduled_jobs rows written with the ask in
+    # this transaction (app/jobs.py), so they survive a restart and run once
+    # whichever instance's worker claims them.
     eligible = routing.eligible_devices(db, now, google_link_required(), ask.tenant_id)
     visible = routing.visible_to(db, ask, now, google_link_required())
+    escalation_due = [routing.visible_from(ask.created_at, r, bool(ask.red_gate))
+                      for r in range(1, max(routing.rank_count(eligible), 1))]
+    jobs.schedule_for_ask(db, ask, escalation_due, now=now)
+
+    db.commit()
+    receipt = {"request_id": ask.id, "state": ask.state}
     publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": visible},
             tenant_id=ask.tenant_id, device_ids=visible)
-    delays = routing.escalation_delays(ask.created_at, routing.rank_count(eligible), bool(ask.red_gate), now)
-    routing.schedule_escalations(ask.id, delays, SessionLocal, google_link_required, publish)
     idempotency.store(db, key.tenant_id, key.caller, "create", idem_key, payload, 201, receipt)
     return receipt
 

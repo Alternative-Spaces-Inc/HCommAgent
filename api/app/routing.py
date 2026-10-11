@@ -18,7 +18,6 @@ With every device at the default priority there is one rank and the
 behaviour is exactly pre-P14: every device sees every ask immediately.
 """
 
-import asyncio
 import os
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional
@@ -109,17 +108,11 @@ def escalation_delays(created_at: datetime, n_ranks: int, red_gate: bool, now: d
     return out
 
 
-# --- escalation timers ---------------------------------------------------
-
-_loop: Optional[asyncio.AbstractEventLoop] = None
-_tasks: set = set()
-
-
-def bind_loop(loop: asyncio.AbstractEventLoop) -> None:
-    """Called from the app's startup handler; without a loop no timer is
-    armed and the poll path alone carries escalation."""
-    global _loop
-    _loop = loop
+# --- escalation ------------------------------------------------------------
+# HCA-P20 Day 3: the P14 in-process asyncio timers (bind_loop and
+# schedule_escalations) are gone. Each later rank's window is a
+# scheduled_jobs row written with the ask (app/jobs.py) and claimed by any
+# instance's worker, which calls fire_escalation below.
 
 
 def fire_escalation(ask_id: str, session_factory, link_required_fn, publish_fn, now: Optional[datetime] = None) -> Optional[dict]:
@@ -139,25 +132,3 @@ def fire_escalation(ask_id: str, session_factory, link_required_fn, publish_fn, 
         data = _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": ids}
         tenant_id = ask.tenant_id
     return publish_fn("request.escalated", data, tenant_id=tenant_id, device_ids=ids)
-
-
-def schedule_escalations(ask_id: str, delays: List[float], session_factory, link_required_fn, publish_fn) -> int:
-    """Arm one timer per delay on the bound loop; returns how many were armed."""
-    if _loop is None or not delays:
-        return 0
-
-    async def _one(delay: float):
-        try:
-            await asyncio.sleep(delay)
-            await asyncio.to_thread(fire_escalation, ask_id, session_factory, link_required_fn, publish_fn)
-        except Exception:
-            pass
-
-    def _arm():
-        for d in delays:
-            t = _loop.create_task(_one(d))
-            _tasks.add(t)
-            t.add_done_callback(_tasks.discard)
-
-    _loop.call_soon_threadsafe(_arm)
-    return len(delays)

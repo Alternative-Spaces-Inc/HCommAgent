@@ -185,6 +185,31 @@ class Event(Base):
     created_at = Column(DateTime, nullable=False, index=True)
 
 
+class ScheduledJob(Base):
+    """HCA-P20 Day 3 (app/jobs.py): one row per timed action on an ask, the
+    escalation of a later rank (kind escalate, run_at = the rank's window
+    open) or the expiry (kind expire, run_at = expires_at). Any instance's
+    worker may claim a due row: the claim is a compare-and-set on
+    lease_expires_at (FOR UPDATE SKIP LOCKED on Postgres so claimants do
+    not queue on each other), so each job runs once however many instances
+    poll. Replaces the in-process asyncio timers (P14) and the sweep's
+    unleased scan (P19)."""
+    __tablename__ = "scheduled_jobs"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    ask_id = Column(String, ForeignKey("asks.id"), nullable=False, index=True)
+    kind = Column(String, nullable=False)
+    run_at = Column(DateTime, nullable=False, index=True)
+    lease_owner = Column(String, nullable=True)
+    lease_expires_at = Column(DateTime, nullable=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    done_at = Column(DateTime, nullable=True, index=True)
+    result = Column(JSON, nullable=True)
+    last_error = Column(String, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+
+
 class Nonce(Base):
     """HCA-P20 Day 2 (app/nonces.py): one row per (device, nonce) seen inside
     the signature skew window, so a signed request replayed against another

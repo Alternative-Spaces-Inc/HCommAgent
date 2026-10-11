@@ -43,11 +43,17 @@ async def _stop_event_listener():
 
 
 @app.on_event("startup")
-async def _bind_routing_loop():
-    # HCA-P14: escalation timers (app/routing.py) run on the server loop.
-    import asyncio
-    from . import routing
-    routing.bind_loop(asyncio.get_running_loop())
+async def _start_jobs_worker():
+    # HCA-P20 Day 3: escalation and expiry run as leased scheduled_jobs rows
+    # claimed by this thread (app/jobs.py); the P14 loop timers are gone.
+    from . import jobs
+    jobs.start_worker()
+
+
+@app.on_event("shutdown")
+async def _stop_jobs_worker():
+    from . import jobs
+    jobs.stop_worker()
 
 
 @app.get("/healthz")
@@ -71,8 +77,11 @@ def healthz():
         return JSONResponse(status_code=503, content={"status": "degraded", "db": "down"})
     # HCA-P20 Day 2: the fan-out listener's state, so a deploy can prove the
     # instance really is on LISTEN (poll fallback keeps delivery either way).
-    from . import events
+    from . import events, jobs
     ls = events.listener_state
+    js = jobs.worker_state
     return {"status": "ok", "db": "ok",
             "events": {"listener": "connected" if ls["connected"] else ("poll" if not ls["running"] else "reconnecting"),
-                       "notifications": ls["notifications"], "errors": ls["errors"]}}
+                       "notifications": ls["notifications"], "errors": ls["errors"]},
+            "jobs": {"worker": "running" if js["running"] else "stopped", "polls": js["polls"], "claimed": js["claimed"],
+                     "done": js["done"], "failed": js["failed"]}}
