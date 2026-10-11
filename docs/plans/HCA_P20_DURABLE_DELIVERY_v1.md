@@ -75,6 +75,8 @@ Verified against repo files on branch origin/p19/day1-tenancy (head 37c0282):
 
 ## 6 Owner decisions
 
+All four taken 2026-10-10 18:2x PT, recorded as decision 6 in docs/decisions/DECISIONS_20261010.md: 1 LISTEN/NOTIFY plus 2 s poll, 2 24 h or 1,000 events, 3 _MAX_INSTANCES 3, 4 dual mode.
+
 ### Selection 1: Event Fan-Out Mechanism
 - Title: LISTEN/NOTIFY versus Poll-Only Fan-Out
 - Suggested option: Postgres LISTEN/NOTIFY with 2-second polling fallback.
@@ -126,8 +128,8 @@ Verified against repo files on branch origin/p19/day1-tenancy (head 37c0282):
 
 | Day | State | Evidence |
 | --- | --- | --- |
-| Day 1 | built, PR open | Branch p20/day1-events: migration d4e5f6a7b8c9 (events table, index tenant_id plus id), publish() writes the row before any queue and the envelope carries the row id as the SSE id line, replay() returns the rows a device missed (same tenant and routing set rule as live delivery, 24 h or 1,000 rows, env HCA_EVENT_REPLAY_WINDOW_SECONDS and HCA_EVENT_REPLAY_MAX_EVENTS), GET /v1/inbox/stream reads Last-Event-ID (header) or ?since= and replays before going live with no duplicate at the seam. Stream payloads are JSON-encoded once (ISO 8601 datetimes, matching the HTTP responses; before P20 the stream wrote str(datetime)). Proofs: tests/test_events.py (row written, monotonic ids, replay order, device and tenant filter, window and cap, header parsing), tests/test_inbox_api.py (reconnect replays missed events then live, no replay without the header, route parameters in the schema); 119 passed locally, alembic upgrade and downgrade on SQLite, check_migrated.py OK with 11 tables, openapi parity OK. Day 1 contributes nothing to fan-out yet: the queue set is still per instance (Day 2). |
-| Day 2 | pending | LISTEN/NOTIFY plus 2 s poll (selection 1), nonces table |
+| Day 1 | live | PR 92 merged, main 7afcd8ff, Cloud Build cd1579d7 SUCCESS, migrate job asserted head d4e5f6a7b8c9, revision hca-api-service-00068, smoke-live PASS (docs/deploys/2026-10-10_p20_day1_events.md). Content: migration d4e5f6a7b8c9 (events table, index tenant_id plus id), publish() writes the row before any queue and the envelope carries the row id as the SSE id line, replay() returns the rows a device missed (same tenant and routing set rule as live delivery, 24 h or 1,000 rows, env HCA_EVENT_REPLAY_WINDOW_SECONDS and HCA_EVENT_REPLAY_MAX_EVENTS), GET /v1/inbox/stream reads Last-Event-ID (header) or ?since= and replays before going live with no duplicate at the seam. Stream payloads are JSON-encoded once (ISO 8601 datetimes, matching the HTTP responses; before P20 the stream wrote str(datetime)). Proofs: tests/test_events.py (row written, monotonic ids, replay order, device and tenant filter, window and cap, header parsing), tests/test_inbox_api.py (reconnect replays missed events then live, no replay without the header, route parameters in the schema); 119 passed locally, alembic upgrade and downgrade on SQLite, check_migrated.py OK with 11 tables, openapi parity OK. Day 1 contributes nothing to fan-out yet: the queue set is still per instance (Day 2). |
+| Day 2 | pending | LISTEN/NOTIFY plus 2 s poll (selection 1), nonces table, Mac app sends Last-Event-ID on reconnect |
 | Day 3 | pending | leased jobs for escalation and expiry |
 | Day 4 | pending | two process test, metrics, _MAX_INSTANCES 3 (selection 3) |
 | Day 5 | pending | deploy, restart proof, record |
