@@ -61,6 +61,19 @@ A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 
 - API restart: the Day 4 rollover to revision 00072 restarted every instance while the owner's Mac Notifier and extension held streams; after the rollover the metrics page showed replay gaps 0, truncated 0 and drops 0, and the listener reconnected (connected true, errors 0). Replays 0 means no client had missed an event across the rollover (newest_id 10 was already delivered before it).
 - Pending owner proof: an ask created while the Mac Notifier is stopped (`launchctl bootout` of the P18 agent, then `launchctl bootstrap`), expected to appear as one banner on restart with replay replays 1, replayed_events 1, gaps 0 on the metrics page. Recorded here when run.
 
+## Live owner proof (12:3x PT, revision 00073)
+
+Run from the owner's Mac by the agent over the bridge: `launchctl bootout` of the P18 login agent (no Notifier process after 3 s), one ask created with a temporary api key while nothing listened (request 2d91eb3a, event id 13, title "P20 restart proof: did this banner appear once?", radio Once / Twice or more / Never), `launchctl bootstrap` 5 s later (Notifier pid 76764 running under launchd), key revoked.
+
+- Metrics 20 s after the restart: the Mac device's stream open at last_sent_id 13, drops 0, gaps 0.
+- The owner answered on the banner: state answered, value `twice`, answered_by "Al MacBook Notifier", surface macos_notification, path [macos_notification, banner, option_1], duration 306 s. Audit row carries the Mac device id.
+- Delivery after a process restart is proven: an ask created while the Notifier was down reached the owner and was answered through HCA itself.
+
+Two findings:
+
+1. The owner saw the banner more than once over the 306 s. The store dedupes the inbox read against the stream (`shown` set), so a startup double post is excluded by code; the P14 repost of a cleared banner every 90 s is the expected cause, but the Notifier writes no log line per post, so this run cannot distinguish the two. Follow-up: a per-post log line (request id, reason: added, repost) in the Notifier.
+2. Metrics replay counters stayed at 0: the Mac app keeps its Last-Event-ID in memory only, so a fresh process reconnects without one and the ask arrived through the startup inbox read, not through SSE replay. The server side replay is proven by the pipeline proof; the Mac client does not yet use it across a restart. Follow-up: persist the last event id (UserDefaults) and send it on the first connect.
+
 ## Status
 
-Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live. Open: the live owner proof (Notifier stopped, ask created, banner on restart).
+Day 4 live on revision 00072 with max instances 3. Day 5 live on revision 00073: proof script passing in the pipeline on every build, stream cap live, live owner proof done (answered on the banner after a Notifier restart). Two Mac client follow-ups recorded above.
