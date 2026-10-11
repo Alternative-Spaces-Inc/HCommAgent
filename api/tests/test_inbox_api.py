@@ -126,8 +126,87 @@ def test_inbox_event_source_delivers_a_published_event():
         await gen.__anext__()  # the ": connected" comment
         publish("request.cancelled", {"request_id": "xyz"}, tenant_id=DEFAULT_TENANT_ID)
         chunk = await asyncio.wait_for(gen.__anext__(), timeout=1)
-        assert chunk.startswith("event: request.cancelled\n")
+        assert chunk.startswith("id: ")
+        assert "\nevent: request.cancelled\n" in chunk
         assert "xyz" in chunk
         await gen.aclose()
 
     asyncio.run(run())
+
+
+# HCA-P20 Day 1: a reconnecting stream replays what it missed.
+
+def _parse_sse(chunk: str) -> dict:
+    import json
+    out = {}
+    for line in chunk.strip().splitlines():
+        k, _, v = line.partition(": ")
+        out[k] = json.loads(v) if k == "data" else v
+    return out
+
+
+def test_stream_with_last_event_id_replays_missed_events_then_goes_live():
+    import asyncio
+    from app.inbox_api import inbox_event_source
+    from app.events import publish
+
+    device = _stream_device()
+
+    async def run():
+        # Session 1: see one event, note its id, drop the connection.
+        gen = inbox_event_source(device, keepalive_seconds=5)
+        await gen.__anext__()
+        publish("request.cancelled", {"request_id": "seen"}, tenant_id=DEFAULT_TENANT_ID)
+        seen = _parse_sse(await asyncio.wait_for(gen.__anext__(), timeout=1))
+        await gen.aclose()
+
+        # While disconnected: two events the device should get, one addressed
+        # to another device it must not get.
+        publish("request.cancelled", {"request_id": "missed-1"}, tenant_id=DEFAULT_TENANT_ID)
+        publish("request.created", {"request_id": "not-mine"}, tenant_id=DEFAULT_TENANT_ID, device_ids=["some-other-device"])
+        publish("request.created", {"request_id": "missed-2"}, tenant_id=DEFAULT_TENANT_ID, device_ids=[device.id])
+
+        # Session 2: reconnect with Last-Event-ID.
+        gen2 = inbox_event_source(device, keepalive_seconds=5, last_event_id=int(seen["id"]))
+        assert await gen2.__anext__() == ": connected\n\n"
+        r1 = _parse_sse(await asyncio.wait_for(gen2.__anext__(), timeout=1))
+        r2 = _parse_sse(await asyncio.wait_for(gen2.__anext__(), timeout=1))
+        assert [r1["data"]["data"]["request_id"], r2["data"]["data"]["request_id"]] == ["missed-1", "missed-2"]
+        assert int(seen["id"]) < int(r1["id"]) < int(r2["id"])
+        # Live delivery resumes after the replay, with no duplicate of r2.
+        publish("request.answered", {"request_id": "live"}, tenant_id=DEFAULT_TENANT_ID)
+        live = _parse_sse(await asyncio.wait_for(gen2.__anext__(), timeout=1))
+        assert live["data"]["data"]["request_id"] == "live"
+        assert int(live["id"]) > int(r2["id"])
+        await gen2.aclose()
+
+    asyncio.run(run())
+
+
+def test_stream_without_last_event_id_replays_nothing():
+    import asyncio
+    from app.inbox_api import inbox_event_source
+    from app.events import publish
+
+    device = _stream_device()
+    publish("request.cancelled", {"request_id": "before-connect"}, tenant_id=DEFAULT_TENANT_ID)
+
+    async def run():
+        gen = inbox_event_source(device, keepalive_seconds=0.2)
+        await gen.__anext__()
+        nxt = await asyncio.wait_for(gen.__anext__(), timeout=1)
+        assert nxt == ": keep-alive\n\n", f"an event was replayed without Last-Event-ID: {nxt!r}"
+        await gen.aclose()
+
+    asyncio.run(run())
+
+
+def test_stream_route_reads_last_event_id_header_and_since_query():
+    import inspect
+    from app import inbox_api
+    params = inspect.signature(inbox_api.stream_inbox).parameters
+    assert "last_event_id_header" in params and "since" in params
+    spec = app.openapi()["paths"]["/v1/inbox/stream"]["get"]
+    names = {(p["in"], p["name"]) for p in spec.get("parameters", [])}
+    assert ("header", "last-event-id") in names or ("header", "Last-Event-ID") in names, names
+    assert ("query", "since") in names
