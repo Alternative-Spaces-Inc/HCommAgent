@@ -13,6 +13,7 @@ from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, CancelRequestBody
 from .events import publish
 from .webhooks import deliver_outcome
+from . import webhook_destinations
 from .auth import require_agent_key, require_linked_device, google_link_required
 from . import routing, jobs
 from . import controls
@@ -125,6 +126,15 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
         controls.validate_request_shape(body.control, body.options_or_fields, body.title, body.why, body.caller)
     except controls.ControlError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
+    deliver_to = body.deliver_to.model_dump()
+    deliver_to["destination_id"] = None
+    if deliver_to.get("mode") == "webhook":
+        # HCA-P21a decision 7: only a registered, non revoked destination of
+        # this caller and tenant receives outcomes; anything else is a 400.
+        dest = webhook_destinations.find_active_by_url(db, key.tenant_id, key.caller, deliver_to.get("url") or "")
+        if dest is None:
+            raise HTTPException(status_code=400, detail="deliver_to.url is not a registered webhook destination; POST /v1/webhooks first")
+        deliver_to["destination_id"] = dest.id
     now = datetime.now(timezone.utc)
     expires_at = _expires_at(now, body.deadline_at)
     ask = models.Ask(
@@ -141,7 +151,7 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
         voice=body.voice.model_dump() if body.voice else None,
         deadline_at=_utc(body.deadline_at),
         expiry_policy=body.expiry_policy,
-        deliver_to=body.deliver_to.model_dump(),
+        deliver_to=deliver_to,
         state="queued",
         created_at=now,
         expires_at=expires_at,
