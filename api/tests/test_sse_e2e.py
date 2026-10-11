@@ -158,7 +158,9 @@ async def _sse_e2e(base_url):
         "control": "radio",
         "options_or_fields": [{"id": "a", "label": "A"}, {"id": "b", "label": "B"}],
         "suggested": {"option_id": "a", "why": "A is simpler"},
-        "deliver_to": {"mode": "webhook", "url": "https://example.test/hook"},
+        # HCA-P21a: a real server process resolves DNS for webhook urls, and
+        # this test is about the stream, so the ask polls.
+        "deliver_to": {"mode": "poll"},
     }
 
     async with httpx.AsyncClient(base_url=base_url, timeout=HARD_TIMEOUT_SECONDS) as client:

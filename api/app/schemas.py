@@ -48,6 +48,9 @@ class Delivery(BaseModel):
 class DeliverTo(BaseModel):
     mode: Optional[Literal["webhook", "poll", "websocket"]] = None
     url: Optional[str] = None
+    # HCA-P21a: set by the server from the registry when mode is webhook; a
+    # value sent by the caller is ignored.
+    destination_id: Optional[str] = None
 
 
 class CollectionRequest(BaseModel):

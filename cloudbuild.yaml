@@ -91,6 +91,10 @@ steps:
       - HCA_API_KEY_PEPPER=smoke-local-pepper-0123456789
       - HCA_REQUIRE_GOOGLE_LINK=0
       - DATABASE_URL=sqlite:////tmp/hca_smoke.db
+      # HCA-P21a: the smoke webhook receiver is a loopback http server; this
+      # switch lets it pass the SSRF rules here only. The deploy step never
+      # sets it.
+      - HCA_WEBHOOK_ALLOW_INSECURE=1
     args:
       - -c
       - |
