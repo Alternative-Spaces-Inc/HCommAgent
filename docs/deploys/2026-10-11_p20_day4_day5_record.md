@@ -44,6 +44,8 @@ PASS api key revoked: 200
 
 The smoke-local step of cloudbuild.yaml now runs the proof after the golden path on every build: uvicorn is killed and started again inside the gap, so every merge proves that events written before a restart reach a client that reconnects after it. The step's pass or fail is in each build's log.
 
+First pipeline run (Cloud Build 4e3d5175 on main 98f77087, PR 102) FAILED at exactly one of the twelve checks, `gap command (API restart): exit 1`: the gap script waited for /healthz with curl, which the python:3.12-slim step image does not ship, so the wait timed out although the restarted API was up (the replay checks after it all passed). The step's first health wait had the same silent problem and spent its 30 s budget on every build. Fix on the follow-up PR: scripts/wait_healthz.py (urllib) replaces both curl loops, and restart_proof.py prints the gap command's last output lines when it fails.
+
 ## Live
 
 A fresh device cannot read the live stream because HCA_REQUIRE_GOOGLE_LINK is 1 (P7), so the live proof is read from the linked clients and the metrics page rather than from a temporary device:

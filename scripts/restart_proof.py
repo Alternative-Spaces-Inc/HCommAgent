@@ -157,8 +157,10 @@ def main() -> int:
         # 4. the gap: optionally restart the API in the middle of it
         if args.gap_cmd:
             import subprocess
-            rc = subprocess.call(args.gap_cmd, shell=True)
-            ok_all &= check("gap command (API restart)", rc == 0, f"exit {rc}")
+            run = subprocess.run(args.gap_cmd, shell=True, capture_output=True, text=True)
+            rc = run.returncode
+            tail = (run.stdout + run.stderr).strip().splitlines()[-5:]
+            ok_all &= check("gap command (API restart)", rc == 0, f"exit {rc}" + (": " + " | ".join(tail) if rc else ""))
         time.sleep(args.gap)
 
         # 5a. reconnect with ?since=
