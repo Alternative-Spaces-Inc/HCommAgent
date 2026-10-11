@@ -1,0 +1,1 @@
+P24: Starting macOS hardening and strict concurrency setup
