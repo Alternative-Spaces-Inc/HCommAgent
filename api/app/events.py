@@ -78,6 +78,12 @@ _lock = threading.Lock()
 # instead of vanishing (read by tests and the Day 4 metrics).
 dropped: dict[str, int] = {}
 
+# HCA-P20 Day 4: the last event id each open stream has written to its
+# client (keyed by its queue), so stream lag can be measured against the
+# newest events row (app/metrics.py). Replay counters for the same page.
+_last_sent: dict[asyncio.Queue, int] = {}
+replay_state: Dict[str, int] = {"replays": 0, "replayed_events": 0, "gaps": 0, "truncated": 0}
+
 # Listener state for /healthz and the Day 4 metrics.
 listener_state: Dict[str, Any] = {"running": False, "connected": False, "notifications": 0, "errors": 0, "last_error": None}
 _listener_thread: Optional[threading.Thread] = None
@@ -111,6 +117,23 @@ def subscribe(device_id: str, tenant_id: str) -> asyncio.Queue:
 def unsubscribe(q: asyncio.Queue) -> None:
     with _lock:
         _subscribers.pop(q, None)
+        _last_sent.pop(q, None)
+
+
+def mark_sent(q: asyncio.Queue, event_id: Optional[int]) -> None:
+    """The stream generator reports each id it has written to the client."""
+    if event_id is None:
+        return
+    with _lock:
+        if q in _subscribers:
+            _last_sent[q] = max(_last_sent.get(q, 0), int(event_id))
+
+
+def stream_positions() -> List[Dict[str, Any]]:
+    """One row per open stream: device, tenant, last id written (0 when none yet)."""
+    with _lock:
+        return [{"device_id": s.device_id, "tenant_id": s.tenant_id, "last_sent_id": _last_sent.get(q, 0)}
+                for q, s in _subscribers.items()]
 
 
 def subscriber_count() -> int:
@@ -210,12 +233,28 @@ def replay(db, *, tenant_id: str, device_id: str, after_id: int, now: Optional[d
             .where(models.Event.created_at >= floor)
             .order_by(models.Event.id.asc()))
     out: List[Dict[str, Any]] = []
+    truncated = False
     for row in db.execute(stmt).scalars():
         if row.device_ids is not None and device_id not in row.device_ids:
             continue
         out.append(_envelope(int(row.id), row.event, row.data, row.created_at))
         if len(out) >= max_events:
+            truncated = True
             break
+    # HCA-P20 Day 4: a replay gap is a reconnect whose missed rows cannot all
+    # be served: the client's last id is older than the oldest row still in
+    # the window (rows between may have aged out), or the replay hit
+    # max_events (rows beyond it are not sent now; the client gets them on its
+    # next reconnect from the last id it saw). Counted, never hidden.
+    oldest_in_window = db.execute(select(func.min(models.Event.id)).where(models.Event.created_at >= floor)).scalar()
+    oldest_any = db.execute(select(func.min(models.Event.id))).scalar()
+    aged_out = oldest_in_window is not None and oldest_any is not None and oldest_any < oldest_in_window and after_id < oldest_in_window - 1
+    replay_state["replays"] += 1
+    replay_state["replayed_events"] += len(out)
+    if truncated:
+        replay_state["truncated"] += 1
+    if aged_out or truncated:
+        replay_state["gaps"] += 1
     return out
 
 

@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from . import models
 from .db import get_db, SessionLocal
-from .events import subscribe, unsubscribe, format_sse, replay, parse_last_event_id
+from .events import subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
 from .requests_api import _ask_to_collection_request
 from .auth import require_linked_device, google_link_required
 from . import routing
@@ -81,12 +81,14 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
         if last_event_id is not None:
             for envelope in await asyncio.to_thread(_replay_for, device, last_event_id):
                 high_water = max(high_water, envelope["id"])
+                mark_sent(q, envelope["id"])
                 yield format_sse(envelope)
         while True:
             try:
                 envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
                 if envelope.get("id") is not None and envelope["id"] <= high_water:
                     continue
+                mark_sent(q, envelope.get("id"))
                 yield format_sse(envelope)
             except asyncio.TimeoutError:
                 if not await asyncio.to_thread(authorized_fn, device.id):

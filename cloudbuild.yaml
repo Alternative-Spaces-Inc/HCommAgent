@@ -36,7 +36,9 @@ substitutions:
   _SWEEP_TOKEN_SECRET: hca-sweep-trigger-token
   _ADMIN_TOKEN_SECRET: hca-admin-token
   _PEPPER_SECRET: hca-api-key-pepper   # HMAC pepper for api key hashes (api/app/apikeys.py)
-  _MAX_INSTANCES: "1"               # in-process event bus; see api/Dockerfile
+  _MAX_INSTANCES: "3"               # HCA-P20 Day 4: events table plus LISTEN/NOTIFY fan-out and leased jobs make instances interchangeable (owner selection 3)
+  _DB_POOL_SIZE: "2"                # per instance; with _DB_MAX_OVERFLOW and the listener connection, 5 slots per instance, 15 across 3, against the 25 of the smallest Cloud SQL tier (a draining revision and the migrate job need the rest)
+  _DB_MAX_OVERFLOW: "2"
   _GOOGLE_CLIENT_ID: ""             # HCA-P7: public client id of the Chrome Extension OAuth client (set by the block)
   _GOOGLE_CLIENT_IDS: ""            # HCA-P13: extra client ids allowed to link, comma separated (Desktop client of the macOS app)
   _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = any verified account
@@ -164,7 +166,7 @@ steps:
           --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
           --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest,HCA_API_KEY_PEPPER=${_PEPPER_SECRET}:latest \
-          "--set-env-vars=^:^HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}" \
+          "--set-env-vars=^:^HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}:HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}:HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}" \
           --min-instances=1 \
           --max-instances=${_MAX_INSTANCES} \
           --concurrency=80 \

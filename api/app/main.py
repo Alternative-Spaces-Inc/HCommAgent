@@ -5,6 +5,7 @@ from .requests_api import router as requests_router, audit_router
 from .inbox_api import router as inbox_router
 from .apikeys_api import router as apikeys_router
 from .sweep_api import router as sweep_router
+from .metrics_api import router as metrics_router
 from .devices_api import router as devices_router
 from .privacy import router as privacy_router
 from .tenancy import router as tenants_router
@@ -15,6 +16,7 @@ app.include_router(audit_router)
 app.include_router(inbox_router)
 app.include_router(apikeys_router)
 app.include_router(sweep_router)
+app.include_router(metrics_router)
 app.include_router(devices_router)
 app.include_router(tenants_router)
 app.include_router(privacy_router)
