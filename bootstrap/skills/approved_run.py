@@ -32,7 +32,7 @@ import argparse, datetime, json, os, re, sys, time
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import mac_bridge as mb  # noqa: E402
 
-PROMPT_RE = re.compile(r"^alfarmer@MBP---Al [^%]*% ?")
+PROMPT_RE = re.compile(r"^[A-Za-z0-9._-]+@[^ ]+ [^%]*% ?")
 REDACT = [
     (re.compile(r"(ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}"), "[redacted-github-token]"),
     (re.compile(r"ya29\.[A-Za-z0-9_\-]+"), "[redacted-google-token]"),

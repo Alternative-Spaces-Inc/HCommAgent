@@ -14,9 +14,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Run dash gate
@@ -27,9 +27,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Run client data gate
@@ -40,9 +40,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install PyYAML
@@ -55,9 +55,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.11'
       - name: Install openapi-spec-validator
@@ -89,43 +89,58 @@ jobs:
       DATABASE_URL: postgresql+psycopg2://hca:hca@localhost:5432/hca_test
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install dependencies
         working-directory: api
-        run: pip install -r requirements.txt psycopg2-binary
+        run: pip install -r requirements.txt psycopg2-binary pytest-cov
       - name: Run migrations
         working-directory: api
         run: alembic upgrade head
-      - name: Run pytest
+      - name: Check the database is at head (catches a rolled back upgrade)
         working-directory: api
-        run: pytest -v
+        run: python3 scripts/check_migrated.py
+      - name: Run pytest with coverage (fails under 85 percent of app/)
+        working-directory: api
+        run: pytest -v --cov=app --cov-report=term-missing --cov-fail-under=85
+      - name: Check OpenAPI parity (yaml versus generated schema)
+        run: pip install pyyaml && python3 .github/gates/check_openapi_parity.py
 
   extension:
     name: Extension Tests (Node 20)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: '20'
       - name: Run the extension unit tests
         working-directory: extension
         run: npm test
 
+  swift-tests:
+    name: Swift Tests (macOS)
+    runs-on: macos-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+      - name: Run the HCACore and HCANotifier XCTests
+        working-directory: macos
+        run: swift test 2>&1 | tail -40
+
   ruff:
     name: Python Lint (ruff)
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install ruff
@@ -138,9 +153,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Set up Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
       - name: Install pip-audit

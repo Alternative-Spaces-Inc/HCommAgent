@@ -8,6 +8,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY app ./app
 COPY alembic.ini .
 COPY alembic ./alembic
+COPY scripts ./scripts
 
 # Local fallback only; Cloud Run injects DATABASE_URL from Secret Manager.
 ENV DATABASE_URL=sqlite:////app/hca.db

@@ -3,7 +3,7 @@ repo: Alternative-Spaces-Inc/human-collections-agent
 skills:
 - name: approved_run.py
   path: bootstrap/skills/approved_run.py
-  sha256: 7fdd3d83f7abdc7fa154c46d51258867c58d0b5ded1a29712f56fef709ba3794
+  sha256: 4713428c62db5a8eefa6293f98c0691b7a85b1b7f49255a948a2760f69295196
   purpose: Approved-command execution lane for terminal bridge
 - name: mac_bridge.py
   path: bootstrap/skills/mac_bridge.py
@@ -39,7 +39,7 @@ skills:
   purpose: Skill auto-restore installer
 - name: secret-parity-check.sh
   path: bootstrap/skills/secret-parity-check.sh
-  sha256: c85e89d15c5100a8a58b503f9925bf5cc053bdb89c597026940e32abdfbc5345
+  sha256: 32a0a3d9ef568e6d9e48aabc9660c2f368323f4ca5eed39e0c99f9c0e5e049d2
   purpose: Agent secret parity verification
 rules:
 - bootstrap/agents-surface/rules/sub_agent_prompts_opus55.md

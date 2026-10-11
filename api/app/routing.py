@@ -51,10 +51,10 @@ def window_seconds(red_gate: bool, base: Optional[float] = None) -> float:
     return base / 2.0 if red_gate else base
 
 
-def eligible_devices(db: Session, now: datetime, link_required: bool) -> List[models.Device]:
+def eligible_devices(db: Session, now: datetime, link_required: bool, tenant_id: str) -> List[models.Device]:
     """Unrevoked devices seen within the active window, linked when the gate is on."""
     cutoff = now - timedelta(seconds=active_seconds())
-    rows = db.execute(select(models.Device).where(models.Device.revoked_at.is_(None))).scalars().all()
+    rows = db.execute(select(models.Device).where(models.Device.tenant_id == tenant_id).where(models.Device.revoked_at.is_(None))).scalars().all()
     out = []
     for d in rows:
         seen = _aware(d.last_seen_at)
@@ -81,7 +81,7 @@ def visible_from(created_at: datetime, rank: int, red_gate: bool) -> datetime:
 
 def visible_to(db: Session, ask: models.Ask, now: datetime, link_required: bool) -> List[str]:
     """Device ids that may see the ask at `now`, in ladder order."""
-    eligible = eligible_devices(db, now, link_required)
+    eligible = eligible_devices(db, now, link_required, ask.tenant_id)
     out = []
     for d in sorted(eligible, key=lambda d: (d.priority, d.created_at)):
         if visible_from(ask.created_at, rank_of(d, eligible), bool(ask.red_gate)) <= now:
@@ -90,7 +90,9 @@ def visible_to(db: Session, ask: models.Ask, now: datetime, link_required: bool)
 
 
 def is_visible(db: Session, ask: models.Ask, device: models.Device, now: datetime, link_required: bool) -> bool:
-    eligible = eligible_devices(db, now, link_required)
+    if device.tenant_id != ask.tenant_id:
+        return False
+    eligible = eligible_devices(db, now, link_required, ask.tenant_id)
     if all(d.id != device.id for d in eligible):
         # The caller was just seen by the auth layer; treat it as eligible
         # even if its row has not been refreshed in this session.
@@ -130,12 +132,13 @@ def fire_escalation(ask_id: str, session_factory, link_required_fn, publish_fn, 
             return None
         link_required = link_required_fn()
         ids = visible_to(db, ask, now, link_required)
-        eligible = eligible_devices(db, now, link_required)
+        eligible = eligible_devices(db, now, link_required, ask.tenant_id)
         rank0 = {d.id for d in eligible if rank_of(d, eligible) == 0}
         if not (set(ids) - rank0):
             return None  # no later rank's window has opened yet
         data = _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": ids}
-    return publish_fn("request.escalated", data)
+        tenant_id = ask.tenant_id
+    return publish_fn("request.escalated", data, tenant_id=tenant_id, device_ids=ids)
 
 
 def schedule_escalations(ask_id: str, delays: List[float], session_factory, link_required_fn, publish_fn) -> int:

@@ -21,6 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 os.environ.setdefault("WEBHOOK_RETRY_DELAYS", "0,0")
 os.environ.setdefault("HCA_ADMIN_TOKEN", "test-admin-token")
+os.environ.setdefault("HCA_API_KEY_PEPPER", "test-pepper-0123456789abcdef")
 
 import httpx
 import pytest
@@ -48,3 +49,14 @@ def webhook_recorder():
         yield rec
     finally:
         webhooks.set_transport_factory(None)
+
+
+@pytest.fixture(autouse=True)
+def default_tenant():
+    """HCA-P19: test modules rebuild the schema from metadata, which has no
+    default tenant row; every api key, device and ask needs one."""
+    from app.db import SessionLocal
+    from app import models
+    with SessionLocal() as db:
+        models.ensure_default_tenant(db)
+    yield

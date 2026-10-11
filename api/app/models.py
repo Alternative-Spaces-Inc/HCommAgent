@@ -1,5 +1,5 @@
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Integer, Boolean, ForeignKey
+from sqlalchemy import Column, String, DateTime, JSON, Integer, Boolean, ForeignKey, UniqueConstraint
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -9,12 +9,59 @@ def gen_id() -> str:
     return uuid.uuid4().hex
 
 
+# HCA-P19: every record belongs to exactly one tenant. Rows that predate the
+# tenants table were backfilled to this id by the P19 migration so an
+# upgraded deployment keeps working as a one-tenant installation.
+DEFAULT_TENANT_ID = "default"
+
+
+class Tenant(Base):
+    """One customer organisation. Asks, devices, api keys and audit rows
+    carry tenant_id; every read, stream and write is filtered on it from
+    authenticated server state (the api key's or the device's tenant),
+    never from a client supplied value."""
+    __tablename__ = "tenants"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    slug = Column(String, nullable=False, unique=True)
+    name = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    disabled_at = Column(DateTime, nullable=True)
+
+
+def ensure_default_tenant(db) -> "Tenant":
+    """Idempotent: the P19 migration inserts the default tenant for upgraded
+    deployments; a database built from metadata (tests, a fresh local run
+    without alembic) gets it here, at app startup."""
+    from datetime import datetime, timezone
+    t = db.get(Tenant, DEFAULT_TENANT_ID)
+    if t is None:
+        t = Tenant(id=DEFAULT_TENANT_ID, slug=DEFAULT_TENANT_ID, name="Default tenant", created_at=datetime.now(timezone.utc))
+        db.add(t)
+        db.commit()
+    return t
+
+
+class TenantOwner(Base):
+    """A Google account allowed to link a device of this tenant
+    (app/googleauth.py). Replaces the deployment wide HCA_GOOGLE_OWNERS
+    list, which stays as a fallback for the default tenant only."""
+    __tablename__ = "tenant_owners"
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    email = Column(String, nullable=False)
+    created_at = Column(DateTime, nullable=False)
+    removed_at = Column(DateTime, nullable=True)
+
+
 class Ask(Base):
     """A CollectionRequest plus its RequestView tracking fields."""
     __tablename__ = "asks"
 
     id = Column(String, primary_key=True, default=gen_id)
     caller = Column(String, nullable=False)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, default=DEFAULT_TENANT_ID, server_default=DEFAULT_TENANT_ID, index=True)
     audience = Column(String, nullable=False)
     title = Column(String, nullable=False)
     why = Column(String, nullable=True)
@@ -71,6 +118,7 @@ class ApiKey(Base):
 
     id = Column(String, primary_key=True, default=gen_id)
     caller = Column(String, nullable=False, unique=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, default=DEFAULT_TENANT_ID, server_default=DEFAULT_TENANT_ID, index=True)
     key_prefix = Column(String, nullable=True, unique=True)
     key_hash = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
@@ -83,6 +131,7 @@ class AuditRow(Base):
 
     id = Column(String, primary_key=True, default=gen_id)
     ask_id = Column(String, ForeignKey("asks.id"), nullable=False, unique=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, default=DEFAULT_TENANT_ID, server_default=DEFAULT_TENANT_ID, index=True)
     control = Column(String, nullable=False)
     value = Column(JSON, nullable=True)
     answered_by = Column(String, nullable=True)
@@ -96,6 +145,24 @@ class AuditRow(Base):
     passthrough = Column(JSON, nullable=True)
 
     ask = relationship("Ask", back_populates="answer")
+
+
+class IdempotencyKey(Base):
+    """HCA-P19 Day 2 (app/idempotency.py): one stored response per
+    (tenant, scope, route, key) so a retried POST replays instead of
+    repeating its effect."""
+    __tablename__ = "idempotency_keys"
+    __table_args__ = (UniqueConstraint("tenant_id", "scope", "route", "key", name="uq_idempotency_scope_key"),)
+
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    scope = Column(String, nullable=False)
+    route = Column(String, nullable=False)
+    key = Column(String, nullable=False)
+    request_hash = Column(String, nullable=False)
+    status_code = Column(Integer, nullable=False)
+    response = Column(JSON, nullable=False)
+    created_at = Column(DateTime, nullable=False, index=True)
 
 
 class WebhookAttempt(Base):
@@ -123,6 +190,7 @@ class Device(Base):
 
     id = Column(String, primary_key=True)
     label = Column(String, nullable=False)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, default=DEFAULT_TENANT_ID, server_default=DEFAULT_TENANT_ID, index=True)
     surface = Column(String, nullable=False, default="browser_overlay")
     # HCA-P14 (app/routing.py): lower is earlier in the surface ladder.
     # Devices with the same value share a rank and see an ask together; the

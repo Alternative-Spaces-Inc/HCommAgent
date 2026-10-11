@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from app.main import app
 from app.db import Base, engine, SessionLocal
 from app.apikeys import verify_api_key
+from sqlalchemy import select
 from authhelper import ADMIN_AUTH
 
 Base.metadata.drop_all(bind=engine)
@@ -118,3 +119,47 @@ def test_revoked_key_is_refused_on_an_agent_route():
     assert client.get("/v1/requests/does-not-exist", headers=agent).status_code == 404
     client.post(f"/v1/api-keys/{issued['prefix']}/revoke", headers=ADMIN_AUTH)
     assert client.get("/v1/requests/does-not-exist", headers=agent).status_code == 403
+
+
+def test_stored_hash_is_peppered_hmac_not_plain_sha256():
+    import hashlib
+    from app import models
+    resp = client.post("/v1/api-keys", json={"caller": "agent-keys-pepper"}, headers=ADMIN_AUTH)
+    assert resp.status_code == 201
+    key = resp.json()["api_key"]
+    secret = "_".join(key.split("_")[3:])
+    db = SessionLocal()
+    try:
+        row = db.execute(select(models.ApiKey).where(models.ApiKey.caller == "agent-keys-pepper")).scalar_one()
+        assert row.key_hash.startswith("hmac256$")
+        assert row.key_hash != hashlib.sha256(secret.encode()).hexdigest()
+    finally:
+        db.close()
+
+
+def test_legacy_sha256_row_verifies_once_and_is_rehashed():
+    import hashlib
+    from app import models
+    resp = client.post("/v1/api-keys", json={"caller": "agent-keys-legacy"}, headers=ADMIN_AUTH)
+    key = resp.json()["api_key"]
+    secret = "_".join(key.split("_")[3:])
+    db = SessionLocal()
+    try:
+        row = db.execute(select(models.ApiKey).where(models.ApiKey.caller == "agent-keys-legacy")).scalar_one()
+        row.key_hash = hashlib.sha256(secret.encode()).hexdigest()  # as minted before the pepper
+        db.commit()
+        assert verify_api_key(db, key) is not None
+        db.refresh(row)
+        assert row.key_hash.startswith("hmac256$")
+        assert verify_api_key(db, key) is not None
+        assert verify_api_key(db, key[:-1] + ("A" if key[-1] != "A" else "B")) is None
+    finally:
+        db.close()
+
+
+def test_missing_pepper_refuses_to_hash(monkeypatch):
+    import pytest
+    from app.apikeys import _hash_secret
+    monkeypatch.delenv("HCA_API_KEY_PEPPER", raising=False)
+    with pytest.raises(RuntimeError):
+        _hash_secret("anything")
