@@ -1,2 +1,26 @@
-# Client data denylist terms.
-# One term or pattern per line. Add terms to fail check_client_data.py scan.
+# Hygiene denylist for the public repository, read by check_client_data.py.
+# One entry per line. A plain line is a literal, case insensitive term.
+# A line starting with "re:" is a case sensitive regular expression.
+# Matches fail the gate; the output masks the matched term.
+#
+# This public file holds credential shapes and wording that must never appear
+# in the product repository. Client and business specific terms live in a
+# private list held outside this repository and are checked before publishing.
+
+# Credential shapes
+re:hca_live_[a-z0-9]{6,}_[A-Za-z0-9_-]{24,}
+re:AKIA[0-9A-Z]{16}
+re:ghp_[A-Za-z0-9]{36}
+re:github_pat_[A-Za-z0-9_]{20,}
+re:AIza[0-9A-Za-z_-]{35}
+re:xox[baprs]-[A-Za-z0-9-]{10,}
+re:sk_live_[A-Za-z0-9]{16,}
+re:-----BEGIN (RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----
+re:"private_key_id"\s*:
+
+# Wording that does not belong in a product repository
+re:\b[Pp]ortfolio\b
+re:\b[Hh]iring\b
+re:\b[Ee]mployer\b
+re:\b[Rr]ecruiter\b
+re:\b[Jj]ob application\b
