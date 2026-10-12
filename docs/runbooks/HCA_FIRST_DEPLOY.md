@@ -1,3 +1,5 @@
+> Historical runbook: these commands target the previous credentials, identities and pipeline. Do not execute them unmodified. Use [the current operations prerequisites](../OPERATIONS.md) and `cloudbuild.yaml` in the reviewed release. The current candidate requires separate `_MIGRATE_SA` and `_MIGRATE_DB_URL_SECRET`, versioned webhook encryption keys, a Google owner gate, and build-specific candidate promotion. The old ungated first-deploy exception is removed.
+
 # HCA first deploy runbook (P5b)
 
 Every block below goes into the Mac Terminal application, one block at a time, each waiting for its output before the next. Each block is self-contained: it sets its own variables and never relies on a block run earlier. Replace the two placeholders once, everywhere: `<PROJECT_ID>` (your GCP project id) and `<REGION>` (one Cloud Run region, for example `us-west1`). Every other name is fixed by this runbook and by `cloudbuild.yaml`; change them together or not at all.

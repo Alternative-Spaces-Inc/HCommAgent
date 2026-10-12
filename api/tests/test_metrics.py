@@ -11,11 +11,10 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_local.db")
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import events, metrics, models
 from authhelper import ADMIN_AUTH, agent_auth
 
-Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 TENANT = models.DEFAULT_TENANT_ID
 

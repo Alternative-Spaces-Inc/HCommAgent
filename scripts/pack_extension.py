@@ -34,8 +34,8 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT = os.path.join(ROOT, "extension")
 REQUIRED = ["manifest.json", "background.js", "popup.html", "popup.js", "options.html", "options.js"]
-EXCLUDE_DIRS = {"tests", "node_modules"}
-EXCLUDE_FILES = {"package.json", "package-lock.json"}
+EXCLUDE_DIRS = {"tests", "node_modules", "docs"}
+EXCLUDE_FILES = {"package.json", "package-lock.json", "README.md"}
 
 
 def collect():

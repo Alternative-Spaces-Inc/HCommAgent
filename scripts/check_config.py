@@ -1,40 +1,50 @@
 #!/usr/bin/env python3
-"""Fail when the live service carries a switch that must stay local
-(HCA-P21a Day 2). Reads the JSON of
-`gcloud run services describe <service> --region <region> --format json`
-from stdin or from the file named as the first argument, and exits 1 when
-any container env entry names a forbidden variable.
-
-HCA_WEBHOOK_ALLOW_INSECURE permits http and loopback webhook destinations for
-the smoke-local receiver; on the deployed service it would turn the SSRF
-rules off. The pipeline runs this right after the deploy step.
-"""
+"""Fail closed on malformed or unsafe candidate service configuration."""
 import json
 import sys
 
-FORBIDDEN = {"HCA_WEBHOOK_ALLOW_INSECURE"}
+REQUIRED = {'DATABASE_URL', 'SWEEP_TRIGGER_TOKEN', 'HCA_ADMIN_TOKEN', 'HCA_API_KEY_PEPPER', 'HCA_WEBHOOK_ENCRYPTION_KEYS'}
 
 
-def main() -> int:
-    raw = open(sys.argv[1]).read() if len(sys.argv) > 1 else sys.stdin.read()
+def validate(service):
+    spec = service.get('spec') or {}
+    containers = ((spec.get('template') or {}).get('spec') or {}).get('containers') or spec.get('containers')
+    if not isinstance(containers, list) or len(containers) != 1:
+        raise ValueError('expected exactly one configured container')
+    entries = containers[0].get('env')
+    if not isinstance(entries, list):
+        raise ValueError('container environment is missing')
+    env = {item.get('name'): item for item in entries}
+    def configured(name):
+        entry = env.get(name) or {}
+        ref = (entry.get('valueFrom') or {}).get('secretKeyRef') or {}
+        return bool(entry.get('value') or (ref.get('name') and ref.get('key')))
+    for name in REQUIRED:
+        if not configured(name):
+            raise ValueError('missing required credential reference: ' + name)
+    for name, expected in (('HCA_ENV', 'production'), ('HCA_REQUIRE_GOOGLE_LINK', '1')):
+        if (env.get(name) or {}).get('value') != expected:
+            raise ValueError(name + ' must be ' + expected)
+    if (env.get('HCA_WEBHOOK_ALLOW_INSECURE') or {}).get('value') not in (None, '', '0'):
+        raise ValueError('insecure webhook switch is forbidden')
+    if not (configured('HCA_GOOGLE_CLIENT_ID') or configured('HCA_GOOGLE_CLIENT_IDS')):
+        raise ValueError('Google client IDs are missing')
+    if not configured('HCA_WEBHOOK_CURRENT_KEY_ID'):
+        raise ValueError('webhook current key ID is missing')
+
+
+def main():
     try:
-        svc = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        print(f"FAIL check_config: service description is not JSON: {exc}")
+        service = json.load(open(sys.argv[1])) if len(sys.argv) > 1 else json.load(sys.stdin)
+        if not isinstance(service, dict):
+            raise ValueError('expected a service object')
+        validate(service)
+    except (ValueError, TypeError, KeyError) as exc:
+        print('FAIL check_config: ' + str(exc))
         return 1
-    containers = (((svc.get("spec") or {}).get("template") or {}).get("spec") or {}).get("containers") or []
-    found = []
-    for c in containers:
-        for env in c.get("env") or []:
-            if env.get("name") in FORBIDDEN:
-                found.append(env["name"])
-    if found:
-        print(f"FAIL check_config: live service env carries {sorted(set(found))}; these are local only switches")
-        return 1
-    names = sorted({e.get("name") for c in containers for e in (c.get("env") or []) if e.get("name")})
-    print(f"OK check_config: {len(containers)} container(s), {len(names)} env vars, no forbidden switch")
+    print('OK check_config: fail-closed production candidate configuration')
     return 0
 
 
-if __name__ == "__main__":
-    sys.exit(main())
+if __name__ == '__main__':
+    raise SystemExit(main())

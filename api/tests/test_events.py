@@ -7,11 +7,10 @@ import asyncio
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models
 from app.events import subscribe, unsubscribe, publish, replay, format_sse, parse_last_event_id, dropped, QUEUE_MAXSIZE
 
-Base.metadata.create_all(bind=engine)
 
 
 def _tenant(tenant_id: str) -> None:
@@ -127,7 +126,10 @@ def test_queue_overflow_is_counted_not_silent():
                 publish("request.answered", {"request_id": "x"}, tenant_id="tenant-a")
             # Day 2: delivery is the dispatcher's, so let it run one pass.
             await _settled(q, QUEUE_MAXSIZE)
-            assert dropped.get("dev-full", 0) == before + 3
+            assert dropped.get("dev-full", 0) == before + 4  # three new rows plus the evicted queued row
+            envelopes = [q.get_nowait() for _ in range(q.qsize())]
+            assert envelopes[-1]["event"] == "stream.reset"
+            assert envelopes[-1]["data"]["reason"] == "queue_overflow"
         finally:
             unsubscribe(q)
 

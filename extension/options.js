@@ -1,6 +1,5 @@
-import { currentDevice } from "./lib/devicekey.js";
 import { fetchSelfDevice, linkGoogle, setSelfPriority, priorityLabel } from "./lib/api.js";
-import { hasHostAccess, requestHostAccess } from "./lib/hostaccess.js";
+import { hasHostAccess, requestHostAccess, normalizeApiOrigin } from "./lib/hostaccess.js";
 
 const API_BASE_KEY = "hca_api_base";
 
@@ -11,6 +10,7 @@ async function load() {
   await showDevice();
   await showGoogle();
   await showPriority();
+  document.getElementById("notification-previews").checked = (await chrome.storage.local.get("hca_notification_previews")).hca_notification_previews === true;
 }
 
 async function apiBase() {
@@ -128,7 +128,8 @@ async function signInWithGoogle() {
 }
 
 async function showDevice() {
-  const device = await currentDevice();
+  const device = await chrome.runtime.sendMessage({ type: "hca_device" });
+  if (!device?.ok) throw new Error(device?.error || "Cannot load device key");
   document.getElementById("device-id").textContent = device.deviceId;
   document.getElementById("device-pem").value = device.publicKeyPem;
   document.getElementById("device-created").textContent = device.createdAt || "";
@@ -138,7 +139,11 @@ async function showDevice() {
 // chrome.permissions.request needs. Order: ask first, store second, so a
 // refused dialog leaves the old (working) URL in place.
 async function save() {
-  const value = document.getElementById("api-base").value.trim().replace(/\/+$/, "");
+  let value;
+  try { value = normalizeApiOrigin(document.getElementById("api-base").value); }
+  catch (e) { setHostStatus(e.message, true); return; }
+  const oldOrigin = await apiBase();
+  if (oldOrigin && oldOrigin !== value && !confirm(`Change API server from ${oldOrigin} to ${value}? Cached decisions and saved offline answers for the old server will be discarded. Verify the new server before continuing.`)) return;
   let access;
   try {
     access = await requestHostAccess(value);
@@ -150,7 +155,8 @@ async function save() {
     setHostStatus(`Access to ${new URL(value).host} was refused; the URL was not saved.`, true);
     return;
   }
-  await chrome.storage.local.set({ [API_BASE_KEY]: value });
+  const result = await chrome.runtime.sendMessage({ type: "hca_set_origin", origin: value });
+  if (!result?.ok) { setHostStatus(result?.error || "Could not save API server", true); return; }
   setHostStatus(`Access to ${new URL(value).host} granted.`);
   const saved = document.getElementById("saved");
   saved.hidden = false;
@@ -171,4 +177,14 @@ document.getElementById("save").addEventListener("click", save);
 document.getElementById("copy-pem").addEventListener("click", copyPem);
 document.getElementById("google-signin").addEventListener("click", signInWithGoogle);
 document.getElementById("priority-save").addEventListener("click", savePriority);
-load();
+document.getElementById("notification-previews").addEventListener("change", (event) => chrome.storage.local.set({ hca_notification_previews: event.target.checked }));
+document.getElementById("rotate-key").addEventListener("click", async () => {
+  if (!confirm("Rotate this device key? Saved offline responses will be discarded. Revoke the old device on the server, then register the new public key and sign in again. Rotation here does not revoke the old server registration.")) return;
+  const result = await chrome.runtime.sendMessage({ type: "hca_rotate_device" });
+  if (!result?.ok) { setGoogleStatus(result?.error || "Key rotation failed", true); return; }
+  // Reload clears keys and configuration cached in this page's module context.
+  location.reload();
+});
+load().catch((error) => setHostStatus(error.message, true));
+
+chrome.storage.onChanged.addListener((changes, area) => { if (area === "local" && changes.hca_device_generation) location.reload(); });

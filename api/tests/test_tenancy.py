@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models
 from app.apikeys import issue_api_key
 from app.devicesig import canonical_string, device_id_for_public_key_pem
@@ -32,8 +32,6 @@ from app.inbox_api import inbox_event_source
 from authhelper import ADMIN_AUTH
 from deviceauth import raw_signature
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
@@ -102,7 +100,7 @@ class S:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _env():
+def _env(isolated_module_database):
     S.ALPHA = _tenant("alpha")
     S.BETA = _tenant("beta")
     S.KEY_A = _key(S.ALPHA, "alpha-agent")

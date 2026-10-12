@@ -1,5 +1,7 @@
 from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from fastapi.responses import JSONResponse
+from fastapi.exceptions import RequestValidationError
 from .db import db_ping
 from .requests_api import router as requests_router, audit_router
 from .inbox_api import router as inbox_router
@@ -10,8 +12,37 @@ from .devices_api import router as devices_router
 from .privacy import router as privacy_router
 from .webhooks_api import router as webhooks_router
 from .tenancy import router as tenants_router
+from .data_api import router as data_router
+from . import limits  # noqa: F401 (registers persistent counters on Base.metadata)
+from .middleware import RequestBounds
 
-app = FastAPI(title="Human Collections Agent (HCA) API")
+@asynccontextmanager
+async def lifespan(app):
+    from .config import validate_environment
+    from .db import SessionLocal
+    from . import models, events, jobs
+    validate_environment()
+    with SessionLocal() as db:
+        models.ensure_default_tenant(db)
+    events.start_listener()
+    jobs.start_worker()
+    try:
+        yield
+    finally:
+        jobs.stop_worker()
+        events.stop_listener()
+
+
+app = FastAPI(title="Human Collections Agent (HCA) API", version="0.3.0", lifespan=lifespan)
+app.add_middleware(RequestBounds)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Do not reflect credentials or non-JSON values from invalid input.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+        for error in exc.errors()]})
 app.include_router(requests_router)
 app.include_router(audit_router)
 app.include_router(inbox_router)
@@ -20,44 +51,15 @@ app.include_router(sweep_router)
 app.include_router(metrics_router)
 app.include_router(devices_router)
 app.include_router(tenants_router)
+app.include_router(data_router)
 app.include_router(privacy_router)
 app.include_router(webhooks_router)
 
 
-@app.on_event("startup")
-async def _ensure_default_tenant():
-    from .db import SessionLocal
-    from . import models
-    with SessionLocal() as db:
-        models.ensure_default_tenant(db)
-
-
-@app.on_event("startup")
-async def _start_event_listener():
-    # HCA-P20 Day 2: on Postgres, LISTEN for rows other instances publish;
-    # on SQLite this is a no-op and the 2 s poll plus in-process wake deliver.
-    from . import events
-    events.start_listener()
-
-
-@app.on_event("shutdown")
-async def _stop_event_listener():
-    from . import events
-    events.stop_listener()
-
-
-@app.on_event("startup")
-async def _start_jobs_worker():
-    # HCA-P20 Day 3: escalation and expiry run as leased scheduled_jobs rows
-    # claimed by this thread (app/jobs.py); the P14 loop timers are gone.
-    from . import jobs
-    jobs.start_worker()
-
-
-@app.on_event("shutdown")
-async def _stop_jobs_worker():
-    from . import jobs
-    jobs.stop_worker()
+@app.get("/v1/controls", tags=["controls"])
+def control_catalogue():
+    from .controls import CONTROLS
+    return CONTROLS
 
 
 @app.get("/healthz")

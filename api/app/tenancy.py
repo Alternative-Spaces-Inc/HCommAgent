@@ -73,10 +73,11 @@ def owner_emails_for(db: Session, tenant_id: str) -> Optional[set]:
     """The tenant's live owner emails; None for the default tenant with no
     rows (so the HCA_OWNER_EMAILS fallback in app/googleauth.py applies).
     Any other tenant with no rows gets an empty set: nobody may link."""
-    rows = db.execute(select(models.TenantOwner.email).where(
-        models.TenantOwner.tenant_id == tenant_id, models.TenantOwner.removed_at.is_(None))).scalars().all()
-    emails = {e.lower() for e in rows}
-    if not emails and tenant_id == models.DEFAULT_TENANT_ID:
+    rows = db.execute(select(models.TenantOwner).where(
+        models.TenantOwner.tenant_id == tenant_id)).scalars().all()
+    emails = {r.email.lower() for r in rows if r.removed_at is None}
+    # An explicitly emptied allowlist must never resurrect deployment owners.
+    if not rows and tenant_id == models.DEFAULT_TENANT_ID:
         return None
     return emails
 
@@ -157,5 +158,9 @@ def remove_owner(tenant_id: str, email: str, db: Session = Depends(get_db), _adm
     now = datetime.now(timezone.utc)
     for r in rows:
         r.removed_at = now
+    for device in db.execute(select(models.Device).where(
+        models.Device.tenant_id == t.id, models.Device.google_email == email,
+        models.Device.revoked_at.is_(None))).scalars():
+        device.revoked_at = now
     db.commit()
     return _view(db, t)

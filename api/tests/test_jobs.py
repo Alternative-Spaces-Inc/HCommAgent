@@ -19,13 +19,12 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select, func
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models, jobs
 from authhelper import agent_auth, ADMIN_AUTH
 from deviceauth import ensure_registered, DEVICE_ID
 from overdue import backdate
 
-Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 
 

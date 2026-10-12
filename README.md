@@ -1,92 +1,77 @@
-# Human Collections Agent (HCA)
+# Human Collections Agent
 
-HCA is a human control plane for agentic retail, marketing, merchandising and creative operations. AI agents post the questions only a person may answer (approve this spend, pick one of these four layouts, confirm these rows) through one API; HCA puts each question in front of the responsible human as a UI selection on the best available surface, records the decision with who answered, where and when, and delivers the answer back to the agent. Every open question is counted as N of M against active requests, never narrated.
+HCA lets an agent pause at a human decision, present the relevant context, record the authorized response, and resume through an authenticated webhook or a poll. It includes a FastAPI service, a Chrome decision inbox, and a developer macOS menu bar client.
 
-Who it is for: teams running autonomous agents that must stop at a human gate without stopping the agent, and engineers who need that gate to be auditable, multi-tenant and hard to bypass.
+The supported authorization model is **tenant owners**. An agent key belongs to one caller and tenant; a human device must be registered and linked to a current permitted Google account in production. The `audience` field describes a request. It does not implement arbitrary departments, role-based routing, or a separate permission boundary.
 
-## Surfaces
+For a hiring review, start with the credential-free demo and [case study](docs/PORTFOLIO.md). The [remediation record](docs/SECURITY_REMEDIATION.md) maps the security review to the code and the evidence still needed. This source update has not been deployed to a production service; a repository cannot guarantee a hiring outcome or establish compliance certification.
 
-The same ask reaches the human on a ladder of surfaces, all on the same API and the same answer record:
+## Run the five-minute demonstration
 
-- **Chrome extension** (`extension/`): popup inbox, server-sent events plus polling, device-signed answers, options page for the API base URL and surface priority.
-- **macOS menu bar app, HCA Notifier** (`macos/`): native notification banners with action buttons, menu rows for pending asks, launch at login, liveness indicator.
+Use Python 3.12 from the repository root:
 
-The server decides who sees an ask first. Each device carries a priority; eligible devices seen within the active window are ranked, and an ask becomes visible to rank *r* at `created_at + r * window` (90 seconds by default, 45 seconds for red gates), so a banner the owner ignores on the Mac shows up in Chrome a window later (`api/app/routing.py`).
-
-## How it works
-
-1. An agent calls `POST /v1/requests` with an API key: a title, why it matters, a control (`approve_deny`, `radio`, `dropdown`, `checkbox`, `chat`, `confirm_rows`), its options, a deadline and an expiry policy. Values are validated against the control catalogue in `api/app/controls.py`; an `Idempotency-Key` header makes retries safe.
-2. The ask is stored under the caller's tenant and a `request.created` event is published to the tenant's stream; escalation timers are scheduled for each surface rank.
-3. Human clients read `GET /v1/inbox` and `GET /v1/inbox/stream` with a device signature; the server filters both to the asks that device may see right now.
-4. The human answers on the surface that reached them; the client posts `POST /v1/requests/{id}/answer`, signed by the device key.
-5. The server locks the ask row (`SELECT ... FOR UPDATE`), accepts exactly one terminal transition, validates the answer value against the control, and writes the audit row: device, surface, path taken, value, timestamps.
-6. A `request.answered` event goes to every open stream so other surfaces drop the card; a signed delivery to the agent's registered webhook destination is queued durably and retried for about an hour, each attempt recorded ([docs/webhooks.md](docs/webhooks.md)).
-7. Asks nobody answers are swept at their deadline per the ask's expiry policy: auto denied (the default), expired, or held (`api/app/expiry.py`).
-8. `GET /v1/audit` returns the answer records with filters by agent, window, surface and outcome.
-
-## Repository layout
-
-| Path | What lives there | Tests |
-| --- | --- | --- |
-| `api/` | FastAPI service, SQLAlchemy models, Alembic migrations, the OpenAPI contract (`api/openapi.yaml`) | `cd api && pytest -q` |
-| `extension/` | Chrome extension (Manifest V3), device key in the extension, options page | `cd extension && npm test` |
-| `macos/` | SwiftPM package: `HCACore` library and `HCANotifier` menu bar app | `cd macos && swift test` |
-| `scripts/` | Smoke test against a live deployment, extension packaging, store helpers | run by Cloud Build |
-| `.github/` | CI gates, workflows, templates, Dependabot, CODEOWNERS | run on every PR |
-| `cloudbuild.yaml` | Build, test, migrate, deploy and smoke pipeline | |
-| `docs/` | Charter, plans per phase, runbooks, deploy records, decisions, reviews | |
-| `bootstrap/` | Seat tooling for the agent that maintains this repo (moving to a separate operations repo, decision 3 in the P19 program plan) | manifest gate |
-
-## Quickstart, local
-
-Run in a terminal from the repository root. Python 3.12 and Node 20 are what CI uses.
-
-```
-cd api
-python3 -m venv .venv
+```sh
+python3.12 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
-alembic upgrade head
-pytest -q
-uvicorn app.main:app --reload
+python -m pip install --require-hashes -r api/requirements-dev.lock
+python scripts/dev_setup.py
+python scripts/demo_workflow.py
 ```
 
-Without `DATABASE_URL` the service uses a local SQLite file; CI and production run Postgres. The test suite at the time of writing: 105 passed, 1 skipped. Interactive API docs are served by FastAPI at `/docs` once the server is running; the contract of record is `api/openapi.yaml`, and a CI gate fails any PR where the two disagree.
+Setup generates disposable local credentials and an explicit development configuration. The demo starts a loopback API and mock webhook receiver, creates a synthetic request, submits a device-signed decision, verifies the signed delivery, records the mock effect and audit, and retries the same operation to check that a second effect is not produced. It requires no personal Google account, cloud project, or author's credentials. It exercises a scripted human-client contract; it does not simulate production Google authentication or native notification presentation.
 
-## Security model
+To leave the local API running for inspection:
 
-- **Agents** authenticate with an API key (`Authorization: Bearer hca_live_...`), one live key per caller, stored as an HMAC-SHA256 hash of a 192-bit random secret under a Secret Manager pepper, scoped to a tenant (`api/app/apikeys.py`, `api/app/auth.py`).
-- **Humans** authenticate as devices: a P-256 key generated on the device, registered once by an administrator, then every call to a human route carries `X-HCA-Device`, `X-HCA-Timestamp`, `X-HCA-Nonce` and `X-HCA-Signature` over method, path, body hash and timestamp; the server checks freshness and signature (`api/app/devicesig.py`, `api/app/auth.py`). Shared test vectors keep the Swift and JavaScript signers in step with the Python verifier.
-- **Owner gate**: a device must link a Google account that is on the tenant's owner allowlist before it can read or answer asks (`api/app/googleauth.py`, `api/app/tenancy.py`).
-- **Tenancy**: every ask, device, key, audit row, webhook attempt and event carries a `tenant_id`; reads, streams and writes are filtered on it from authenticated server state, never from the client.
-- **Platform administration** (tenants, owners, devices, keys) uses a separate admin bearer; the expiry sweep uses its own bearer.
-- **Concurrency**: row locks and a single terminal transition per ask; `Idempotency-Key` replay for agent writes.
+```sh
+cd api
+../.venv/bin/uvicorn app.main:app --env-file ../.env --reload
+```
 
-Vulnerability reports: see [SECURITY.md](SECURITY.md).
+Open `http://127.0.0.1:8000/docs`. Development uses a generated SQLite path; production requires Postgres. Do not point the tests or local demo at an application database. See [Contributing](CONTRIBUTING.md) for Postgres tests and [Operations](docs/OPERATIONS.md) for production requirements.
 
-## Deployment
+## Supported clients and controls
 
-Cloud Build runs `cloudbuild.yaml` on every merge to main: `guard` (gates), `pytest`, `smoke-local`, `pack-extension`, `build`, `push`, `migrate` (an Alembic job that then asserts the database is at head with every model table present), `deploy` (Cloud Run, new revision at 100 percent), `check-config` (no local only switch on the live service), `smoke-live` (end to end against the new revision: mint a key, post an ask, answer with a test device, check audit and webhook, revoke the key). The first-time setup is in [docs/runbooks/HCA_FIRST_DEPLOY.md](docs/runbooks/HCA_FIRST_DEPLOY.md). Project ids, hostnames and secrets are runbook and Secret Manager values; none live in this repository.
+| Control | Chrome 122+ | macOS 14+ developer client |
+| --- | --- | --- |
+| Radio | Yes | Yes |
+| Approve/deny | Yes, with complete material context | Yes, with context review |
+| Checkbox | Yes | Use Chrome |
+| Searchable dropdown | Yes | Use Chrome |
+| Chat | Yes, bounded text | Use Chrome |
+| Row confirmation | Yes | Use Chrome |
 
-## Quality gates (CI, every PR)
+Chrome uses non-extractable device keys in IndexedDB, an origin-scoped inbox, a bounded durable response queue, and fresh signatures on each retry. Suggestions do not preselect answers. Both clients hide decision details in notifications by default. Material approvals expose the resource, change, impact, command and rollback before an explicit decision. Read the [Chrome instructions](extension/README.md) and [macOS instructions](macos/README.md) for registration, Google linking, upgrades and local cleanup.
 
-Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity, Validate OpenAPI Specification (including parity between the yaml and the running app), API Tests (Postgres, with an 85 percent coverage floor), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), CodeQL (Python, JavaScript, Swift, Actions). How to fix a red gate: [CONTRIBUTING.md](CONTRIBUTING.md).
+The macOS build is developer-only. Local or ad-hoc signing is available; public Developer ID signing, notarization and an automatic updater are outside the advertised scope. Chrome packaging produces a versioned archive and checksum; an operator must verify its extension ID and OAuth client configuration before distribution.
 
-## Documentation
+## What the service guarantees
 
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): components, data model, state machine, routing, diagrams.
-- [docs/HCA_CHARTER_v1.md](docs/HCA_CHARTER_v1.md): what HCA is and is not.
-- [docs/plans/](docs/plans/): one plan per phase; the current program is [HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md](docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md).
-- [docs/deploys/](docs/deploys/): dated deploy and proof records (what went live, which build, what was verified).
-- [docs/decisions/](docs/decisions/): decisions of record with the alternatives declined.
-- [docs/runbooks/](docs/runbooks/): first deploy, Chrome Web Store.
-- [docs/INDEX.md](docs/INDEX.md): every file, one line each.
-- [CONTRIBUTING.md](CONTRIBUTING.md), [SECURITY.md](SECURITY.md), [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md).
+1. Caller and tenant authorization comes from verified server state. Removing an owner prevents an already-linked device from continuing to use protected routes; streams recheck current authorization on a clock.
+2. Decisions and expiry are checked under a database lock. A non-hold decision cannot be accepted after its deadline just because a worker has not run yet. `hold` deliberately remains answerable.
+3. An idempotency reservation, the business change, its audit, event and webhook outbox share a transaction. The fingerprint includes the requested resource, so a key cannot replay another request's answer.
+4. Leased workers renew their claim and fence stale writes. External deliveries have at-least-once semantics: a receiver must authenticate the signed delivery ID and deduplicate its effect transactionally.
+5. SSE replay is bounded. A replay gap triggers an explicit reset and inbox reconciliation; clients also poll to recover from suspension and disconnects.
 
-## Status
+These properties have regression tests. Database-specific ordering and multi-process behavior need the Postgres checks; browser, OAuth, platform and deployment evidence have their own limits. Read [Architecture](docs/ARCHITECTURE.md), [Threat model](docs/THREAT_MODEL.md), and the [webhook receiver contract](docs/webhooks.md) before relying on the service as an approval boundary.
 
-Live and proven in production: the API with surface routing, device authentication, Google owner gate, Chrome extension (published unlisted), macOS Notifier with launch at login, Cloud Build pipeline with migrate assertion and live smoke, and P19 (tenancy, strict controls, one terminal transition, idempotency, OpenAPI parity gate). Open: P20 to P27 of the hardening program, listed in the plan file above.
+## Repository map
 
-## License
+| Path | Purpose |
+| --- | --- |
+| `api/` | API, schemas, database models, migrations, runtime and development dependency locks, tests |
+| `extension/` | Chrome surface, queue/key/state helpers, Node and Chromium checks |
+| `macos/` | Swift core, menu bar client, loopback OAuth tests, developer bundle tooling |
+| `scripts/` | Local setup/demo, smoke checks, packaging and candidate configuration checks |
+| `.github/` | Quality gates, pinned Actions, dependency updates, code ownership |
+| `docs/` | Current architecture, security/operations guidance, portfolio evidence and historical records |
+| `cloudbuild.yaml` | Build, migration, no-traffic candidate validation, smoke and promotion |
 
-Apache License 2.0, see [LICENSE](LICENSE).
+Privileged personal-agent operations have been removed from the product tree. Historical plans and deployment notes describe their date and source revision; they are not current operating instructions or proof that this update is deployed.
+
+## Validation and deployment
+
+CI runs Python 3.12 API tests against a disposable Postgres database, Node 24 extension and Chromium tests, Swift tests on macOS, lint, dependency audit, credential/history scanning, the operations-isolation gate, complete generated OpenAPI parity, and container scan/SBOM checks. CodeQL coverage and repository enforcement are tracked separately in the [dated settings evidence](docs/REPOSITORY_SETTINGS_2026-10-12.json). Exact results belong to the reviewed commit's CI, not a permanent test count in this README.
+
+The release image uses locked runtime dependencies, a digest-pinned base, a non-root user and process signal forwarding. The deployment pipeline requires explicit production authentication and separate migration identity, deploys a candidate with no production traffic, checks configuration and runs the candidate smoke before promotion. Its automated live smoke covers an agent request/cancel flow. Real Google-linked human approval, cloud IAM, rollback/restore and live load evidence remain separate operator checks. See [Operations](docs/OPERATIONS.md).
+
+Use [Security](SECURITY.md) for private vulnerability reporting and the supported update policy, [Contributing](CONTRIBUTING.md) for reproducible checks, and the [documentation index](docs/INDEX.md) for the current entry points. HCA is licensed under [Apache-2.0](LICENSE).

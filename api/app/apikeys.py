@@ -20,6 +20,7 @@ review the earlier additions (cancel, inbox, inbox/stream, audit) got.
 import hashlib
 import hmac
 import os
+import json
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
@@ -111,8 +112,21 @@ def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:
     if row is None or row.revoked_at is not None:
         return None
     if "$" in row.key_hash:
-        if not hmac.compare_digest(row.key_hash, _hash_secret(secret)):
-            return None
+        current = _hash_secret(secret)
+        if not hmac.compare_digest(row.key_hash, current):
+            previous = json.loads(os.environ.get("HCA_API_KEY_PREVIOUS_PEPPERS", "[]"))
+            if not isinstance(previous, list) or len(previous) > 3:
+                raise RuntimeError("invalid previous pepper configuration")
+            matches = False
+            for pepper in previous:
+                if not isinstance(pepper, str) or len(pepper) < 16:
+                    raise RuntimeError("invalid previous pepper configuration")
+                candidate = f"{HASH_SCHEME}$" + hmac.new(pepper.encode(), secret.encode(), hashlib.sha256).hexdigest()
+                matches |= hmac.compare_digest(row.key_hash, candidate)
+            if not matches:
+                return None
+            row.key_hash = current
+            db.commit()
         return row
     # Legacy row (plain SHA-256, no scheme marker): verify once, re-hash under the pepper.
     if not hmac.compare_digest(row.key_hash, _legacy_hash_secret(secret)):

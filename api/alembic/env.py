@@ -10,6 +10,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import Base
 from app import models  # noqa: F401  (registers models on Base.metadata)
+from app import limits  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:
@@ -46,20 +47,23 @@ def _terminate_idle_in_transaction(connection) -> None:
     period. The API reconnects on its next query (pool_pre_ping) and SSE
     clients reconnect on their own; no data is touched. Disable with
     HCA_MIGRATE_TERMINATE_IDLE=0."""
-    if os.environ.get("HCA_MIGRATE_TERMINATE_IDLE", "1") != "1":
+    if os.environ.get("HCA_MIGRATE_TERMINATE_IDLE", "0") != "1":
         print("migrate: idle-in-transaction termination disabled")
         return
-    rows = connection.execute(text(f"""
+    if not IDLE_TXN_GRACE.endswith(" seconds") or not IDLE_TXN_GRACE[:-8].isdigit():
+        raise RuntimeError("HCA_MIGRATE_IDLE_TXN_GRACE must be integer seconds")
+    rows = connection.execute(text("""
         SELECT pid, application_name, state, now() - state_change AS idle_for, left(query, 120) AS query
         FROM pg_stat_activity
         WHERE datname = current_database() AND pid <> pg_backend_pid()
-          AND state = 'idle in transaction' AND state_change < now() - interval '{IDLE_TXN_GRACE}'
-    """)).fetchall()
+          AND state = 'idle in transaction' AND application_name = 'hca-api'
+          AND state_change < now() - CAST(:grace AS interval)
+    """), {"grace": IDLE_TXN_GRACE}).fetchall()
     if not rows:
         print("migrate: no idle-in-transaction backends to clear")
         return
     for r in rows:
-        print(f"migrate: terminating idle-in-transaction backend pid={r.pid} app={r.application_name!r} idle_for={r.idle_for} query={r.query!r}")
+        print(f"migrate: terminating scoped backend pid={r.pid} idle_for={r.idle_for}")
         connection.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": r.pid})
 
 
@@ -72,7 +76,7 @@ def _print_blockers(connection) -> None:
     """)).fetchall()
     print(f"migrate: lock timeout after {LOCK_TIMEOUT}; {len(rows)} other backends in a transaction:")
     for r in rows:
-        print(f"  pid={r.pid} state={r.state!r} app={r.application_name!r} txn_age={r.txn_age} query={r.query!r}")
+        print(f"  pid={r.pid} state={r.state!r} app={r.application_name!r} txn_age={r.txn_age}")
 
 
 def run_migrations_online():
@@ -89,7 +93,7 @@ def run_migrations_online():
             # survives the commit, so lock_timeout still applies to the DDL.
             with connection.begin():
                 _terminate_idle_in_transaction(connection)
-                connection.execute(text(f"SET lock_timeout = '{LOCK_TIMEOUT}'"))
+                connection.execute(text("SELECT set_config('lock_timeout', :timeout, false)"), {"timeout": LOCK_TIMEOUT})
             assert not connection.in_transaction(), "migration setup left a transaction open"
         context.configure(connection=connection, target_metadata=target_metadata)
         try:

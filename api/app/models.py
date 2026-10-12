@@ -175,7 +175,9 @@ class Event(Base):
     device_ids null means every device of the tenant (terminal events);
     otherwise the server side routing set of a created or escalated ask."""
     __tablename__ = "events"
-    __table_args__ = (Index("ix_events_tenant_id_id", "tenant_id", "id"),)
+    # SQLite needs the explicit AUTOINCREMENT keyword to preserve cursor
+    # monotonicity even after retention deletes every event row.
+    __table_args__ = (Index("ix_events_tenant_id_id", "tenant_id", "id"), {"sqlite_autoincrement": True})
 
     id = Column(Integer().with_variant(BigInteger(), "postgresql"), primary_key=True, autoincrement=True)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)

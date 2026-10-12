@@ -11,6 +11,7 @@ import HCACore
 /// Day 1: menu, permission, test banners. Day 2: Keychain device key.
 /// Day 3: signed inbox read, SSE stream with poll fallback, signed answer,
 /// dedupe between stream and poll.
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCenterDelegate, NSMenuDelegate {
     private var statusItem: NSStatusItem!
     private let statusMenuItem = NSMenuItem(title: "Status: starting", action: nil, keyEquivalent: "")
@@ -25,6 +26,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     private let priorityItem = NSMenuItem(title: "Priority: loading", action: nil, keyEquivalent: "")
     // HCA-P18: liveness row and the launch-at-login toggle.
     private let livenessItem = NSMenuItem(title: "Last inbox read: waiting for the first read", action: nil, keyEquivalent: "")
+    private let privacyItem = NSMenuItem(title: "Hide decision details in notifications", action: #selector(toggleNotificationPrivacy), keyEquivalent: "")
+    private var redactNotifications: Bool {
+        UserDefaults.standard.object(forKey: "redactNotifications") as? Bool ?? true
+    }
     private let loginItem = NSMenuItem(title: "Launch at login", action: #selector(toggleLoginItem), keyEquivalent: "")
     private var liveness = Liveness()
     private var stalenessTask: Task<Void, Never>?
@@ -33,7 +38,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private var signer: DeviceSigner?
     private var client: APIClient?
+    private var networkGeneration = 0
     private var store = InboxStore()
+    private var submitting: Set<String> = []
+    private var answerKeys: [String: (AnswerSubmission, String)] = [:]
     private var shownAt: [String: Date] = [:]
     private var streamTask: Task<Void, Never>?
     private var pollTask: Task<Void, Never>?
@@ -87,13 +95,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         menu.addItem(priorityParent)
         loginItem.target = self
         menu.addItem(loginItem)
+        privacyItem.target = self; privacyItem.state = redactNotifications ? .on : .off
+        menu.addItem(privacyItem)
         menu.addItem(NSMenuItem(title: "Copy device public key (PEM)", action: #selector(copyPublicKey), keyEquivalent: "c"))
         menu.addItem(NSMenuItem(title: "Copy device id", action: #selector(copyDeviceId), keyEquivalent: ""))
         menu.addItem(.separator())
+        menu.addItem(NSMenuItem(title: "Configure API origin…", action: #selector(configureOrigin), keyEquivalent: ""))
         menu.addItem(NSMenuItem(title: "Link Google account (opens browser)", action: #selector(linkGoogle), keyEquivalent: "g"))
         menu.addItem(NSMenuItem(title: "Refresh inbox now", action: #selector(refreshNow), keyEquivalent: "r"))
+        #if DEBUG
         menu.addItem(NSMenuItem(title: "Send test notification (Approve / Deny)", action: #selector(sendTestApproveDeny), keyEquivalent: "t"))
         menu.addItem(NSMenuItem(title: "Send test notification (3 options)", action: #selector(sendTestRadio), keyEquivalent: ""))
+        #endif
         menu.addItem(.separator())
         menu.addItem(NSMenuItem(title: "Quit HCA Notifier", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q"))
         menu.delegate = self
@@ -106,7 +119,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             signer = s
             deviceItem.title = "Device: \(s.deviceId)"
             Self.writePublicKeyFile(s)
-            client = APIClient(signer: s)
+            let configured = APIClient(signer: s)
+            if let origin = configured.baseURL?.absoluteString {
+                let prior = UserDefaults.standard.string(forKey: "trustedAPIOrigin")
+                if prior == origin || approveOrigin(origin, prior: prior) { client = configured }
+            }
         } catch {
             deviceItem.title = "Device: key error \(error.localizedDescription)"
         }
@@ -130,6 +147,74 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         startStalenessWatch()
         installSignalTrigger()
         healLoginItemAfterRebuild()
+    }
+
+    @objc private func toggleNotificationPrivacy() {
+        UserDefaults.standard.set(!redactNotifications, forKey: "redactNotifications")
+        privacyItem.state = redactNotifications ? .on : .off
+        let identifiers = store.pending.keys.map { NotificationShaper.notificationIdentifier(for: $0) }
+        UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: identifiers)
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: identifiers)
+        askCategories.removeAll()
+        UNUserNotificationCenter.current().setNotificationCategories(Self.baseCategories())
+        for item in store.pending.values { post(item: item, reason: "privacy setting changed") }
+    }
+
+    private func approveOrigin(_ origin: String, prior: String?) -> Bool {
+        let alert = NSAlert()
+        alert.messageText = "Trust this HCA API origin?"
+        alert.informativeText = (prior.map { "Previous: " + $0 + "\n" } ?? "") + "API: " + origin + "\nDevice-signed requests and answers will be sent to this origin."
+        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Trust origin")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        UserDefaults.standard.set(origin, forKey: "trustedAPIOrigin")
+        if prior != origin {
+            UNUserNotificationCenter.current().getDeliveredNotifications { delivered in
+                let stale = delivered.filter { $0.request.content.userInfo["api_origin"] as? String != origin }.map { $0.request.identifier }
+                UNUserNotificationCenter.current().removeDeliveredNotifications(withIdentifiers: stale)
+            }
+            UNUserNotificationCenter.current().getPendingNotificationRequests { pending in
+                let stale = pending.filter { $0.content.userInfo["api_origin"] as? String != origin }.map { $0.identifier }
+                UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: stale)
+            }
+        }
+        cursor.value = nil
+        return true
+    }
+
+    @objc private func configureOrigin() {
+        let alert = NSAlert()
+        alert.messageText = "Configure HCA API origin"
+        alert.informativeText = "Enter an HTTPS origin with no path, query, credentials, or fragment."
+        let input = NSTextField(frame: NSRect(x: 0, y: 0, width: 440, height: 24))
+        input.stringValue = client?.baseURL?.absoluteString ?? "https://"
+        input.setAccessibilityLabel("HCA API origin")
+        alert.accessoryView = input
+        alert.addButton(withTitle: "Cancel"); alert.addButton(withTitle: "Save origin")
+        NSApp.activate(ignoringOtherApps: true)
+        guard alert.runModal() == .alertSecondButtonReturn else { return }
+        do {
+            let origin = try APIOrigin(input.stringValue, allowLocalHTTP: UserDefaults.standard.bool(forKey: "allowLocalHTTPDevelopment")).url.absoluteString
+            guard approveOrigin(origin, prior: client?.baseURL?.absoluteString), let signer else { return }
+            networkGeneration += 1
+            linkTask?.cancel(); linking = false
+            streamTask?.cancel(); pollTask?.cancel()
+            client?.session.invalidateAndCancel()
+            apply(store.applyInbox([])); answerKeys.removeAll(); shownAt.removeAll(); askCategories.removeAll()
+            cursor.value = nil
+            UserDefaults.standard.set(origin, forKey: APIClient.defaultsKey)
+            client = APIClient(signer: signer)
+            streamConnected = false; liveness.streamConnected = false
+            startNetwork()
+        } catch { postLocal(title: "HCA: invalid API origin", body: "Use an HTTPS origin such as https://api.example.com. Local HTTP requires the documented development setting.") }
+    }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        networkGeneration += 1
+        linkTask?.cancel()
+        streamTask?.cancel(); pollTask?.cancel(); stalenessTask?.cancel(); Task { await inboxReads.cancel() }
+        client?.session.invalidateAndCancel()
+        for source in signalSources { source.cancel() }
     }
 
     /// A hand-opened instance that finds the agent configured: if the launchd job
@@ -248,8 +333,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    /// kill -USR1 <pid> runs the Google link flow (the agent triggers it over the bridge;
-    /// the owner only signs in). SIGUSR2 refreshes the inbox.
+    /// Optional same-user local triggers: SIGUSR1 opens Google sign-in,
+    /// and SIGUSR2 refreshes the inbox.
     private var signalSources: [DispatchSourceSignal] = []
     private func installSignalTrigger() {
         for (sig, action) in [(SIGUSR1, #selector(linkGoogle)), (SIGUSR2, #selector(refreshNow))] {
@@ -269,6 +354,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             connectionItem.title = "Server: not configured (apiBaseURL)"
             return
         }
+        streamTask?.cancel(); pollTask?.cancel()
+        networkGeneration += 1
+        let generation = networkGeneration
+        Task { @MainActor in
+            await inboxReads.cancel()
+            guard generation == self.networkGeneration else { return }
+            self.startNetworkWorkers(generation: generation)
+        }
+    }
+
+    private func startNetworkWorkers(generation: Int) {
         Task { await checkDevice() }
         pollTask = Task { [weak self] in
             while !Task.isCancelled {
@@ -284,23 +380,28 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 do {
                     let sinceId = self.lastEventId
                     try await client.stream(lastEventId: sinceId, onOpen: {
+                        guard generation == self.networkGeneration, !Task.isCancelled else { return }
                         opened = true
                         self.postLog.notice("stream open lastEventId=\(sinceId ?? "none", privacy: .public)")
-                        DispatchQueue.main.async {
-                            self.streamConnected = true
-                            self.liveness.streamConnected = true
-                            self.connectionItem.title = "Server: stream connected"
-                        }
+                        self.streamConnected = true
+                        self.liveness.streamConnected = true
+                        self.connectionItem.title = "Server: stream connected"
                         Task { await self.poll() }   // catch up on anything missed while reconnecting
                     }, onEvent: { env, id in
-                        DispatchQueue.main.async {
-                            if let id = id { self.cursor.advance(to: id) }
-                            self.handle(event: env)
-                        }
+                        guard generation == self.networkGeneration, !Task.isCancelled else { return }
+                        if let id = id { self.cursor.advance(to: id) }
+                        self.handle(event: env)
+                    }, onReset: {
+                        guard generation == self.networkGeneration, !Task.isCancelled else { return }
+                        self.cursor.value = nil
+                        Task { await self.poll() }
                     })
+                    guard generation == self.networkGeneration, !Task.isCancelled else { return }
                     await MainActor.run { self.streamConnected = false; self.liveness.streamConnected = false; self.connectionItem.title = "Server: stream closed, reconnecting" }
                 } catch {
+                    guard generation == self.networkGeneration, !Task.isCancelled else { return }
                     await MainActor.run {
+                        self.handleAuthorizationFailure(error)
                         self.streamConnected = false
                         self.liveness.streamConnected = false
                         self.connectionItem.title = "Server: stream error, polling (\(error.localizedDescription))"
@@ -315,37 +416,64 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     /// Signed GET /v1/devices/self: proves the key is registered and shows the Google link state.
     private func checkDevice() async {
         guard let client = client else { return }
+        let generation = networkGeneration
         do {
             let me = try await client.deviceSelf()
+            guard generation == networkGeneration, !Task.isCancelled else { return }
             await MainActor.run {
                 let link = me.google_email.map { "Google: \($0)" } ?? "Google: not linked"
                 self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), \(link))"
                 self.showPriority(me.priority)
             }
         } catch {
+            guard generation == networkGeneration, !Task.isCancelled else { return }
+            handleAuthorizationFailure(error)
             await MainActor.run { self.deviceItem.title = "Device: \(self.signer?.deviceId ?? "?") (server: \(error.localizedDescription))" }
         }
     }
 
-    private func poll() async {
-        guard let client = client else { return }
+    private let inboxReads = SingleFlight<[InboxItem]>()
+    @discardableResult
+    private func poll() async -> Bool {
+        guard let client = client else { return false }
+        let generation = networkGeneration
         do {
-            let items = try await client.inbox()
-            await MainActor.run {
-                self.recordRead()
-                let delta = self.store.applyInbox(items)
-                self.apply(delta)
-                self.repostCleared()
-                if !self.streamConnected { self.connectionItem.title = "Server: polling every \(Self.pollInterval)s" }
-            }
+            let items = try await inboxReads.value { try await client.inbox() }
+            try Task.checkCancellation()
+            guard generation == networkGeneration else { return false }
+            recordRead()
+            apply(store.applyInbox(items))
+            repostCleared()
+            if !streamConnected { connectionItem.title = "Server: polling every \(Self.pollInterval)s" }
+            return true
         } catch {
-            await MainActor.run {
-                if !self.streamConnected { self.connectionItem.title = "Server: poll error (\(error.localizedDescription))" }
-            }
+            guard generation == networkGeneration else { return false }
+            handleAuthorizationFailure(error)
+            if !streamConnected { connectionItem.title = "Server: poll error (\(error.localizedDescription))" }
+            return false
+        }
+    }
+
+    private func handleAuthorizationFailure(_ error: Error) {
+        if case APIClient.ClientError.http(let code, _) = error, code == 401 || code == 403 {
+            networkGeneration += 1
+            streamTask?.cancel()
+            streamConnected = false; liveness.streamConnected = false
+            cursor.value = nil
+            apply(store.applyInbox([]))
+            answerKeys.removeAll()
+            askCategories.removeAll()
+            UNUserNotificationCenter.current().setNotificationCategories(Self.baseCategories())
+            setLastAction("access refused; local asks and notifications cleared")
         }
     }
 
     private func handle(event: StreamEnvelope) {
+        if event.event == "stream.reset" {
+            cursor.value = nil
+            Task { await self.poll() }
+            return
+        }
         recordRead()
         // HCA-P14: created and escalated envelopes name the devices they are
         // for; ignore the ones not addressed to this device.
@@ -372,7 +500,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         if !delta.removed.isEmpty {
             UNUserNotificationCenter.current().removeDeliveredNotifications(
                 withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
-            for id in delta.removed { shownAt.removeValue(forKey: id) }
+            UNUserNotificationCenter.current().removePendingNotificationRequests(
+                withIdentifiers: delta.removed.map { NotificationShaper.notificationIdentifier(for: $0) })
+            for id in delta.removed {
+                shownAt.removeValue(forKey: id); answerKeys.removeValue(forKey: id)
+                askCategories.removeValue(forKey: NotificationShaper.categoryPrefix + "ask." + id)
+            }
+            UNUserNotificationCenter.current().setNotificationCategories(Self.baseCategories().union(askCategories.values))
         }
         pendingItem.title = "Pending asks (\(store.count))"
         rebuildAskRows()
@@ -392,6 +526,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             let parent = NSMenuItem(title: "\(row.title)  [\(MenuAskList.shortId(row.requestId))]", action: nil, keyEquivalent: "")
             let sub = NSMenu(title: row.title)
             sub.autoenablesItems = false
+            parent.toolTip = store.pending[row.requestId]?.title
+            let details = NSMenuItem(title: "Review full decision details…", action: #selector(reviewDetails(_:)), keyEquivalent: "")
+            details.target = self; details.representedObject = row.requestId; details.isEnabled = true
+            sub.addItem(details)
+            sub.addItem(.separator())
             if let why = row.why {
                 let whyItem = NSMenuItem(title: why, action: nil, keyEquivalent: "")
                 whyItem.isEnabled = false
@@ -402,7 +541,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 for choice in row.choices {
                     let c = NSMenuItem(title: choice.title, action: #selector(chooseAnswer(_:)), keyEquivalent: "")
                     c.target = self
-                    c.isEnabled = true
+                    c.isEnabled = !submitting.contains(row.requestId)
+                    c.toolTip = store.pending[row.requestId]?.options_or_fields.first { $0.id == choice.optionId }?.label
                     c.state = choice.suggested ? .on : .off
                     c.representedObject = [row.requestId, choice.optionId]
                     sub.addItem(c)
@@ -422,19 +562,62 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     @objc func chooseAnswer(_ sender: NSMenuItem) {
         guard let pair = sender.representedObject as? [String], pair.count == 2 else { return }
         let requestId = pair[0], optionId = pair[1]
-        setLastAction("menu click \(optionId) on \(requestId)")
-        guard let item = store.pending[requestId] else {
-            setLastAction("\(requestId) no longer pending")
-            return
+        Task { @MainActor in
+            guard await self.poll(), let item = self.store.pending[requestId],
+                  item.options_or_fields.contains(where: { $0.id == optionId }) else {
+                self.setLastAction("ask unavailable; refresh or use Chrome")
+                return
+            }
+            guard self.confirm(item: item, optionId: optionId) else { return }
+            let body = AnswerSubmission(control: item.control, value: optionId,
+                                        path_taken: ["macos_notification", "menu", optionId])
+            await self.submit(requestId: requestId, body: body)
         }
-        let started = shownAt[requestId]
-        let body = AnswerSubmission(control: item.control, value: optionId,
-                                    path_taken: ["macos_notification", "menu", optionId],
-                                    duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
-        setLastAction("sending menu \(optionId) for \(requestId)")
-        Task { await self.submit(requestId: requestId, body: body) }
     }
 
+    private func decisionAlert(item: InboxItem) -> NSAlert {
+        let alert = NSAlert()
+        alert.messageText = item.isRedGate ? "Review red-gate decision" : "Review decision"
+        alert.alertStyle = item.isRedGate ? .warning : .informational
+        let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 620, height: 340))
+        scroll.hasVerticalScroller = true
+        let text = NSTextView(frame: scroll.bounds)
+        text.isEditable = false; text.isSelectable = true
+        text.font = .systemFont(ofSize: 14)
+        text.string = item.decisionContext
+        text.textContainer?.widthTracksTextView = true
+        text.isVerticallyResizable = true
+        text.setAccessibilityLabel("Full decision context")
+        scroll.documentView = text
+        alert.accessoryView = scroll
+        return alert
+    }
+
+    private func confirm(item: InboxItem, optionId: String) -> Bool {
+        guard !submitting.contains(item.request_id),
+              let option = item.options_or_fields.first(where: { $0.id == optionId }) else { return false }
+        let alert = decisionAlert(item: item)
+        alert.informativeText = "Selected answer: " + option.label + "\nReview the full context before submitting."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Submit selected answer")
+        NSApp.activate(ignoringOtherApps: true)
+        return alert.runModal() == .alertSecondButtonReturn
+    }
+
+    private func review(item: InboxItem) {
+        let alert = decisionAlert(item: item)
+        alert.informativeText = MenuAskList.menuControls.contains(item.control)
+            ? "Choose an answer from this ask's menu after reviewing these details."
+            : "Open the Human Collections Agent Chrome card to answer this control."
+        alert.addButton(withTitle: "Close")
+        NSApp.activate(ignoringOtherApps: true)
+        alert.runModal()
+    }
+
+    @objc private func reviewDetails(_ sender: NSMenuItem) {
+        guard let id = sender.representedObject as? String, let item = store.pending[id] else { return }
+        review(item: item)
+    }
 
     /// HCA-P15: every owner action and its outcome goes to the menu line and
     /// to the unified log (subsystem com.alternativespaces.hca.notifier,
@@ -447,6 +630,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
     }
 
     private var linking = false
+    private var linkTask: Task<Void, Never>?
 
     /// Day 4: installed-app sign-in, then the device-signed link call.
     @objc func linkGoogle() {
@@ -454,17 +638,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         guard !linking, let client = client else { return }
         linking = true
         setLastAction("Google sign-in opened in the browser")
-        Task {
-            defer { Task { @MainActor in self.linking = false } }
+        linkTask = Task { @MainActor in
+            defer { if self.client === client { self.linking = false; self.linkTask = nil } }
             do {
                 let token = try await GoogleLinker().obtainAccessToken(loginHint: nil)
+                guard self.client === client, !Task.isCancelled else { return }
                 let me = try await client.googleLink(accessToken: token)
+                guard self.client === client, !Task.isCancelled else { return }
                 await MainActor.run {
                     self.deviceItem.title = "Device: \(me.device_id) (\(me.label ?? "?"), Google: \(me.google_email ?? "?"))"
                     self.setLastAction("Google account linked")
+                    self.startNetwork()
                 }
                 await self.poll()
             } catch {
+                guard self.client === client, !Task.isCancelled else { return }
                 NSLog("hca.link failed: %@", error.localizedDescription)
                 await MainActor.run {
                     self.setLastAction("Google link failed")
@@ -496,11 +684,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         Task {
             do {
                 let me = try await client.setPriority(value)
+                guard self.client === client, !Task.isCancelled else { return }
                 await MainActor.run {
                     self.showPriority(me.priority)
                     self.setLastAction("priority set to \(value)")
                 }
             } catch {
+                guard self.client === client, !Task.isCancelled else { return }
+                self.handleAuthorizationFailure(error)
                 await MainActor.run {
                     self.priorityItem.title = "Priority: not saved (\(error.localizedDescription))"
                     self.setLastAction("priority change refused")
@@ -559,6 +750,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
             return NotificationShaper.categoryPrefix + "alert"
         }
         let id = NotificationShaper.categoryPrefix + "ask." + item.request_id
+        guard askCategories[id] != nil || askCategories.count < 64 else { return NotificationShaper.categoryPrefix + "alert" }
         askCategories[id] = UNNotificationCategory(identifier: id, actions: actions, intentIdentifiers: [], options: [.customDismissAction])
         UNUserNotificationCenter.current().setNotificationCategories(Self.baseCategories().union(askCategories.values))
         return id
@@ -566,38 +758,36 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     private func post(item: InboxItem, reason: String) {
         postLog.notice("post \(item.request_id, privacy: .public) \(reason, privacy: .public)")
-        let summary = item.summary
-        let shape = NotificationShaper.shape(for: summary)
-        let content = UNMutableNotificationContent()
-        content.title = (item.isRedGate ? "RED GATE: " : "") + item.title
-        var body = NotificationShaper.body(for: summary, shape: shape)
-        if let why = item.why, !why.isEmpty { body = why + (body.isEmpty ? "" : "\n") + body }
-        content.body = body
-        content.subtitle = item.caller.map { "from \($0)" } ?? ""
-        content.categoryIdentifier = categoryFor(item: item, shape: shape)
-        content.sound = .default
-        content.interruptionLevel = item.isRedGate ? .timeSensitive : .active
-        content.userInfo = ["request_id": item.request_id]
+        // Red-gate decisions always open the complete review context first.
+        let redact = redactNotifications
+        let shape = NotificationShaper.shape(for: item, redacted: redact)
+        let wanted = categoryFor(item: item, shape: shape)
+        let origin = client?.baseURL?.absoluteString ?? ""
         shownAt[item.request_id] = Date()
-        // The per-ask category was registered a moment ago; a notification posted
-        // before usernoted has applied the new set shows without buttons (seen on
-        // the 2026-10-04 proof: banner, no Approve or Deny). Read the set back
-        // first: getNotificationCategories completes after the pending set has
-        // been applied, so the add below is ordered behind it. If the id is still
-        // missing, fall back to a base category so the buttons always exist.
-        let center = UNUserNotificationCenter.current()
-        let wanted = content.categoryIdentifier
-        center.getNotificationCategories { categories in
-            if !categories.contains(where: { $0.identifier == wanted }) {
-                content.categoryIdentifier = NotificationShaper.categoryPrefix + (shape == .approveDeny ? "approve_deny" : "alert")
-            }
-            let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
-                                                content: content, trigger: nil)
-            center.add(request) { error in
-                DispatchQueue.main.async {
-                    if let error = error { self.setLastAction("post failed \(error.localizedDescription)") }
+        Task { @MainActor in
+            let installed: Bool = await withCheckedContinuation { continuation in
+                UNUserNotificationCenter.current().getNotificationCategories { categories in
+                    continuation.resume(returning: categories.contains { $0.identifier == wanted })
                 }
             }
+            guard self.client?.baseURL?.absoluteString ?? "" == origin, self.redactNotifications == redact,
+                  item.request_id.hasPrefix("test-") || self.store.pending[item.request_id] != nil else { return }
+            let content = UNMutableNotificationContent()
+            content.title = redact ? "HCA: decision waiting" : (item.isRedGate ? "RED GATE: " : "") + item.title
+            var body = NotificationShaper.body(for: item.summary, shape: shape)
+            if item.isRedGate { body = "Open HCA's menu and review the full decision details before answering." }
+            if let why = item.why, !why.isEmpty { body = why + (body.isEmpty ? "" : "\n") + body }
+            content.body = redact ? "Open HCA's menu to review and answer this decision." : body
+            content.subtitle = redact ? "" : item.caller.map { "from \($0)" } ?? ""
+            content.categoryIdentifier = installed ? wanted : NotificationShaper.categoryPrefix + "alert"
+            content.sound = .default
+            content.interruptionLevel = item.isRedGate ? .timeSensitive : .active
+            content.userInfo = ["request_id": item.request_id, "api_origin": origin,
+                                "option_ids": item.options_or_fields.map(\.id)]
+            let request = UNNotificationRequest(identifier: NotificationShaper.notificationIdentifier(for: item.request_id),
+                                                content: content, trigger: nil)
+            do { try await UNUserNotificationCenter.current().add(request) }
+            catch { self.setLastAction("post failed \(error.localizedDescription)") }
         }
     }
 
@@ -660,34 +850,59 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
 
     // MARK: action taps
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse,
                                 withCompletionHandler completionHandler: @escaping () -> Void) {
         let requestId = NotificationShaper.requestId(fromNotificationIdentifier: response.notification.request.identifier) ?? "?"
         let action = response.actionIdentifier
-        DispatchQueue.main.async {
-            self.setLastAction("\(action) on \(requestId)")
-            guard let item = self.store.pending[requestId] else {
-                // Test notifications and already-removed asks end here.
-                if requestId.hasPrefix("test-") { self.setLastAction("\(action) on \(requestId) (test, not sent)") }
-                completionHandler(); return
+        let origin = response.notification.request.content.userInfo["api_origin"] as? String
+        let shownOptions = response.notification.request.content.userInfo["option_ids"] as? [String]
+        // The notification framework owns this completion; acknowledge synchronously.
+        completionHandler()
+        Task { @MainActor in
+            if requestId.hasPrefix("test-") { self.setLastAction("test notification action (not sent)"); return }
+            guard origin == self.client?.baseURL?.absoluteString else {
+                self.postLocal(title: "HCA: notification is stale", body: "This notification belongs to another API origin. Refresh the inbox.")
+                return
             }
-            guard let optionId = ActionMapper.optionId(for: action, item: item) else { completionHandler(); return }
-            let started = self.shownAt[requestId]
+            // Recover mappings after process restart from a fresh, authorized inbox.
+            // Never trust option metadata persisted in the system notification.
+            guard await self.poll() else {
+                self.postLocal(title: "HCA: ask is unavailable", body: "The inbox could not be refreshed. No answer was sent.")
+                return
+            }
+            let result = NotificationRecovery.resolve(requestId: requestId, action: action,
+                isDefaultAction: action == UNNotificationDefaultActionIdentifier,
+                notificationOrigin: origin, apiOrigin: self.client?.baseURL?.absoluteString,
+                shownOptionIds: shownOptions, inbox: self.store.pending)
+            let item: InboxItem
+            let optionId: String
+            switch result {
+            case .answer(let refreshed, let option): item = refreshed; optionId = option
+            case .review(let refreshed): self.review(item: refreshed); return
+            case .unavailable, .changedChoices, .wrongOrigin:
+                self.postLocal(title: "HCA: notification is stale", body: "The ask or its choices are no longer available. Review the current inbox before answering.")
+                return
+            case .ignored: return
+            }
+            guard self.confirm(item: item, optionId: optionId) else { return }
             let body = AnswerSubmission(control: item.control, value: optionId,
-                                        path_taken: ["macos_notification", "banner", action],
-                                        duration_ms: started.map { Int(Date().timeIntervalSince($0) * 1000) })
-            self.setLastAction("sending \(optionId) for \(requestId)")
-            Task {
-                await self.submit(requestId: requestId, body: body)
-                completionHandler()
-            }
+                                        path_taken: ["macos_notification", "banner", action])
+            await self.submit(requestId: requestId, body: body)
         }
     }
 
     private func submit(requestId: String, body: AnswerSubmission) async {
-        guard let client = client else { return }
+        guard let client = client, !submitting.contains(requestId) else { return }
+        let generation = networkGeneration
+        submitting.insert(requestId)
+        defer { submitting.remove(requestId); rebuildAskRows() }
+        rebuildAskRows()
+        let key: String
+        if let saved = answerKeys[requestId], saved.0 == body { key = saved.1 }
+        else { key = UUID().uuidString; answerKeys[requestId] = (body, key) }
         do {
-            let outcome = try await client.answer(requestId: requestId, body: body)
+            let outcome = try await client.answer(requestId: requestId, body: body, idempotencyKey: key)
+            guard generation == networkGeneration else { return }
             await MainActor.run {
                 switch outcome {
                 case .recorded:
@@ -697,6 +912,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 case .gone:
                     self.setLastAction("\(requestId) is gone (cancelled or expired)")
                 case .refused(let code, let text):
+                    self.handleAuthorizationFailure(APIClient.ClientError.http(code, text))
                     self.setLastAction("refused HTTP \(code) on \(requestId)")
                     self.postLocal(title: "HCA: answer refused (HTTP \(code))", body: String(text.prefix(140)))
                     return
@@ -705,6 +921,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
                 self.apply(InboxStore.Delta(added: [], removed: [requestId]))
             }
         } catch {
+            guard generation == networkGeneration else { return }
+            handleAuthorizationFailure(error)
             await MainActor.run {
                 self.setLastAction("send failed on \(requestId)")
                 self.postLocal(title: "HCA: answer not sent", body: "\(error.localizedDescription). The ask stays pending; answer again or use Chrome.")
@@ -712,7 +930,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, UNUserNotificationCent
         }
     }
 
-    func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification,
                                 withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
         completionHandler([.banner, .sound])
     }

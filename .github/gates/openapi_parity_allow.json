@@ -1,7 +1,0 @@
-{
-  "_note": "HCA-P19 Day 3 fix items: /v1/controls is implemented on Day 3 and the internal sweep route is documented the same day. Remove each line as it is closed; the gate fails when a line stops matching.",
-  "allowed_differences": [
-    "MISSING_IN_APP /v1/controls GET",
-    "MISSING_IN_YAML /v1/internal/expiry-sweep POST"
-  ]
-}

@@ -83,16 +83,27 @@ def require_agent_key(
     key = verify_api_key(db, token)
     if key is None:
         raise HTTPException(status_code=403, detail="invalid or revoked api key")
+    tenant = db.get(models.Tenant, key.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise HTTPException(status_code=403, detail="tenant disabled")
+    from .limits import authorize_budget
+    authorize_budget(db, key.tenant_id, "agent:" + key.key_prefix)
+    db.expire_on_commit = False
+    db.commit()
     return key
 
 
-def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends(_admin_bearer)) -> None:
+def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends(_admin_bearer),
+                         db: Session = Depends(get_db)) -> None:
     expected = os.environ.get("HCA_ADMIN_TOKEN")
     if not expected:
         raise HTTPException(status_code=403, detail="admin token is not configured")
     token = _token(creds)
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="invalid admin token")
+    from .limits import consume
+    consume(db, "platform-admin", 300)
+    db.commit()
 
 
 def _device_401(detail: str) -> HTTPException:
@@ -107,6 +118,8 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     signature = h.get(devicesig.HEADER_SIGNATURE, "").strip()
     if not (device_id and timestamp and nonce and signature):
         raise _device_401("missing device signature headers")
+    if len(device_id) > 100 or len(timestamp) > 16 or len(nonce) > 128 or len(signature) > 100:
+        raise _device_401("invalid device signature header size")
     if not devicesig.timestamp_is_fresh(timestamp):
         raise _device_401("stale device signature timestamp")
 
@@ -115,6 +128,9 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
         raise HTTPException(status_code=403, detail="unknown device")
     if device.revoked_at is not None:
         raise HTTPException(status_code=403, detail="device revoked")
+    tenant = db.get(models.Tenant, device.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise HTTPException(status_code=403, detail="tenant disabled")
 
     body = await request.body()
     path_and_query = request.url.path + (f"?{request.url.query}" if request.url.query else "")
@@ -127,6 +143,9 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     # instance shares and which survives a restart (app/nonces.py).
     if not await asyncio.to_thread(nonces.check_and_record, device_id, nonce):
         raise _device_401("device signature replayed")
+
+    from .limits import authorize_budget
+    authorize_budget(db, device.tenant_id, "device:" + device_id)
 
     device.last_seen_at = datetime.now(timezone.utc)
     # HCA-P19 hotfix: keep the loaded device readable after this commit. With
@@ -147,7 +166,29 @@ def google_link_required() -> bool:
     return os.environ.get("HCA_REQUIRE_GOOGLE_LINK", "").strip() == "1"
 
 
-def require_linked_device(device: models.Device = Depends(require_device)) -> models.Device:
+def device_is_authorized(db: Session, device: models.Device) -> bool:
+    """Current membership, including changes made after an earlier sign-in."""
+    if device is None or device.revoked_at is not None:
+        return False
+    tenant = db.get(models.Tenant, device.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        return False
+    if not google_link_required():
+        return True
+    if not device.google_sub or not device.google_email:
+        return False
+    from .tenancy import owner_emails_for
+    from .googleauth import owner_emails
+    allowed = owner_emails_for(db, device.tenant_id)
+    allowed = owner_emails() if allowed is None else allowed
+    return device.google_email.lower() in allowed
+
+
+def require_linked_device(device: models.Device = Depends(require_device), db: Session = Depends(get_db)) -> models.Device:
     if google_link_required() and not device.google_sub:
         raise HTTPException(status_code=403, detail="device is not linked to a Google account")
+    if not device_is_authorized(db, device):
+        raise HTTPException(status_code=403, detail="device owner is no longer authorized")
+    # Membership queries must not leave a transaction open for an SSE lifetime.
+    db.commit()
     return device

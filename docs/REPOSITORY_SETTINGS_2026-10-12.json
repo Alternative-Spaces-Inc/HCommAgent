@@ -1,0 +1,14 @@
+{
+  "repository": "Alternative-Spaces-Inc/HCommAgent",
+  "verified_on": "2026-10-12",
+  "source_head_at_start": "0f78e630e99444f85d666409aa4d6f4537e88331",
+  "main_protection": {"required_checks": true, "strict_checks": true, "enforce_admins": true, "force_pushes": false, "deletions": false, "resolve_conversations": true, "approving_review_count": 0},
+  "review_exception": "Solo maintainer: no independent approving review required by current settings. Final human diff review is required before any production merge; this is an exception, not evidence of independent review.",
+  "secret_scanning": "enabled",
+  "secret_scanning_push_protection": "enabled",
+  "dependabot_security_updates": "enabled",
+  "private_vulnerability_reporting": "enabled",
+  "codeql": {"query_suite": "extended", "languages": ["actions", "python", "javascript-typescript", "swift"], "configuration_validation": "success", "run_url": "https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38272346601"},
+  "cloud_production_configuration": "not inspected or deployed during source remediation",
+  "pending": ["exact remediation commit CI", "new container scan/SBOM/provenance", "operator production prerequisites and actual grants"]
+}

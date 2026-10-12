@@ -32,7 +32,7 @@ def _naive(dt: datetime) -> datetime:
 
 
 def check_and_record(device_id: str, nonce: str, now: Optional[datetime] = None, session_factory=None,
-                     ttl_seconds: int = devicesig.MAX_SKEW_SECONDS) -> bool:
+                     ttl_seconds: int = devicesig.NONCE_RETENTION_SECONDS) -> bool:
     """True when the pair is new (and now recorded); False on a replay."""
     from . import models
     if session_factory is None:
@@ -54,7 +54,7 @@ def check_and_record(device_id: str, nonce: str, now: Optional[datetime] = None,
         return True
 
 
-def prune(session_factory=None, ttl_seconds: int = devicesig.MAX_SKEW_SECONDS, now: Optional[datetime] = None) -> int:
+def prune(session_factory=None, ttl_seconds: int = devicesig.NONCE_RETENTION_SECONDS, now: Optional[datetime] = None) -> int:
     from . import models
     if session_factory is None:
         from .db import SessionLocal

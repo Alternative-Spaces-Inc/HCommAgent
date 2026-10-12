@@ -11,15 +11,27 @@ HERE="$(cd "$(dirname "$0")/.." && pwd)"
 OUT="${1:-$HOME/hca-notifier}"
 APP="$OUT/HCA Notifier.app"
 cd "$HERE"
-swift build -c release --product HCANotifier
-BIN="$(swift build -c release --show-bin-path)/HCANotifier"
+VERSION="${HCA_VERSION:-0.3.0}"
+BUILD_NUMBER="${HCA_BUILD_NUMBER:-$(git -C "$HERE" rev-list --count HEAD 2>/dev/null || echo 1)}"
+REVISION="$(git -C "$HERE" rev-parse HEAD 2>/dev/null || echo unknown)"
+DIRTY=false
+if [ -n "$(git -C "$HERE" status --porcelain -- . 2>/dev/null)" ]; then DIRTY=true; fi
+if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "HCA_VERSION must be a numeric major.minor.patch version" >&2; exit 1
+fi
+if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]{0,3}(\.[0-9]{1,2}){0,2}$ ]]; then
+  echo "HCA_BUILD_NUMBER must be a positive numeric Apple build number (up to 4.2.2 digits)" >&2; exit 1
+fi
+SWIFT_ARGS=()
+if [ -n "${HCA_SWIFT_SCRATCH_PATH:-}" ]; then SWIFT_ARGS+=(--scratch-path "$HCA_SWIFT_SCRATCH_PATH"); fi
+if [ -n "${HCA_SWIFT_CACHE_PATH:-}" ]; then SWIFT_ARGS+=(--cache-path "$HCA_SWIFT_CACHE_PATH"); fi
+if [ -n "${HCA_SWIFT_CONFIG_PATH:-}" ]; then SWIFT_ARGS+=(--config-path "$HCA_SWIFT_CONFIG_PATH"); fi
+if [ -n "${HCA_SWIFT_SECURITY_PATH:-}" ]; then SWIFT_ARGS+=(--security-path "$HCA_SWIFT_SECURITY_PATH"); fi
+swift build -c release --product HCANotifier "${SWIFT_ARGS[@]}"
+BIN="$(swift build -c release --show-bin-path "${SWIFT_ARGS[@]}")/HCANotifier"
 if [ -d "$APP" ]; then rm -r "$APP"; fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/HCANotifier"
-# HCA-P18: the LaunchAgent the app registers through SMAppService when the owner
-# ticks "Launch at login" (RunAtLoad plus KeepAlive on crash; a clean Quit stays
-# quit). Shipping it inside the bundle keeps it under the code signature.
-VERSION="$(git -C "$HERE" rev-parse --short HEAD 2>/dev/null || echo dev)"
 cat > "$APP/Contents/Info.plist" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -29,8 +41,10 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   <key>CFBundleIdentifier</key><string>com.alternativespaces.hca.notifier</string>
   <key>CFBundleExecutable</key><string>HCANotifier</string>
   <key>CFBundlePackageType</key><string>APPL</string>
-  <key>CFBundleShortVersionString</key><string>0.2.1</string>
-  <key>CFBundleVersion</key><string>${VERSION}</string>
+  <key>CFBundleShortVersionString</key><string>${VERSION}</string>
+  <key>CFBundleVersion</key><string>${BUILD_NUMBER}</string>
+  <key>HCARepositoryRevision</key><string>${REVISION}</string>
+  <key>HCARepositoryDirty</key><${DIRTY}/>
   <key>LSMinimumSystemVersion</key><string>14.0</string>
   <key>LSUIElement</key><true/>
   <key>NSHighResolutionCapable</key><true/>
@@ -50,4 +64,9 @@ fi
 echo "requirement: $(codesign -d -r- "$APP" 2>&1 | grep '^designated' | cut -c1-160)"
 codesign --verify --deep --strict "$APP" && echo "codesign verify: ok"
 echo "bundle: $APP"
-echo "version: ${VERSION}"
+echo "version: ${VERSION} (${BUILD_NUMBER}) revision ${REVISION} dirty ${DIRTY}"
+ARCHIVE="$OUT/HCA-Notifier-${VERSION}-macos.zip"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ARCHIVE"
+(cd "$OUT" && shasum -a 256 "$(basename "$ARCHIVE")" > "$(basename "$ARCHIVE").sha256")
+echo "developer-only archive: $ARCHIVE"
+echo "checksum: $ARCHIVE.sha256"

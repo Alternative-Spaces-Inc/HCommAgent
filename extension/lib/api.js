@@ -8,15 +8,12 @@
 // of fields it changed).
 
 import { signedFetch } from "./devicekey.js";
+import { normalizeApiOrigin } from "./hostaccess.js";
 
 export const SURFACE = "browser_overlay";
 
-// Controls this client version renders. The full control library
-// (docs/HCA_CHARTER_v1.md) also lists dropdown, chat, and confirm_row;
-// those are out of scope for this sub-task (dispatch hca-p3-20260929 named
-// only radio, check, approve and deny) and are reported as unsupported
-// rather than silently mishandled.
-export const SUPPORTED_CONTROLS = new Set(["radio", "checkbox", "approve_deny"]);
+// This surface renders every control accepted by the v1 API.
+export const SUPPORTED_CONTROLS = new Set(["radio", "checkbox", "approve_deny", "dropdown", "chat", "confirm_rows"]);
 
 /**
  * Build the POST /v1/requests/{request_id}/answer body for a given control
@@ -29,10 +26,13 @@ export function buildAnswerPayload({ control, selection, answeredBy, deviceId })
   if (!SUPPORTED_CONTROLS.has(control)) {
     throw new Error(`unsupported control: ${control}`);
   }
-  if (control === "checkbox") {
-    if (!Array.isArray(selection)) {
-      throw new Error("checkbox answer requires an array of option ids");
+  if (control === "checkbox" || control === "confirm_rows") {
+    if (!Array.isArray(selection) || selection.some((id) => typeof id !== "string" || !id) || new Set(selection).size !== selection.length) {
+      throw new Error(`${control} answer requires an array of distinct option ids`);
     }
+    if (control === "confirm_rows" && !selection.length) throw new Error("Select at least one row to confirm");
+  } else if (control === "chat") {
+    if (typeof selection !== "string" || !selection.trim() || selection.length > 4000) throw new Error("Enter a message between 1 and 4000 characters");
   } else if (typeof selection !== "string" || selection.length === 0) {
     throw new Error(`${control} answer requires a single option id`);
   }
@@ -47,13 +47,15 @@ export function buildAnswerPayload({ control, selection, answeredBy, deviceId })
   return body;
 }
 
-export async function postAnswer(apiBase, requestId, body) {
+export async function postAnswer(apiBase, requestId, body, { idempotencyKey, signal } = {}) {
+  apiBase = normalizeApiOrigin(apiBase);
   // Signed per device (HCA-P6, lib/devicekey.js): the server records the
   // verified device id on the answer, whatever body.device says.
   const resp = await signedFetch(`${apiBase}/v1/requests/${encodeURIComponent(requestId)}/answer`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...(idempotencyKey ? { "Idempotency-Key": idempotencyKey } : {}) },
     body: JSON.stringify(body),
+    signal,
   });
   if (!resp.ok) {
     const text = await resp.text().catch(() => "");
@@ -62,12 +64,26 @@ export async function postAnswer(apiBase, requestId, body) {
   return resp.json();
 }
 
-export async function fetchInbox(apiBase) {
-  const resp = await signedFetch(`${apiBase}/v1/inbox`);
-  if (!resp.ok) {
-    throw new Error(`GET /v1/inbox failed: ${resp.status}`);
+// Inbox pages remain arrays; the response header carries the next opaque
+// cursor. Bound pagination and detect loops before replacing a cached inbox.
+export async function fetchInbox(apiBase, { signal, fetchFn = signedFetch } = {}) {
+  apiBase = normalizeApiOrigin(apiBase);
+  const items = [];
+  const seen = new Set();
+  let cursor = null;
+  for (let page = 0; page < 50; page++) {
+    const query = cursor ? `?limit=200&after=${encodeURIComponent(cursor)}` : "";
+    const response = await fetchFn(`${apiBase}/v1/inbox${query}`, { signal });
+    if (!response.ok) { const error = new Error(`GET /v1/inbox failed: ${response.status}`); error.status = response.status; throw error; }
+    const rows = await response.json();
+    if (!Array.isArray(rows)) throw new Error("Invalid inbox response");
+    items.push(...rows);
+    cursor = response.headers?.get?.("X-HCA-Next-Cursor");
+    if (!cursor) return items;
+    if (seen.has(cursor)) throw new Error("Inbox pagination returned a repeated cursor");
+    seen.add(cursor);
   }
-  return resp.json();
+  throw new Error("Inbox exceeds the supported pagination limit");
 }
 
 /**
@@ -148,6 +164,7 @@ export function parseSSEChunk(buffer, chunkText) {
 
 // HCA-P7: Google sign-in linked to this device.
 export async function fetchSelfDevice(apiBase) {
+  apiBase = normalizeApiOrigin(apiBase);
   const resp = await signedFetch(`${apiBase}/v1/devices/self`);
   if (!resp.ok) throw new Error(`GET /v1/devices/self ${resp.status}`);
   return resp.json();
@@ -167,6 +184,7 @@ export function priorityLabel(priority) {
 }
 
 export async function setSelfPriority(apiBase, priority) {
+  apiBase = normalizeApiOrigin(apiBase);
   const payload = JSON.stringify({ priority: Number(priority) });
   const resp = await signedFetch(`${apiBase}/v1/devices/self`, {
     method: "PATCH",
@@ -182,6 +200,7 @@ export async function setSelfPriority(apiBase, priority) {
 }
 
 export async function linkGoogle(apiBase, accessToken) {
+  apiBase = normalizeApiOrigin(apiBase);
   const payload = JSON.stringify({ access_token: accessToken });
   const resp = await signedFetch(`${apiBase}/v1/devices/self/google-link`, {
     method: "POST",

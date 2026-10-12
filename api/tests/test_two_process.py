@@ -32,13 +32,12 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_local.db")
 
 from sqlalchemy import select, func
 
-from app.db import Base, engine, SessionLocal, DATABASE_URL
+from app.db import SessionLocal, DATABASE_URL
 from app import models
 from authhelper import agent_key, ADMIN_AUTH, ADMIN_TOKEN
 from deviceauth import human_headers, ensure_registered, DEVICE_ID
 from overdue import backdate
 
-Base.metadata.create_all(bind=engine)
 
 IS_POSTGRES = DATABASE_URL.startswith("postgresql")
 API_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

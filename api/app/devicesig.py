@@ -39,6 +39,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
 MAX_SKEW_SECONDS = 300
+NONCE_RETENTION_SECONDS = 2 * MAX_SKEW_SECONDS + 1
 PREFIX = "HCA1"
 
 HEADER_DEVICE = "x-hca-device"
@@ -91,7 +92,7 @@ def verify_signature(pem: str, canonical: bytes, signature_b64url: str) -> bool:
 class ReplayGuard:
     """Remembers (device, nonce) pairs for the skew window."""
 
-    def __init__(self, ttl_seconds: int = MAX_SKEW_SECONDS):
+    def __init__(self, ttl_seconds: int = NONCE_RETENTION_SECONDS):
         self._ttl = ttl_seconds
         self._seen: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()

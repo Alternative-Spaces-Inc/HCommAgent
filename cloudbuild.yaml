@@ -31,18 +31,23 @@ substitutions:
   _IMAGE: hca-api
   _SERVICE: hca-api-service
   _MIGRATE_JOB: hca-migrate
+  _MIGRATE_SA: sa-hca-migrate       # separate DDL privileges; provision in first-deploy runbook
   _RUNTIME_SA: sa-hca-api
   _CLOUDSQL_INSTANCE: ""            # PROJECT_ID:REGION:INSTANCE, set by the trigger or the block
+  _MIGRATE_DB_URL_SECRET: hca-migration-database-url
+  _CANDIDATE_TAG: hca-${BUILD_ID}
   _DB_URL_SECRET: hca-database-url
   _SWEEP_TOKEN_SECRET: hca-sweep-trigger-token
   _ADMIN_TOKEN_SECRET: hca-admin-token
+  _WEBHOOK_KEYS_SECRET: hca-webhook-encryption-keys
+  _WEBHOOK_KEY_ID: v1
   _PEPPER_SECRET: hca-api-key-pepper   # HMAC pepper for api key hashes (api/app/apikeys.py)
   _MAX_INSTANCES: "3"               # HCA-P20 Day 4: events table plus LISTEN/NOTIFY fan-out and leased jobs make instances interchangeable (owner selection 3)
   _DB_POOL_SIZE: "2"                # per instance; with _DB_MAX_OVERFLOW and the listener connection, 5 slots per instance, 15 across 3, against the 25 of the smallest Cloud SQL tier (a draining revision and the migrate job need the rest)
   _DB_MAX_OVERFLOW: "2"
   _GOOGLE_CLIENT_ID: ""             # HCA-P7: public client id of the Chrome Extension OAuth client (set by the block)
   _GOOGLE_CLIENT_IDS: ""            # HCA-P13: extra client ids allowed to link, comma separated (Desktop client of the macOS app)
-  _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = any verified account
+  _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = no default-tenant owner may link
   _REQUIRE_GOOGLE_LINK: "1"         # HCA-P7: human routes refuse a device with no linked Google account
   _ALLOW_UNGATED: "0"               # HCA-P8: "1" only for a first deploy on a fresh project (no client id yet)
 
@@ -57,7 +62,7 @@ availableSecrets:
 
 steps:
   - id: guard
-    name: bash
+    name: bash@sha256:61962062d969cb46dfc2bad061d36342406fa485f64f246aa7e95693ca07df1f
     env:
       - CLIENT_ID=${_GOOGLE_CLIENT_ID}
       - REQ=${_REQUIRE_GOOGLE_LINK}
@@ -66,26 +71,25 @@ steps:
       - -c
       - |
         set -euo pipefail
-        if [ "$$ALLOW_UNGATED" = "1" ]; then echo "guard: ungated build allowed on purpose"; exit 0; fi
-        [ -n "$$CLIENT_ID" ] || { echo "guard: _GOOGLE_CLIENT_ID is empty; set it on the trigger or pass _ALLOW_UNGATED=1"; exit 1; }
+        [ -n "$$CLIENT_ID" ] || { echo "guard: _GOOGLE_CLIENT_ID is empty; set it on the trigger"; exit 1; }
         [ "$$REQ" = "1" ] || { echo "guard: _REQUIRE_GOOGLE_LINK is '$$REQ', not 1; the P7 gate would drop silently"; exit 1; }
         echo "guard: gate pinned"
 
   - id: pytest
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     dir: api
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        pip install --no-cache-dir -q -r requirements.txt
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
         export DATABASE_URL=sqlite:////tmp/hca_cloudbuild.db
         alembic upgrade head
         pytest -q
 
   - id: smoke-local
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     entrypoint: bash
     env:
       - HCA_ADMIN_TOKEN=smoke-local-admin
@@ -101,7 +105,7 @@ steps:
       - |
         set -euo pipefail
         cd api
-        pip install --no-cache-dir -q -r requirements.txt
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
         echo $$! > /tmp/uvicorn.pid
@@ -121,7 +125,7 @@ steps:
         python3 ../scripts/restart_proof.py --base http://127.0.0.1:8080 --gap 1 --gap-cmd "bash /tmp/restart_api.sh"
 
   - id: pack-extension
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     entrypoint: bash
     env:
       - COMMIT=${COMMIT_SHA}
@@ -160,9 +164,9 @@ steps:
         gcloud run jobs deploy ${_MIGRATE_JOB} \
           --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA} \
           --region=${_REGION} \
-          --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
+          --service-account=${_MIGRATE_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --set-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
-          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest \
+          --set-secrets=DATABASE_URL=${_MIGRATE_DB_URL_SECRET}:latest \
           --command=sh \
           --args=-c,"alembic upgrade head && python3 scripts/check_migrated.py" \
           --max-retries=0 \
@@ -183,14 +187,16 @@ steps:
           --platform=managed \
           --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
-          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest,HCA_API_KEY_PEPPER=${_PEPPER_SECRET}:latest \
-          "--set-env-vars=^:^HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}:HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}:HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}" \
+          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest,HCA_API_KEY_PEPPER=${_PEPPER_SECRET}:latest,HCA_WEBHOOK_ENCRYPTION_KEYS=${_WEBHOOK_KEYS_SECRET}:latest \
+          "--set-env-vars=^:^HCA_ENV=production:HCA_WEBHOOK_CURRENT_KEY_ID=${_WEBHOOK_KEY_ID}:HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}:HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}:HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}" \
           --min-instances=1 \
           --max-instances=${_MAX_INSTANCES} \
           --concurrency=80 \
           --no-cpu-throttling \
           --timeout=3600 \
           --allow-unauthenticated \
+          --no-traffic \
+          --tag=${_CANDIDATE_TAG} \
           --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
           --quiet
 
@@ -203,7 +209,9 @@ steps:
       - -c
       - |
         set -euo pipefail
-        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/check_config.py
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /tmp/hca-candidate.json
+        REV="$$(python3 scripts/candidate_url.py /tmp/hca-candidate.json ${_CANDIDATE_TAG} --revision)"
+        gcloud run revisions describe "$$REV" --region=${_REGION} --format=json | python3 scripts/check_config.py
 
   - id: smoke-live
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
@@ -213,8 +221,19 @@ steps:
       - -c
       - |
         set -euo pipefail
-        URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /tmp/hca-candidate.json
+        URL="$$(python3 scripts/candidate_url.py /tmp/hca-candidate.json ${_CANDIDATE_TAG})"
         python3 scripts/smoke_golden_path.py --base "$$URL"
+
+  - id: promote
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        REV="$$(python3 scripts/candidate_url.py /tmp/hca-candidate.json ${_CANDIDATE_TAG} --revision)"
+        gcloud run services update-traffic ${_SERVICE} --region=${_REGION} --to-revisions="$$REV=100" --quiet
 
 artifacts:
   objects:

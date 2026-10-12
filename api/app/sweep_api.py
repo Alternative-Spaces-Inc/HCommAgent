@@ -52,5 +52,7 @@ def trigger_expiry_sweep(db: Session = Depends(get_db), _auth=Depends(_require_s
                for r in ran if r.get("kind") == jobs.KIND_EXPIRE and r.get("action") not in (None, "nothing_to_do")]
     # HCA-P19 Day 2: the same scheduled call retires idempotency rows past their TTL.
     idempotency_swept = idempotency.sweep(db)
+    from .retention import cleanup
+    retention = cleanup(db)
     return {"swept": len(results), "results": results, "idempotency_swept": idempotency_swept,
-            "jobs_run": len(ran), "reconciled": reconciled}
+            "jobs_run": len(ran), "reconciled": reconciled, "retention": retention}

@@ -22,34 +22,51 @@ PRIVACY_HTML = """<!doctype html>
 </head>
 <body>
 <h1>Human Collections Agent: privacy policy</h1>
-<p>The Human Collections Agent (HCA) browser extension and menu bar app
-present decisions to the owner of this server and send the owner's
-answers back to it. This server is operated by the owner for the
-owner's own use.</p>
-<h2>What the extension sends to this server</h2>
+<p>Updated October 12, 2026. HCA is a self-hosted decision service. The operator
+who supplies your server address controls that deployment and its data. Contact
+that operator for access or deletion. Source project support is available through
+<a href="https://github.com/Alternative-Spaces-Inc/HCommAgent">the repository</a>;
+report vulnerabilities privately through its Security tab.</p>
+<h2>Data collected and used</h2>
 <ul>
-<li>Once, at registration: a public key the extension generates on the
-owner's device. The private half never leaves the device.</li>
-<li>Once, at sign-in: a Google ID token (email and account id) so the
-server can confirm the device belongs to a listed owner account. The
-server keeps the verified email address on the device record and does
-not keep the token.</li>
-<li>Afterwards: signed requests to read pending decisions and to record
-the owner's answers. Each answer is stored with the time, the device
-that gave it and the surface it was given on.</li>
+<li>The clients generate a device key. Only its public key is registered with
+the server; the private key remains in browser storage or the macOS Keychain.</li>
+<li>At Google sign-in, a Google access token is sent over HTTPS to the selected
+server and checked with Google. The token is not persisted by HCA. Verified
+Google subject, email, device identity, and linking time are stored.</li>
+<li>Agent-provided questions and your decisions are stored with timestamps and
+verified device/owner identity. Client-provided descriptions are identified as
+untrusted metadata. Server operators may also retain network access logs.</li>
+<li>The extension stores an origin-scoped inbox, event cursor, preferences, and
+bounded offline answers locally. Offline answers expire after the documented
+client queue lifetime; configuration changes clear the old server's state.</li>
 </ul>
-<h2>What it does not do</h2>
-<ul>
-<li>No browsing history, page content, cookies or keystrokes are read or
-sent. Site access is requested only for this server's own address.</li>
-<li>Nothing is sold, shared with third parties or used for advertising.</li>
-<li>No analytics or tracking code runs in the extension.</li>
-</ul>
-<h2>Retention and contact</h2>
-<p>Decision records stay on this server as the owner's audit trail until
-the owner deletes them. The owner can revoke a device at any time, after
-which its requests are refused. Questions go to the operator of this
-server through the channel that gave you the install link.</p>
+<h2>Recipients and permissions</h2>
+<p>Answers are delivered to webhook recipients registered by the asking agent,
+or read by that agent from the API. The operator's hosting provider processes
+server data; Google processes sign-in verification. HCA does not sell data or
+use it for advertising. No browsing history, page content, cookies, or keystrokes
+are read. Browser host access is granted only to the chosen API origin. HCA's
+use of Google user data follows the Chrome Web Store User Data Policy, including
+Limited Use requirements.</p>
+<h2>Retention, export, and deletion</h2>
+<p>Decision and audit records remain until the operator explicitly deletes them.
+The admin API provides paginated export and bounded deletion of completed
+records with an explicit tenant confirmation. Active decisions are retained;
+the operator must cancel them before deletion. Transient event replay and
+completed job rows older than seven days are cleaned by the authenticated
+scheduler sweep. Replay availability is 24 hours and may be limited by count.</p>
+<p>Device/owner profiles and registered webhook configuration remain until the
+operator removes them. Database backups and infrastructure logs have a separate
+operator-defined retention period. Deletion from a running database does not
+immediately erase older backups; the operator must communicate and enforce its
+backup policy. Revoked devices lose server access and clients clear stale state
+when they learn authorization has been revoked.</p>
+<h2>Notifications and your choices</h2>
+<p>System notifications may appear on a lock screen. Chrome uses redacted
+notifications by default. Review sensitive content in the authenticated client.
+You choose the API origin and can revoke browser permissions or uninstall the
+client. Ask the operator to revoke the device and remove server-side records.</p>
 </body>
 </html>
 """

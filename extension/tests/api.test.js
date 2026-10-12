@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, priorityLabel, PRIORITY_CHOICES, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
+import { fetchInbox, buildAnswerPayload, parseSSEChunk, unwrapStreamEnvelope, isAddressedTo, priorityLabel, PRIORITY_CHOICES, SURFACE, SUPPORTED_CONTROLS } from "../lib/api.js";
 
 test("buildAnswerPayload for radio uses a single option id", () => {
   const body = buildAnswerPayload({ control: "radio", selection: "opt_a" });
@@ -23,19 +23,19 @@ test("buildAnswerPayload includes answered_by and device when given", () => {
 });
 
 test("buildAnswerPayload rejects a control this client does not support", () => {
-  assert.throws(() => buildAnswerPayload({ control: "chat", selection: "hello" }), /unsupported control/);
+  assert.throws(() => buildAnswerPayload({ control: "unknown", selection: "hello" }), /unsupported control/);
 });
 
 test("buildAnswerPayload rejects a non-array checkbox selection", () => {
-  assert.throws(() => buildAnswerPayload({ control: "checkbox", selection: "opt_a" }), /array of option ids/);
+  assert.throws(() => buildAnswerPayload({ control: "checkbox", selection: "opt_a" }), /array of distinct option ids/);
 });
 
 test("buildAnswerPayload rejects an empty radio selection", () => {
   assert.throws(() => buildAnswerPayload({ control: "radio", selection: "" }), /single option id/);
 });
 
-test("SUPPORTED_CONTROLS matches the dispatch's three controls", () => {
-  assert.deepEqual([...SUPPORTED_CONTROLS].sort(), ["approve_deny", "checkbox", "radio"]);
+test("SUPPORTED_CONTROLS matches every v1 API control", () => {
+  assert.deepEqual([...SUPPORTED_CONTROLS].sort(), ["approve_deny", "chat", "checkbox", "confirm_rows", "dropdown", "radio"]);
 });
 
 test("parseSSEChunk ignores the connected comment and parses no events", () => {
@@ -126,4 +126,27 @@ test("priorityLabel names the three ladder places and labels anything else custo
   assert.match(priorityLabel("100"), /^Default/);
   assert.match(priorityLabel(200), /^Fallback/);
   assert.equal(priorityLabel(37), "Custom (37)");
+});
+
+
+test("new controls serialize the server contract and reject invalid decisions", () => {
+  assert.equal(buildAnswerPayload({ control: "dropdown", selection: "one" }).value, "one");
+  assert.equal(buildAnswerPayload({ control: "chat", selection: "Explain this" }).value, "Explain this");
+  assert.deepEqual(buildAnswerPayload({ control: "confirm_rows", selection: ["r1"] }).value, ["r1"]);
+  assert.throws(() => buildAnswerPayload({ control: "chat", selection: " " }), /message/);
+  assert.throws(() => buildAnswerPayload({ control: "chat", selection: "a".repeat(4001) }), /message/);
+  assert.throws(() => buildAnswerPayload({ control: "confirm_rows", selection: [] }), /at least/);
+  assert.throws(() => buildAnswerPayload({ control: "confirm_rows", selection: ["r1", "r1"] }), /distinct/);
+});
+
+
+test("inbox collects bounded signed pages and detects cursor loops", async () => {
+  const urls = [];
+  const rows = await fetchInbox("https://api.example", { fetchFn: async (url) => {
+    urls.push(url); const second = urls.length === 2;
+    return { ok: true, json: async () => [{ request_id: second ? "r2" : "r1" }], headers: new Headers(second ? {} : { "X-HCA-Next-Cursor": "r1/?" }) };
+  } });
+  assert.equal(rows.length, 2);
+  assert.equal(urls[1], "https://api.example/v1/inbox?limit=200&after=r1%2F%3F");
+  await assert.rejects(fetchInbox("https://api.example", { fetchFn: async () => ({ ok: true, json: async () => [], headers: new Headers({ "X-HCA-Next-Cursor": "same" }) }) }), /repeated cursor/);
 });

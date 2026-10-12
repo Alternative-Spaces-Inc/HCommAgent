@@ -29,7 +29,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -44,8 +44,8 @@ router = APIRouter(prefix="/v1/devices", tags=["devices"])
 
 
 class DeviceRegistration(BaseModel):
-    label: str
-    public_key_pem: str
+    label: str = Field(min_length=1, max_length=200)
+    public_key_pem: str = Field(min_length=100, max_length=2000)
     surface: str = "browser_overlay"
     # HCA-P19: the tenant the device answers for; omitted means the default
     # tenant so pre-P19 registrations keep working.
@@ -53,7 +53,7 @@ class DeviceRegistration(BaseModel):
 
 
 class GoogleLink(BaseModel):
-    access_token: str
+    access_token: str = Field(min_length=1, max_length=8192)
 
 
 class DevicePatch(BaseModel):

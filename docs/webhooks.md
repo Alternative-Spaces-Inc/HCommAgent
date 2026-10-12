@@ -1,135 +1,118 @@
-# Webhooks: registering a destination and verifying a delivery
+# Webhook receiver contract
 
-HCA tells the agent that asked about every outcome of an ask (answered,
-cancelled, expired) by POSTing to a webhook destination the agent registered
-first. This page is the receiver's contract. Design: P21a plan
-([docs/plans/HCA_P21A_WEBHOOK_SECURITY_v1.md](plans/HCA_P21A_WEBHOOK_SECURITY_v1.md)),
-decisions 7 and 8 in [docs/decisions/DECISIONS_20261011.md](decisions/DECISIONS_20261011.md).
+HCA delivers terminal request outcomes to an agent's registered webhook destination. The outbox is durable, but deliveries can repeat after an ambiguous network failure or a worker restart. Authenticate each delivery and deduplicate the business effect transactionally. A successful HTTP response records transport acknowledgement; it does not prove the receiver performed the intended business operation.
 
-## 1 Register once
+## Register a destination
 
-Under your api key (`Authorization: Bearer <key>`):
+Use the caller's API key to `POST /v1/webhooks` with `{"url":"https://hooks.example.com/hca"}`. The response contains a destination ID and a signing secret shown once. Store the secret securely on the receiver. Use the registered URL in `deliver_to` for a request; unregistered, revoked or different-caller/tenant destinations are refused. Each caller can hold at most ten active destinations.
 
-```
-POST /v1/webhooks
-{"url": "https://hooks.example.com/hca"}
-```
+Production requires HTTPS, no credentials in the URL, an allowed port, and a publicly routable destination. IP literals, cloud metadata names, loopback/private/link-local/reserved addresses and unsafe IPv6 forms are rejected. Every DNS result must pass the checks at registration and send. The sender connects to a checked address while retaining the registered Host/TLS identity. Redirects are refused. A development-only switch permits a loopback mock receiver and is prohibited in production.
 
-Response 201 carries the destination `id` (`whd_...`) and the `secret`
-(`whsec_...`). The secret is shown once; store it on the receiver. The URL
-must pass these rules at registration and again at every send:
+`GET /v1/webhooks` lists the caller's registry. `POST /v1/webhooks/{id}/rotate` returns a new secret, with the previous secret accepted for a 24-hour overlap. `DELETE /v1/webhooks/{id}` revokes the destination; pending deliveries cannot keep using it. Registry changes are audited.
 
-- https only, no userinfo, port 443 or an explicit port above 1023;
-- the host must not be an IP literal in a loopback, private, link local,
-  multicast, reserved or unspecified range, nor an IPv4 mapped or 6to4 IPv6
-  form of one; cloud metadata host names are rejected by name;
-- the host must resolve, and every resolved address must pass the same
-  checks. The addresses are pinned on the row; the send re-resolves and
-  connects to a checked address with the Host header and TLS SNI set to
-  the registered host, so a DNS answer that changes later cannot redirect
-  the POST. Redirects are not followed (a 3xx fails the attempt).
+## Payload and authenticated identity
 
-An ask whose `deliver_to.url` is not a registered, non revoked destination of
-the same caller and tenant is rejected with 400
-(`deliver_to.url is not a registered webhook destination`). A caller holds
-at most 10 active destinations.
+The POST includes:
 
-Other routes under the same key: `GET /v1/webhooks` (yours), `POST
-/v1/webhooks/{id}/rotate` (new secret returned once; the previous secret
-stays valid for 24 hours and deliveries carry a signature under both),
-`DELETE /v1/webhooks/{id}` (revoke; pending deliveries to it fail dead).
-Each registration, rotation and revocation writes a registry audit row.
-
-## 2 What arrives
-
-One JSON POST per outcome:
-
-```
-POST /hca
+```text
 Content-Type: application/json
 User-Agent: HCA-Webhooks/1
-X-HCA-Delivery-Id: whdl_5a1f...        stable across retries; deduplicate on it
-X-HCA-Timestamp: 1760230000            unix seconds when this attempt was signed
-X-HCA-Event: request.answered          or request.cancelled, request.expired
-X-HCA-Request-Id: 486c9196c8c7...
-X-HCA-Signature: t=1760230000,v1=3f9c...   one v1 per valid secret (two during a rotation overlap)
-
-{"answer":{...},"event":"request.answered","request_id":"486c...","sent_at":"2026-10-11T23:26:40+00:00","state":"answered"}
+X-HCA-Delivery-Id: <stable delivery ID>
+X-HCA-Timestamp: <attempt timestamp>
+X-HCA-Event: request.answered
+X-HCA-Request-Id: <request ID>
+X-HCA-Signature: t=<timestamp>,v1=<HMAC hex>
 ```
 
-`answer` is the answer record (control, value, answered_by, surface, device,
-answered_at, path_taken, duration_ms, passthrough); it is `null` for a plain
-expiry with no answer recorded. The body is compact JSON with sorted keys;
-verify the raw bytes you received, never a re-serialised copy.
+The compact JSON body contains `delivery_id`, `event`, `request_id`, `state`, `answer` and `sent_at`. `answer` is null when no answer exists. The same delivery ID remains stable across retries; each attempt has a fresh signature timestamp. During signing-secret overlap there can be two `v1` values.
 
-## 3 Verify
+The signature is HMAC-SHA256 under the signing secret over `<timestamp>.<raw body bytes>`. `delivery_id` is inside those authenticated bytes. Verify raw bytes before trusting the parsed payload, and require its `delivery_id` to equal `X-HCA-Delivery-Id`. Use the signed body's event/request ID as authoritative; convenience headers must match if your application relies on them. Do not deduplicate on an unchecked header.
 
-`v1` is HMAC-SHA256 under your secret over the string `<t>.<raw body>`
-(timestamp, a dot, the exact request body bytes). Accept when any `v1`
-matches and `t` is within 5 minutes of your clock, then deduplicate on
-`X-HCA-Delivery-Id` and answer 2xx within 10 seconds. Any other status, a
-timeout or a redirect counts as a failed attempt.
-
-Python (standard library only):
+### Python verification
 
 ```python
-import hashlib, hmac, time
+import hashlib
+import hmac
+import json
+import re
+import time
 
-def verify(secret: str, header: str, body: bytes, tolerance: int = 300) -> bool:
-    ts, sigs = None, []
-    for item in header.split(","):
-        k, _, v = item.strip().partition("=")
-        if k == "t":
-            ts = int(v)
-        elif k == "v1":
-            sigs.append(v)
-    if ts is None or not sigs or abs(int(time.time()) - ts) > tolerance:
+
+def verify(secret, header, raw_body, delivery_id, tolerance=300):
+    if not delivery_id or len(raw_body) > 1024 * 1024 or len(header) > 4096:
         return False
-    expected = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
-    return any(hmac.compare_digest(expected, s) for s in sigs)
+    timestamps, signatures = [], []
+    for item in header.split(","):
+        key, _, value = item.strip().partition("=")
+        if key == "t":
+            timestamps.append(value)
+        elif key == "v1" and re.fullmatch(r"[0-9a-f]{64}", value):
+            signatures.append(value)
+    if len(timestamps) != 1 or not re.fullmatch(r"[0-9]{1,12}", timestamps[0]):
+        return False
+    timestamp = int(timestamps[0])
+    if not signatures or abs(int(time.time()) - timestamp) > tolerance:
+        return False
+    expected = hmac.new(
+        secret.encode(), f"{timestamp}.".encode() + raw_body, hashlib.sha256
+    ).hexdigest()
+    if not any(hmac.compare_digest(expected, value) for value in signatures):
+        return False
+    try:
+        payload = json.loads(raw_body)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    return isinstance(payload, dict) and payload.get("delivery_id") == delivery_id
 ```
 
-Node:
+### Node verification
 
 ```js
-const crypto = require("crypto");
+import crypto from "node:crypto";
 
-function verify(secret, header, rawBody, tolerance = 300) {
-  const parts = Object.create(null);
-  const sigs = [];
+function verify(secret, header, rawBody, deliveryId, tolerance = 300) {
+  if (!deliveryId || rawBody.length > 1024 * 1024 || header.length > 4096) return false;
+  const timestamps = [], signatures = [];
   for (const item of header.split(",")) {
-    const [k, v] = item.trim().split("=");
-    if (k === "t") parts.t = Number(v);
-    else if (k === "v1") sigs.push(v);
+    const index = item.indexOf("=");
+    const key = item.slice(0, index).trim();
+    const value = item.slice(index + 1).trim();
+    if (key === "t") timestamps.push(value);
+    if (key === "v1" && /^[0-9a-f]{64}$/.test(value)) signatures.push(value);
   }
-  if (!parts.t || sigs.length === 0 || Math.abs(Date.now() / 1000 - parts.t) > tolerance) return false;
-  const expected = crypto.createHmac("sha256", secret).update(`${parts.t}.`).update(rawBody).digest("hex");
-  return sigs.some((s) => s.length === expected.length && crypto.timingSafeEqual(Buffer.from(s, "hex"), Buffer.from(expected, "hex")));
+  if (timestamps.length !== 1 || !/^[0-9]{1,12}$/.test(timestamps[0])) return false;
+  const timestamp = Number(timestamps[0]);
+  if (!signatures.length || Math.abs(Date.now() / 1000 - timestamp) > tolerance) return false;
+  const expected = crypto.createHmac("sha256", secret)
+    .update(`${timestamp}.`).update(rawBody).digest();
+  if (!signatures.some((value) => crypto.timingSafeEqual(expected, Buffer.from(value, "hex")))) return false;
+  try {
+    const payload = JSON.parse(rawBody.toString("utf8"));
+    return payload !== null && !Array.isArray(payload) && payload.delivery_id === deliveryId;
+  } catch { return false; }
 }
 ```
 
-The same check lives in `api/app/webhooks.py` (`verify_signature`) and in
-`scripts/smoke_golden_path.py`, which verifies every delivery the pipeline's
-smoke receiver gets.
+The server reference verifier is `api/app/webhooks.py:verify_signature`, which requires the received `delivery_id` argument. Align both parties' clocks. The default tolerance is five minutes. Bound incoming request/header sizes before invoking the verifier and handle verification failure without performing an effect.
 
-## 4 Retries and the dead state
+## Deduplicate the effect
 
-The outbox is durable: the delivery row is written in the same database
-transaction as the state change, and any API instance's job worker sends
-it. A failed attempt is retried after 1 s, 5 s, 30 s, 2 minutes, 10 minutes,
-30 minutes and 1 hour (each with up to 20 percent jitter). After the 7th
-failure the delivery is `dead`; a `delivery.dead` row in the destination's
-registry audit records the reason. Every HTTP attempt is a row in
-`webhook_attempts` (status code or error, timestamp), so "we never got it"
-is answered from the table. `GET /v1/internal/metrics` (admin bearer)
-reports `webhooks.queued`, `delivered`, `dead` and the oldest queued age.
+After verification, insert the authenticated delivery ID under a database uniqueness constraint in the same receiver transaction as the business effect. A duplicate should return a successful acknowledgement without repeating the effect. Preserve that record long enough for delayed retries and any operator recovery/re-drive policy.
 
-## 5 How secrets are kept
+Do not acknowledge before durable acceptance. If the effect calls another nontransactional system, use your own durable outbox and idempotent downstream operation; a check followed by a separate external side effect can still race or crash. The local demonstration uses a mock receiver to show the contract, not a production payment or merchandising integration.
 
-The server must sign, so it keeps each destination secret encrypted with
-AES-256-GCM under a key derived (HKDF-SHA256) from the api key pepper held
-in Secret Manager; the destination id is the associated data (decision 8).
-No webhook secret is logged or returned after registration or rotation. If
-the pepper is ever rotated, rotate every destination afterwards: deliveries
-to a destination whose secret no longer decrypts fail dead with the reason
-recorded.
+## Deadline, retries and dead deliveries
+
+A delivery attempt has a ten-second overall deadline, including DNS and network work, with a shorter connect budget. DNS work is bounded; redirects fail; response consumption cannot extend the operation indefinitely. Return a successful status promptly after durable acceptance. Any other status, timeout, transport failure or redirect is a failed attempt.
+
+The default schedule has **eight total attempts** and seven waits: 1, 5, 30, 120, 600, 1,800 and 3,600 seconds, each with up to 20 percent jitter. The nominal waits sum to **6,156 seconds (1 hour, 42 minutes, 36 seconds)**. Network attempt time, worker availability and scheduling add to that duration; this is not a one-hour delivery SLA. The retry schedule is configurable, so an operator must calculate their actual horizon and receiver dedupe retention.
+
+After the final failed attempt, the delivery is `dead` and records its reason in the destination registry audit. Each attempt has a delivery-linked record with status/error/time. `GET /v1/internal/metrics`, protected by the admin bearer, reports queued/delivered/dead counts and queued age. A database lease prevents stale completion writes, but cannot prevent a receiver from seeing a duplicate POST.
+
+There is no public promise of automatic dead-letter re-drive. Investigate the receiver and recorded error, repair/re-register or rotate when appropriate, reconcile the receiver's authenticated delivery ledger, and use a separately reviewed recovery procedure. Recreating effects without checking that ledger risks duplication. Live alert thresholds and re-drive evidence belong to the operator runbook.
+
+## Secret encryption and rotation
+
+Signing secrets must be recoverable by the sender. They are encrypted with AES-GCM using the destination ID as associated data. The remediation separates versioned webhook encryption keys from API-key verification peppers. Provision the dedicated keyring/current-key identifier before production rollout, retain older decrypt keys during migration, and use the explicit re-encryption tool described in [Operations](OPERATIONS.md).
+
+Receiver signing-secret rotation, server encryption-key rotation and caller API-key/pepper rotation are different procedures. A previous caller pepper is a temporary verification overlap; it does not authorize decrypting versioned webhook ciphertext with a new key. Legacy ciphertext requires the old pepper for its migration. Do not delete an old key/pepper until retained destinations and required backups have a tested migration/expiry path. Never log or return an already-issued secret in ordinary reads.

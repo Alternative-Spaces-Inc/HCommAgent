@@ -1,93 +1,73 @@
 #!/usr/bin/env python3
-"""check_client_data.py - Scan tracked files against the denylist with masked output.
+"""Credential scan with masked output and optional full-history scanning.
 
-Matching is a case-insensitive substring match on purpose: a client name
-inside a longer token must still fail the gate. Output is capped so a large
-leak does not flood the log; the count of omitted lines is printed.
+The optional client-data denylist supplements real credential checks.
 """
-
+import argparse
+import hashlib
+import json
 import re
 import subprocess
-import sys
 from pathlib import Path
 
-MAX_REPORTED = 50
-SNIFF_BYTES = 8192
+PATTERNS = {
+    "GitHub credential": re.compile(r"(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{70,})"),
+    "Google access token": re.compile(r"ya29\.[A-Za-z0-9_-]{40,}"),
+    "AWS access key": re.compile(r"(?:AKIA|ASIA)[A-Z0-9]{16}"),
+    "HCA agent credential": re.compile(r"hca_live_[a-f0-9]{12}_[A-Za-z0-9_-]{32,}"),
+    "Webhook credential": re.compile(r"whsec_[A-Za-z0-9_-]{43,}"),
+    "Private key": re.compile(r"-----BEGIN (?:EC |RSA |OPENSSH )?PRIVATE KEY-----.*?-----END (?:EC |RSA |OPENSSH )?PRIVATE KEY-----\n?", re.S),
+}
+ROOT = Path(__file__).resolve().parents[2]
+PUBLIC_KEYS = set(json.loads(Path(__file__).with_name("public_test_key_hashes.json").read_text()))
 
 
-def load_denylist():
-    denylist_file = Path(__file__).parent / "client_data_denylist.txt"
-    if not denylist_file.is_file():
-        return []
-    terms = []
-    with open(denylist_file, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                terms.append(line)
-    return terms
-
-
-def get_tracked_files():
-    try:
-        res = subprocess.run(["git", "ls-files"], capture_output=True, text=True, check=True)
-        return [f for f in res.stdout.splitlines() if f.strip()]
-    except Exception as e:
-        print(f"Error running git ls-files: {e}")
-        sys.exit(1)
-
-
-def is_binary(path):
-    with open(path, "rb") as f:
-        return b"\0" in f.read(SNIFF_BYTES)
-
-
-def mask_term(term):
-    """Show only the first and last character; short terms are fully masked."""
-    if len(term) <= 3:
-        return "*" * len(term)
-    return term[0] + "*" * (len(term) - 2) + term[-1]
+def findings(text):
+    text = re.sub(r"(?m)^\+", "", text).replace("\\n", "\n")
+    found = []
+    for label, pattern in PATTERNS.items():
+        for match in pattern.finditer(text):
+            digest = hashlib.sha256(match.group().encode()).hexdigest()
+            if label == "Private key" and digest in PUBLIC_KEYS:
+                continue  # Exact public signature test key, never production material.
+            found.append(label + " (fingerprint " + digest[:10] + ")")
+    return sorted(set(found))
 
 
 def main():
-    terms = load_denylist()
-    if not terms:
-        print("OK: client data denylist is empty.")
-        sys.exit(0)
-
-    patterns = [(term, re.compile(re.escape(term), re.IGNORECASE)) for term in terms]
-    errors = []
-    warnings = []
-
-    for rel_path in get_tracked_files():
-        path = Path(rel_path)
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--history", action="store_true")
+    args = parser.parse_args()
+    paths = subprocess.check_output(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=ROOT, text=True).splitlines()
+    denylist = [line.strip() for line in Path(__file__).with_name("client_data_denylist.txt").read_text().splitlines()
+                if line.strip() and not line.lstrip().startswith("#")]
+    failed = False
+    scanned = 0
+    for name in paths:
+        path = ROOT / name
         if not path.is_file():
             continue
-        try:
-            if is_binary(path):
-                continue
-            with open(path, "r", encoding="utf-8", errors="replace") as f:
-                for line_idx, line in enumerate(f, start=1):
-                    for term, pat in patterns:
-                        if pat.search(line):
-                            errors.append(f"{rel_path}:{line_idx} (matched masked pattern: {mask_term(term)})")
-                            break
-        except OSError as e:
-            warnings.append(f"{rel_path}: skipped, unreadable ({e.strerror})")
-
-    for w in warnings:
-        print(f"WARNING: {w}")
-
-    if errors:
-        print("Client data denylist matches found:")
-        for err in errors[:MAX_REPORTED]:
-            print(err)
-        if len(errors) > MAX_REPORTED:
-            print(f"... {len(errors) - MAX_REPORTED} more matches omitted")
-        sys.exit(1)
-    print("OK: No client data matches found.")
-    sys.exit(0)
+        raw = path.read_bytes()
+        if b"\0" in raw[:8192]:
+            continue
+        text = raw.decode("utf-8", errors="replace")
+        issues = findings(text)
+        if any(term.casefold() in text.casefold() for term in denylist):
+            issues.append("client data denylist match")
+        if issues:
+            print(name + ": " + "; ".join(issues))
+            failed = True
+        scanned += 1
+    if args.history:
+        patches = subprocess.check_output(["git", "log", "--all", "--format=", "--patch"], cwd=ROOT, text=True, errors="replace")
+        issues = findings(patches)
+        if issues:
+            print("Git history: " + "; ".join(issues))
+            failed = True
+    if not failed:
+        print(f"OK: credential patterns checked in {scanned} text files" + (" and Git history" if args.history else ""))
+    return int(failed)
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

@@ -2,7 +2,7 @@ import Foundation
 
 /// How an ask is rendered as a macOS notification. Decided from the control
 /// type and option count only, so it is testable without UserNotifications.
-public enum NotificationShape: Equatable {
+public enum NotificationShape: Equatable, Sendable {
     /// Two action buttons, Approve and Deny.
     case approveDeny
     /// One action button per option, in order. At most `maxRadioOptions`.
@@ -13,7 +13,7 @@ public enum NotificationShape: Equatable {
     public static let maxRadioOptions = 4
 }
 
-public struct NotificationAction: Equatable {
+public struct NotificationAction: Equatable, Sendable {
     /// Stable identifier sent back as `path_taken` and used to pick the answer value.
     public let identifier: String
     public let title: String
@@ -27,7 +27,7 @@ public struct NotificationAction: Equatable {
 }
 
 /// Minimal view of a pending ask as served by GET /v1/inbox.
-public struct AskSummary: Equatable {
+public struct AskSummary: Equatable, Sendable {
     public let requestId: String
     public let control: String
     public let title: String
@@ -56,6 +56,11 @@ public enum NotificationShaper {
     public static let categoryPrefix = "hca."
     /// Notification identifier prefix; the request id follows.
     public static let notificationPrefix = "hca-"
+
+    public static func shape(for item: InboxItem, redacted: Bool) -> NotificationShape {
+        if redacted || item.isRedGate { return .alertOnly(reason: "full review required") }
+        return shape(for: item.summary)
+    }
 
     public static func shape(for ask: AskSummary) -> NotificationShape {
         switch ask.control {

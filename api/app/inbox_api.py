@@ -1,8 +1,9 @@
 import asyncio
+import time
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -11,7 +12,8 @@ from . import models
 from .db import get_db, SessionLocal
 from .events import SUPERSEDED_ENVELOPE, is_closed, subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
 from .requests_api import _ask_to_collection_request
-from .auth import require_linked_device, google_link_required
+from .schemas import InboxItem
+from .auth import require_linked_device, google_link_required, device_is_authorized
 from . import routing
 from datetime import datetime, timezone
 
@@ -31,9 +33,16 @@ def _sort_key(ask: models.Ask):
     return (has_deadline, deadline, is_red_gate)
 
 
-@router.get("")
-def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
-    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES)).where(models.Ask.tenant_id == device.tenant_id)).scalars().all()
+@router.get("", response_model=list[InboxItem], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after to request the next page", "schema": {"type": "string"}}}}})
+def list_inbox(response: Response, limit: int = Query(default=200, ge=1, le=500),
+               after: str = Query(default="", max_length=100),
+               db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
+    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))
+                      .where(models.Ask.tenant_id == device.tenant_id, models.Ask.id > after)
+                      .order_by(models.Ask.id).limit(limit + 1)).scalars().all()
+    if len(asks) > limit:
+        asks = asks[:limit]
+        response.headers["X-HCA-Next-Cursor"] = asks[-1].id
     # HCA-P14: a device sees an ask only once its rank's window has opened
     # (app/routing.py). The poll path applies the same rule as the stream.
     now = datetime.now(timezone.utc)
@@ -44,7 +53,7 @@ def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(re
     # CollectionRequest fields; the extension needs it to build the
     # POST /v1/requests/{request_id}/answer path (HCA-P6 proof found the
     # list without it, so the popup answered against "undefined").
-    return [_ask_to_collection_request(a) | {"request_id": a.id} for a in ordered]
+    return [_ask_to_collection_request(a) | {"request_id": a.id, "expires_at": a.expires_at} for a in ordered]
 
 
 def _device_still_authorized(device_id: str) -> bool:
@@ -52,7 +61,7 @@ def _device_still_authorized(device_id: str) -> bool:
     next keep-alive tick instead of keeping it until it disconnects."""
     with SessionLocal() as db:
         d = db.get(models.Device, device_id)
-        return d is not None and d.revoked_at is None
+        return device_is_authorized(db, d)
 
 
 def _replay_for(device: models.Device, after_id: int):
@@ -76,17 +85,39 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
     water mark)."""
     q = subscribe(device.id, device.tenant_id)
     try:
+        if not await asyncio.to_thread(authorized_fn, device.id):
+            yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+            return
+        next_auth_check = time.monotonic() + keepalive_seconds
         yield ": connected\n\n"
         high_water = -1
         if last_event_id is not None:
+            def replay_gap():
+                from .events import replay_gap
+                with SessionLocal() as db:
+                    return replay_gap(db, tenant_id=device.tenant_id, device_id=device.id, after_id=last_event_id)
+            gap = await asyncio.to_thread(replay_gap)
+            if gap:
+                yield format_sse({"event": "stream.reset", "data": {"reason": gap}})
+                return
             for envelope in await asyncio.to_thread(_replay_for, device, last_event_id):
+                if time.monotonic() >= next_auth_check:
+                    if not await asyncio.to_thread(authorized_fn, device.id):
+                        yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+                        return
+                    next_auth_check = time.monotonic() + keepalive_seconds
                 high_water = max(high_water, envelope["id"])
                 mark_sent(q, envelope["id"])
                 yield format_sse(envelope)
         while True:
+            if time.monotonic() >= next_auth_check:
+                if not await asyncio.to_thread(authorized_fn, device.id):
+                    yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+                    return
+                next_auth_check = time.monotonic() + keepalive_seconds
             try:
                 envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
-                if envelope.get("event") == "stream.closed":
+                if envelope.get("event") in {"stream.closed", "stream.reset"}:
                     # HCA-P20 Day 5: a newer stream of this device took our
                     # slot (STREAM_MAX_PER_DEVICE); tell the client and stop.
                     yield format_sse(envelope)

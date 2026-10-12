@@ -2,7 +2,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,7 +15,7 @@ router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
 
 
 class ApiKeyIssueRequest(BaseModel):
-    caller: str
+    caller: str = Field(min_length=1, max_length=100)
     # HCA-P19: the tenant the key acts for; omitted means the default tenant
     # so pre-P19 callers keep working.
     tenant_id: str = models.DEFAULT_TENANT_ID

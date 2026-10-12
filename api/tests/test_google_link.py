@@ -28,7 +28,7 @@ def client():
 @pytest.fixture(autouse=True)
 def google_env(monkeypatch):
     monkeypatch.setenv("HCA_GOOGLE_CLIENT_ID", CLIENT)
-    monkeypatch.delenv("HCA_OWNER_EMAILS", raising=False)
+    monkeypatch.setenv("HCA_OWNER_EMAILS", "owner@example.com")
     monkeypatch.delenv("HCA_REQUIRE_GOOGLE_LINK", raising=False)
     yield
     googleauth.set_fetcher(None)

@@ -19,14 +19,12 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models, routing
 from app.devicesig import device_id_for_public_key_pem
 from authhelper import agent_auth, ADMIN_AUTH
 from deviceauth import human_get, human_headers, ensure_registered, DEVICE_ID
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
@@ -156,17 +154,16 @@ def test_inactive_primary_drops_out_of_ranking():
     assert rid in [i["request_id"] for i in _second_get("/v1/inbox").json()]
 
 
-def test_created_event_names_rank0_and_fire_escalation_names_later_rank(monkeypatch):
+def test_created_event_names_rank0_and_fire_escalation_names_later_rank():
     ensure_registered()
     client.patch(f"/v1/devices/{DEVICE_ID}", json={"priority": 10}, headers=ADMIN_AUTH)
     _register_second(200)
     human_get(client, "/v1/inbox")
     _second_get("/v1/inbox")
-    from app import requests_api
-    seen = []
-    monkeypatch.setattr(requests_api, "publish", lambda e, d, **kw: seen.append((e, d)) or {"event": e, "data": d})
     rid = _post_ask("event ask")
-    created = [d for e, d in seen if e == "request.created" and d["request_id"] == rid][0]
+    with SessionLocal() as db:
+        created = next(row.data for row in db.query(models.Event).filter_by(event="request.created")
+                       if row.data["request_id"] == rid)
     assert created["visible_to"] == [DEVICE_ID]
     # before the window: nothing to escalate to
     assert routing.fire_escalation(rid, SessionLocal, lambda: False, lambda e, d, **kw: (e, d)) is None
