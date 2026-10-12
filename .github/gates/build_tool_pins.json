@@ -9,6 +9,7 @@
     "gcr.io/cloud-builders/docker:latest": "sha256:f772ab459889c67835bd959c2b9e9351f2c0752c4f989710ecda20c229f0733e",
     "gcr.io/google.com/cloudsdktool/cloud-sdk:slim": "sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806",
     "moby/buildkit:buildx-stable-1": "sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea",
-    "docker/buildkit-syft-scanner:stable-1": "sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9"
+    "docker/buildkit-syft-scanner:stable-1": "sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9",
+    "registry-1.docker.io/library/python:3.12-alpine3.24": "sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4"
   }
 }

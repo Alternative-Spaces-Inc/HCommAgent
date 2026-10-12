@@ -19,7 +19,10 @@ severity and must not be read as reducing the security classification.
 
 On October 12, the documented review was applied in GitHub: alerts 1 and 2
 were dismissed as false positives, and alerts 3 and 4 as synthetic test use,
-each with its reason recorded. Alert 5 remained open pending removal from
+each with its reason recorded. The new previous-pepper HMAC finding (alert 6)
+was independently reviewed and dismissed as a false positive for the same
+server-issued random-credential reason; bounded overlap and CAS upgrade
+regressions remain enabled. Alert 5 remained open pending removal from
 the default branch. No zero-alert claim is made. A successful CodeQL job
 means analysis completed; it does not itself establish that findings were resolved.
 

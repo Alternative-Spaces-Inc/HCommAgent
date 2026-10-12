@@ -23,13 +23,13 @@ fi
 if ! [[ "$BUILD_NUMBER" =~ ^[1-9][0-9]{0,3}(\.[0-9]{1,2}){0,2}$ ]]; then
   echo "HCA_BUILD_NUMBER must be a positive numeric Apple build number (up to 4.2.2 digits)" >&2; exit 1
 fi
-SWIFT_ARGS=()
+SWIFT_ARGS=(-c release)
 if [ -n "${HCA_SWIFT_SCRATCH_PATH:-}" ]; then SWIFT_ARGS+=(--scratch-path "$HCA_SWIFT_SCRATCH_PATH"); fi
 if [ -n "${HCA_SWIFT_CACHE_PATH:-}" ]; then SWIFT_ARGS+=(--cache-path "$HCA_SWIFT_CACHE_PATH"); fi
 if [ -n "${HCA_SWIFT_CONFIG_PATH:-}" ]; then SWIFT_ARGS+=(--config-path "$HCA_SWIFT_CONFIG_PATH"); fi
 if [ -n "${HCA_SWIFT_SECURITY_PATH:-}" ]; then SWIFT_ARGS+=(--security-path "$HCA_SWIFT_SECURITY_PATH"); fi
-swift build -c release --product HCANotifier "${SWIFT_ARGS[@]}"
-BIN="$(swift build -c release --show-bin-path "${SWIFT_ARGS[@]}")/HCANotifier"
+swift build --product HCANotifier "${SWIFT_ARGS[@]}"
+BIN="$(swift build --show-bin-path "${SWIFT_ARGS[@]}")/HCANotifier"
 if [ -d "$APP" ]; then rm -r "$APP"; fi
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/HCANotifier"

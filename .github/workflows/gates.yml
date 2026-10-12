@@ -165,6 +165,7 @@ jobs:
           set -o pipefail
           swift test 2>&1 | tee swift-test.log | tail -40
           swift build -c release 2>&1 | tee swift-release.log | tail -40
+          HCA_VERSION=0.3.0 bash scripts/bundle.sh ../dist/macos 2>&1 | tee swift-bundle.log | tail -40
       - name: Upload the full Swift test log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -173,6 +174,7 @@ jobs:
           path: |
             macos/swift-test.log
             macos/swift-release.log
+            macos/swift-bundle.log
           retention-days: 7
 
   ruff:
