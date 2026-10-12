@@ -32,3 +32,7 @@ Expiry policy is explicit: `auto_deny` records a denial, `expire` expires withou
 The regression suite uses isolated synthetic test databases and controlled outbound network responses. Failure injection proves transaction rollback and retry behavior; it is not a production process-kill or load test. PostgreSQL-only tests cover database lock/sequence behavior in CI. Local SQLite success does not substitute for those checks.
 
 Deploy only after reviewing the final branch, verifying PostgreSQL CI and migrations, confirming production configuration, and rehearsing recovery. This branch has not been merged or deployed. The existing pepper-based webhook encryption format remains pending a separate migration. See [Webhook receiver contract](webhooks.md) for at-least-once delivery and durable deduplication.
+
+## Owner validation approval
+
+The owner reported manual validation completed and approved on October 12, 2026. See the [approval record](reviews/2026-10-12_manual_validation_approval.md). Deployment code and configuration limits remain as documented.
