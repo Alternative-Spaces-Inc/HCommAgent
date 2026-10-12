@@ -60,6 +60,7 @@ def main():
             subprocess.run([sys.executable, "-m", "uvicorn", "app.main:app", "--host", "127.0.0.1", "--port", "8000"],
                            cwd=ROOT / "api", env=env, check=True)
         except KeyboardInterrupt:
+            # Ctrl+C is normal loopback shutdown; avoid a wrapper traceback.
             pass
     else:
         print("Start the loopback API: python scripts/dev_setup.py --serve")

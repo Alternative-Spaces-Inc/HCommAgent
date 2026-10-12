@@ -119,6 +119,7 @@ def main():
                             if http.get("/health").status_code == 200:
                                 break
                         except httpx.HTTPError:
+                            # Startup failures are expected; retain the deadline and sleep below.
                             pass
                         if time.monotonic() > deadline or process.poll() is not None:
                             raise RuntimeError("disposable demo API did not start")

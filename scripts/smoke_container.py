@@ -89,6 +89,7 @@ def wait_health(base, timeout=30):
                 if response.status == 200:
                     return
         except (OSError, urllib.error.URLError):
+            # Wait for startup without skipping the bounded retry delay below.
             pass
         time.sleep(0.25)
     raise SmokeError('runtime did not become healthy within its deadline')
