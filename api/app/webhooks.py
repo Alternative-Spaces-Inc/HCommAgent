@@ -50,6 +50,7 @@ import hmac
 import ipaddress
 import json
 import logging
+import math
 import os
 import random
 import secrets
@@ -67,6 +68,9 @@ log = logging.getLogger("hca.webhooks")
 
 DEFAULT_RETRY_SCHEDULE = "1,5,30,120,600,1800,3600"
 MAX_ATTEMPTS = len(DEFAULT_RETRY_SCHEDULE.split(",")) + 1
+MAX_RETRY_WAITS = 16
+MAX_RETRY_WAIT_SECONDS = 86400
+MAX_RETRY_HORIZON_SECONDS = 7 * 86400
 JITTER = 0.2
 CONNECT_TIMEOUT_SECONDS = 3.0
 TOTAL_TIMEOUT_SECONDS = 10.0
@@ -90,18 +94,30 @@ def set_transport_factory(factory: Optional[Callable[[], httpx.BaseTransport]]) 
     _transport_factory = factory
 
 
-def retry_schedule() -> List[float]:
-    raw = os.environ.get("WEBHOOK_RETRY_SCHEDULE", DEFAULT_RETRY_SCHEDULE)
-    out: List[float] = []
-    for part in raw.split(","):
-        part = part.strip()
-        if not part:
-            continue
-        try:
-            out.append(max(0.0, float(part)))
-        except ValueError:
-            continue
-    return out or [0.0]
+def retry_schedule(env=None) -> List[float]:
+    """Finite, bounded waits; a configured list determines total attempts."""
+    env = os.environ if env is None else env
+    try:
+        raw = env.get("WEBHOOK_RETRY_SCHEDULE", DEFAULT_RETRY_SCHEDULE)
+        if not isinstance(raw, str) or len(raw) > 2048:
+            raise ValueError()
+        parts = raw.split(",")
+        if not 1 <= len(parts) <= MAX_RETRY_WAITS or any(not part.strip() for part in parts):
+            raise ValueError()
+        waits = [float(part.strip()) for part in parts]
+        if any(not math.isfinite(wait) or not 0 <= wait <= MAX_RETRY_WAIT_SECONDS for wait in waits):
+            raise ValueError()
+        if sum(waits) > MAX_RETRY_HORIZON_SECONDS:
+            raise ValueError()
+        return waits
+    except (ValueError, TypeError):
+        raise RuntimeError("invalid webhook retry schedule configuration") from None
+
+
+def retry_policy(env=None) -> dict:
+    waits = retry_schedule(env)
+    return {"attempts": len(waits) + 1, "waits_seconds": waits, "nominal_wait_seconds": sum(waits),
+            "maximum_jittered_wait_seconds": sum(waits) * (1 + JITTER)}
 
 
 def _now() -> datetime:
@@ -279,8 +295,8 @@ def _post(url: str, body: bytes, headers: dict) -> tuple[Optional[int], Optional
         return None, f"{type(exc).__name__}: {exc}"[:500]
 
 
-def _next_delay(attempts_done: int) -> float:
-    sched = retry_schedule()
+def _next_delay(attempts_done: int, sched=None) -> float:
+    sched = retry_schedule() if sched is None else sched
     base = sched[attempts_done - 1] if attempts_done - 1 < len(sched) else sched[-1]
     return base * (1.0 + random.uniform(0.0, JITTER)) if base > 0 else 0.0
 
@@ -293,6 +309,8 @@ def attempt_delivery(delivery_id: str, session_factory, now: Optional[datetime] 
     stable and allows the receiver to reject that duplicate.
     """
     from . import jobs
+    schedule = retry_schedule()
+    attempt_limit = len(schedule) + 1
     now = now or _now()
     started = time.monotonic()
     def clock():
@@ -351,9 +369,9 @@ def attempt_delivery(delivery_id: str, session_factory, now: Optional[datetime] 
             result = {"action": "delivered", "delivery_id": delivery.id, "attempt": attempt_no, "status_code": status_code}
         else:
             delivery.last_error = error
-            if attempt_no >= MAX_ATTEMPTS:
-                return _mark_dead(db, delivery, dest, f"{MAX_ATTEMPTS} attempts failed; last: {error}", finished, lease=lease)
-            delay = _next_delay(attempt_no)
+            if attempt_no >= attempt_limit:
+                return _mark_dead(db, delivery, dest, f"{attempt_limit} attempts failed; last: {error}", finished, lease=lease)
+            delay = _next_delay(attempt_no, schedule)
             run_at = finished + timedelta(seconds=delay)
             delivery.next_run_at = _naive(run_at)
             jobs.schedule(db, tenant_id=delivery.tenant_id, ask_id=delivery.ask_id, kind=jobs.KIND_WEBHOOK,
@@ -381,6 +399,21 @@ def _mark_dead(db, delivery: models.WebhookDelivery, dest: Optional[models.Webho
     jobs.complete(db, lease, result, now)
     db.commit()
     log.warning("webhook delivery %s dead: %s", result["delivery_id"], reason)
+    return result
+
+
+def fail_job_delivery(db, delivery_id: str, reason: str, now: datetime, *, lease) -> dict:
+    """Fence internal-job exhaustion and make an unsent outcome visibly dead."""
+    from . import jobs
+    jobs.guard(db, lease, now)
+    delivery = db.execute(select(models.WebhookDelivery).where(models.WebhookDelivery.id == delivery_id)
+                          .with_for_update()).scalar_one_or_none()
+    if delivery is not None and delivery.state == STATE_QUEUED:
+        dest = db.get(models.WebhookDestination, delivery.destination_id)
+        return _mark_dead(db, delivery, dest, reason, now, lease=lease)
+    result = {"action": "nothing_to_do", "reason": "delivery missing or already terminal"}
+    jobs.complete(db, lease, result, now)
+    db.commit()
     return result
 
 

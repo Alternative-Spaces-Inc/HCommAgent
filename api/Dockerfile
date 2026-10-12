@@ -1,6 +1,6 @@
-# Base image pinned by digest (python:3.12-slim, bookworm) so a rebuild cannot
+# Minimal musl runtime pinned by digest (Python 3.12, Alpine 3.24) so a rebuild cannot
 # silently pick up a different image; the digest is refreshed by a reviewed PR.
-FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+FROM python:3.12-alpine3.24@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
@@ -9,9 +9,15 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Runtime dependencies only (requirements-dev.txt holds the test tooling).
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+# Runtime dependencies only. Require hash-approved musllinux/pure wheels;
+# refuse an unexpected source build or added compiler/toolchain dependency.
+COPY requirements.lock .
+# Explicit Alpine patch; keep the version and official source in the pin record.
+RUN apk add --upgrade --no-cache zlib=1.3.2-r1 \
+    && pip install --require-hashes --only-binary=:all: -r requirements.lock \
+    && python -m pip uninstall --yes pip setuptools wheel \
+    && python -c 'import shutil, sysconfig; from pathlib import Path; shutil.rmtree(Path(sysconfig.get_path("stdlib")) / "ensurepip")'
+# Installation tooling and its bundled installer are absent from the runtime.
 
 COPY app ./app
 COPY alembic.ini .
@@ -20,8 +26,8 @@ COPY scripts ./scripts
 
 # Unprivileged runtime user. The code tree is read only for it; the local
 # SQLite fallback below needs one writable directory.
-RUN groupadd --system --gid 10001 hca \
-    && useradd --system --uid 10001 --gid hca --home-dir /app --no-create-home hca \
+RUN addgroup -S -g 10001 hca \
+    && adduser -S -D -H -u 10001 -G hca -h /app hca \
     && mkdir -p /data && chown hca:hca /data \
     && chown -R root:root /app && chmod -R a-w /app
 USER hca:hca

@@ -2,8 +2,7 @@
 #
 # Runs on every merge to main through the trigger hca-main-deploy (runbook
 # step 11, HCA-P8), and by hand with the block in runbook step 8. Steps:
-#   0. guard: refuse a build whose substitutions would deploy without the
-#      Google-link gate (HCA-P7) unless _ALLOW_UNGATED=1 says so on purpose
+#   0. guard: require exact commit approval and distinct migration credentials
 #   1. pytest against SQLite (fails the build before any image is built)
 #   1b. smoke-local (HCA-P9): the golden path over real HTTP against a local
 #      uvicorn with the gate off: key, device, ask, signed inbox, signed
@@ -13,41 +12,51 @@
 #      gs://<project>_cloudbuild/extension/ once every step succeeds
 #   2. build the api image
 #   3. push it to Artifact Registry
+#   3b. acquire an owner-bound service lease with an etag precondition
 #   4. run alembic upgrade head as a Cloud Run job against Cloud SQL
-#      (a job, not a startup hook, so migrations never race across instances)
-#   5. deploy the candidate revision with no traffic (tag "candidate")
+#      (a build-scoped job; a bounded database lock serializes migrations)
+#   5. deploy an immutable image with no traffic and a build-scoped candidate tag
 #   6. check-config: the candidate carries every required setting and no
 #      local only switch (fails closed)
 #   7. smoke-candidate (HCA-P9 script on the candidate tag URL): healthz,
 #      key, ask, read, cancel with the real admin token (Secret Manager).
 #      The gate stays on; a test device cannot hold a Google account.
-#   8. promote: 100 percent of traffic to the candidate
+#   8. promote the exact validated snapshot using a service etag precondition
 #   9. smoke-live: the same script once more on the production URL
+#   10. release this build's lease conditionally after final success
 #
 # Every value that names your project, region, instance or service account
 # arrives as a substitution; nothing here is specific to one account.
 # $PROJECT_ID, $COMMIT_SHA and $BUILD_ID are Cloud Build built-ins.
 
 substitutions:
+  _APPROVED_COMMIT: ""             # Explicit operator approval of this tested full commit; empty blocks rollout
   _REGION: us-west1
   _AR_REPO: hca-services
   _IMAGE: hca-api
   _SERVICE: hca-api-service
   _MIGRATE_JOB: hca-migrate
+  _MIGRATE_SA: sa-hca-migrate
+  _MIGRATE_DB_URL_SECRET: hca-migration-database-url
   _RUNTIME_SA: sa-hca-api
   _CLOUDSQL_INSTANCE: ""            # PROJECT_ID:REGION:INSTANCE, set by the trigger or the block
   _DB_URL_SECRET: hca-database-url
   _SWEEP_TOKEN_SECRET: hca-sweep-trigger-token
   _ADMIN_TOKEN_SECRET: hca-admin-token
   _PEPPER_SECRET: hca-api-key-pepper   # HMAC pepper for api key hashes (api/app/apikeys.py)
-  _MAX_INSTANCES: "3"               # HCA-P20 Day 4: events table plus LISTEN/NOTIFY fan-out and leased jobs make instances interchangeable (owner selection 3)
-  _DB_POOL_SIZE: "2"                # per instance; with _DB_MAX_OVERFLOW and the listener connection, 5 slots per instance, 15 across 3, against the 25 of the smallest Cloud SQL tier (a draining revision and the migrate job need the rest)
-  _DB_MAX_OVERFLOW: "2"
+  _MAX_INSTANCES: "2"
+  _DB_POOL_SIZE: "2"
+  _DB_MAX_OVERFLOW: "1"
+  # Declared application budget, after reserving Cloud SQL/system clients.
+  # Defaults: 2 * (2 + 1 + listener 1) + old/draining 15 + migrations 2 = 25.
+  _DB_CONNECTION_BUDGET: "25"
+  _DB_OLD_REVISION_RESERVE: "15"
+  _DB_MIGRATION_RESERVE: "2"
   _GOOGLE_CLIENT_ID: ""             # HCA-P7: public client id of the Chrome Extension OAuth client (set by the block)
   _GOOGLE_CLIENT_IDS: ""            # HCA-P13: extra client ids allowed to link, comma separated (Desktop client of the macOS app)
-  _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty = any verified account
+  _OWNER_EMAILS: ""                 # HCA-P7: comma separated owner accounts allowed to link; empty refuses environment fallback owners
   _REQUIRE_GOOGLE_LINK: "1"         # HCA-P7: human routes refuse a device with no linked Google account
-  _ALLOW_UNGATED: "0"               # HCA-P8: "1" only for a first deploy on a fresh project (no client id yet)
+  _ALLOW_UNGATED: "0"               # Historical substitution retained; managed ungated deployment is refused
 
 options:
   logging: CLOUD_LOGGING_ONLY
@@ -60,40 +69,69 @@ availableSecrets:
 
 steps:
   - id: guard
-    name: bash
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
+    entrypoint: bash
     env:
+      - APPROVED_COMMIT=${_APPROVED_COMMIT}
+      - CURRENT_COMMIT=${COMMIT_SHA}
       - CLIENT_ID=${_GOOGLE_CLIENT_ID}
+      - CLIENT_IDS=${_GOOGLE_CLIENT_IDS}
       - REQ=${_REQUIRE_GOOGLE_LINK}
       - ALLOW_UNGATED=${_ALLOW_UNGATED}
+      - MIGRATE_SA=${_MIGRATE_SA}
+      - RUNTIME_SA=${_RUNTIME_SA}
+      - MIGRATE_SECRET=${_MIGRATE_DB_URL_SECRET}
+      - RUNTIME_SECRET=${_DB_URL_SECRET}
+      - HCA_MAX_INSTANCES=${_MAX_INSTANCES}
+      - HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}
+      - HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}
+      - HCA_DB_CONNECTION_BUDGET=${_DB_CONNECTION_BUDGET}
+      - HCA_DB_OLD_REVISION_RESERVE=${_DB_OLD_REVISION_RESERVE}
+      - HCA_DB_MIGRATION_RESERVE=${_DB_MIGRATION_RESERVE}
     args:
       - -c
       - |
         set -euo pipefail
-        if [ "$$ALLOW_UNGATED" = "1" ]; then echo "guard: ungated build allowed on purpose"; exit 0; fi
-        [ -n "$$CLIENT_ID" ] || { echo "guard: _GOOGLE_CLIENT_ID is empty; set it on the trigger or pass _ALLOW_UNGATED=1"; exit 1; }
+        [[ "$$APPROVED_COMMIT" =~ ^[0-9a-f]{40}$$ ]] && [ "$$APPROVED_COMMIT" = "$$CURRENT_COMMIT" ] || { echo "guard: exact tested commit approval is required before cloud changes"; exit 1; }
+        python3 scripts/check_config.py --capacity-from-env
+        [ "$$ALLOW_UNGATED" = "0" ] || { echo "guard: managed deployments require the owner gate; use local development for ungated smoke"; exit 1; }
+        [ -n "$$CLIENT_ID$$CLIENT_IDS" ] || { echo "guard: configure at least one Google client id"; exit 1; }
+        [ -n "$$MIGRATE_SA" ] && [ "$$MIGRATE_SA" != "$$RUNTIME_SA" ] || { echo "guard: distinct migration service account required"; exit 1; }
+        [ -n "$$MIGRATE_SECRET" ] && [ "$$MIGRATE_SECRET" != "$$RUNTIME_SECRET" ] || { echo "guard: distinct migration database secret required"; exit 1; }
         [ "$$REQ" = "1" ] || { echo "guard: _REQUIRE_GOOGLE_LINK is '$$REQ', not 1; the P7 gate would drop silently"; exit 1; }
         echo "guard: gate pinned"
 
+  - id: capacity-preflight
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/candidate_revision.py preflight \
+          --resource projects/${PROJECT_ID}/locations/${_REGION}/services/${_SERVICE}
+
   - id: pytest
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     dir: api
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        pip install --no-cache-dir -q -r requirements-dev.txt
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
         export DATABASE_URL=sqlite:////tmp/hca_cloudbuild.db
         alembic upgrade head
         pytest -q
 
   - id: smoke-local
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     entrypoint: bash
     env:
       - HCA_ADMIN_TOKEN=smoke-local-admin
       - HCA_API_KEY_PEPPER=smoke-local-pepper-0123456789
       - HCA_REQUIRE_GOOGLE_LINK=0
+      - HCA_ENV=development
       - DATABASE_URL=sqlite:////tmp/hca_smoke.db
       # HCA-P21a: the smoke webhook receiver is a loopback http server; this
       # switch lets it pass the SSRF rules here only. The deploy step never
@@ -104,7 +142,7 @@ steps:
       - |
         set -euo pipefail
         cd api
-        pip install --no-cache-dir -q -r requirements-dev.txt
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
         echo $$! > /tmp/uvicorn.pid
@@ -124,7 +162,7 @@ steps:
         python3 ../scripts/restart_proof.py --base http://127.0.0.1:8080 --gap 1 --gap-cmd "bash /tmp/restart_api.sh"
 
   - id: pack-extension
-    name: python:3.12-slim
+    name: python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
     entrypoint: bash
     env:
       - COMMIT=${COMMIT_SHA}
@@ -136,58 +174,93 @@ steps:
         ls -l dist
 
   - id: build
-    name: gcr.io/cloud-builders/docker
+    name: gcr.io/cloud-builders/docker@sha256:f772ab459889c67835bd959c2b9e9351f2c0752c4f989710ecda20c229f0733e
     dir: api
     args:
       - build
       - -t
       - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
-      - -t
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:latest
       - .
 
   - id: push
-    name: gcr.io/cloud-builders/docker
-    args:
-      - push
-      - --all-tags
-      - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}
-
-  - id: migrate
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/cloud-builders/docker@sha256:f772ab459889c67835bd959c2b9e9351f2c0752c4f989710ecda20c229f0733e
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        gcloud run jobs deploy ${_MIGRATE_JOB} \
-          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA} \
+        IMAGE="${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}"
+        docker push "$$IMAGE"
+        docker inspect --format='{{index .RepoDigests 0}}' "$$IMAGE" > /workspace/hca-image.txt
+        test -s /workspace/hca-image.txt
+
+  - id: image-identity
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/candidate_revision.py image --path /workspace/hca-image.txt \
+          --repository ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE} \
+          --commit ${COMMIT_SHA} --build ${BUILD_ID} \
+          --resource projects/${PROJECT_ID}/locations/${_REGION}/services/${_SERVICE}
+
+  - id: deployment-lease
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/candidate_revision.py lease-acquire \
+          --resource projects/${PROJECT_ID}/locations/${_REGION}/services/${_SERVICE} \
+          --build ${BUILD_ID} --lease /workspace/hca-deployment-lease.json
+
+  - id: migrate
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
+        JOB="${_MIGRATE_JOB}-${BUILD_ID}"
+        [ $${#JOB} -le 63 ] || { echo "migration job prefix is too long for a build UUID"; exit 1; }
+        IMAGE="$$(cat /workspace/hca-image.txt)"
+        gcloud run jobs deploy "$$JOB" \
+          --image="$$IMAGE" \
           --region=${_REGION} \
-          --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
+          --service-account=${_MIGRATE_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --set-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
-          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest \
+          --set-secrets=DATABASE_URL=${_MIGRATE_DB_URL_SECRET}:latest \
+          --set-env-vars=HCA_MIGRATE_TERMINATE_IDLE=0,HCA_MIGRATE_SERIALIZE_SECONDS=60 \
+          --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
           --command=sh \
           --args=-c,"alembic upgrade head && python3 scripts/check_migrated.py" \
           --max-retries=0 \
           --task-timeout=10m \
+          --execute-now --wait \
           --quiet
-        gcloud run jobs execute ${_MIGRATE_JOB} --region=${_REGION} --wait --quiet
 
   - id: deploy
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
+        python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
+        IMAGE="$$(cat /workspace/hca-image.txt)"
         gcloud run deploy ${_SERVICE} \
-          --image=${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA} \
+          --image="$$IMAGE" \
           --region=${_REGION} \
           --platform=managed \
           --service-account=${_RUNTIME_SA}@${PROJECT_ID}.iam.gserviceaccount.com \
           --add-cloudsql-instances=${_CLOUDSQL_INSTANCE} \
-          --set-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest,HCA_API_KEY_PEPPER=${_PEPPER_SECRET}:latest \
-          "--set-env-vars=^:^HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}:HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}:HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}" \
+          --update-secrets=DATABASE_URL=${_DB_URL_SECRET}:latest,SWEEP_TRIGGER_TOKEN=${_SWEEP_TOKEN_SECRET}:latest,HCA_ADMIN_TOKEN=${_ADMIN_TOKEN_SECRET}:latest,HCA_API_KEY_PEPPER=${_PEPPER_SECRET}:latest \
+          --remove-env-vars=HCA_WEBHOOK_ALLOW_INSECURE \
+          "--update-env-vars=^:^HCA_ENV=production:HCA_GOOGLE_CLIENT_ID=${_GOOGLE_CLIENT_ID}:HCA_GOOGLE_CLIENT_IDS=${_GOOGLE_CLIENT_IDS}:HCA_OWNER_EMAILS=${_OWNER_EMAILS}:HCA_REQUIRE_GOOGLE_LINK=${_REQUIRE_GOOGLE_LINK}:HCA_DB_POOL_SIZE=${_DB_POOL_SIZE}:HCA_DB_MAX_OVERFLOW=${_DB_MAX_OVERFLOW}:HCA_MAX_INSTANCES=${_MAX_INSTANCES}:HCA_DB_CONNECTION_BUDGET=${_DB_CONNECTION_BUDGET}:HCA_DB_OLD_REVISION_RESERVE=${_DB_OLD_REVISION_RESERVE}:HCA_DB_MIGRATION_RESERVE=${_DB_MIGRATION_RESERVE}" \
           --min-instances=1 \
           --max-instances=${_MAX_INSTANCES} \
           --concurrency=80 \
@@ -196,74 +269,85 @@ steps:
           --allow-unauthenticated \
           --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
           --no-traffic \
-          --tag=candidate \
+          --tag=candidate-${BUILD_ID} \
           --quiet
 
   - id: check-config
-    # The candidate revision (tag "candidate", 0 percent traffic) must carry
-    # every required setting and no local only switch before it is smoked or
-    # promoted. scripts/check_config.py fails closed on a missing container,
-    # a missing secret or env entry, or HCA_WEBHOOK_ALLOW_INSECURE.
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        REV="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/candidate_revision.py --name)"
-        echo "candidate revision: $$REV"
-        gcloud run revisions describe "$$REV" --region=${_REGION} --format=json | python3 scripts/check_config.py --expect-commit ${COMMIT_SHA}
+        python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
+        RESOURCE="projects/${PROJECT_ID}/locations/${_REGION}/services/${_SERVICE}"
+        IMAGE="$$(cat /workspace/hca-image.txt)"
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /workspace/hca-service-v1.json
+        REV="$$(python3 scripts/candidate_revision.py --name --tag candidate-${BUILD_ID} < /workspace/hca-service-v1.json)"
+        gcloud run revisions describe "$$REV" --region=${_REGION} --format=json > /workspace/hca-revision.json
+        python3 scripts/candidate_revision.py service --resource "$$RESOURCE" > /workspace/hca-service-v2.json
+        python3 scripts/candidate_revision.py capture \
+          --service-v1 /workspace/hca-service-v1.json --revision-json /workspace/hca-revision.json \
+          --service-v2 /workspace/hca-service-v2.json --resource "$$RESOURCE" \
+          --commit ${COMMIT_SHA} --build ${BUILD_ID} --image "$$IMAGE" \
+          --snapshot /workspace/hca-candidate.json --lease /workspace/hca-deployment-lease.json
 
   - id: smoke-candidate
-    # Smoke the candidate on its tag URL while production traffic still goes
-    # to the previous revision. A failure here leaves production untouched.
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
     entrypoint: bash
     secretEnv: [HCA_ADMIN_TOKEN]
     args:
       - -c
       - |
         set -euo pipefail
-        URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/candidate_revision.py --url)"
-        echo "candidate url: $$URL"
+        python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
+        URL="$$(python3 scripts/candidate_revision.py field --snapshot /workspace/hca-candidate.json --field url)"
         python3 scripts/smoke_golden_path.py --base "$$URL"
+        python3 scripts/candidate_revision.py smoked --snapshot /workspace/hca-candidate.json
 
   - id: promote
-    # All checks passed on the candidate: move 100 percent of traffic to it.
-    # Rollback: docs/runbooks/HCA_DEPLOY_ROLLBACK.md (update-traffic back to
-    # the previous revision name printed below).
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        echo "serving before promotion:"
-        gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.traffic[].revisionName,status.traffic[].percent)'
-        gcloud run services update-traffic ${_SERVICE} --region=${_REGION} --to-latest --quiet
-        echo "serving after promotion:"
-        gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.traffic[].revisionName,status.traffic[].percent)'
+        python3 scripts/candidate_revision.py promote --snapshot /workspace/hca-candidate.json > /workspace/hca-promotion.json
+        cat /workspace/hca-promotion.json
 
   - id: smoke-live
     # Final proof on the production URL after promotion.
-    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
     entrypoint: bash
     secretEnv: [HCA_ADMIN_TOKEN]
     args:
       - -c
       - |
         set -euo pipefail
+        python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
         URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.url)')"
         python3 scripts/smoke_golden_path.py --base "$$URL"
+
+  - id: release-deployment-lease
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim@sha256:c70885ba9f0450ea9987b1c5dc1ab80acc768bac2fe783962dc98a64ea74c806
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        python3 scripts/candidate_revision.py lease-release --lease /workspace/hca-deployment-lease.json > /workspace/hca-lease-release.json
 
 artifacts:
   objects:
     location: gs://${PROJECT_ID}_cloudbuild/extension/
     paths:
       - dist/extension-*.zip
+      - hca-deployment-lease.json
+      - hca-lease-release.json
+      - hca-candidate.json
+      - hca-promotion.json
 
 images:
   - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}
-  - ${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:latest
 
 timeout: 1800s

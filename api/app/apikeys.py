@@ -11,22 +11,24 @@ never in the database. Rows hashed under the earlier plain SHA-256 scheme
 verify once more through the legacy path and are re-hashed under the pepper
 on that first use; see docs/decisions/DECISIONS_20261010.md.
 
-This module is new in this sub-task (dispatch hca-p3-20260929); it is not
-one of the endpoints the 2026-09-29 decisions log reconciled, so
-POST /v1/api-keys is marked PROPOSED in api/openapi.yaml pending the same
-review the earlier additions (cancel, inbox, inbox/stream, audit) got.
+The published POST /v1/api-keys route requires the platform administrator
+bearer. New secrets contain 24 random bytes (192 bits). An explicit bounded
+previous-pepper list permits a transition; successful verification upgrades
+the hash without overwriting a concurrent credential rotation or revocation.
 """
 
 import hashlib
 import hmac
+import json
 import os
+import re
 import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 
 from . import models
 
@@ -37,6 +39,26 @@ MAX_ACTIVE_API_KEYS = max(1, int(os.environ.get("HCA_MAX_ACTIVE_API_KEYS", "1000
 
 
 HASH_SCHEME = "hmac256"
+MAX_PREVIOUS_PEPPERS = 3
+
+
+def previous_peppers(env=None) -> list[str]:
+    """Explicit, bounded verification/decryption overlap; never log values."""
+    env = os.environ if env is None else env
+    try:
+        raw = env.get("HCA_API_KEY_PREVIOUS_PEPPERS", "[]")
+        if not isinstance(raw, str) or len(raw) > 16384:
+            raise ValueError()
+        peppers = json.loads(raw)
+        if not isinstance(peppers, list) or len(peppers) > MAX_PREVIOUS_PEPPERS:
+            raise ValueError()
+        if any(not isinstance(value, str) or not 16 <= len(value) <= 4096 for value in peppers):
+            raise ValueError()
+        if len(set(peppers)) != len(peppers):
+            raise ValueError()
+        return peppers
+    except (ValueError, TypeError):
+        raise RuntimeError("invalid previous API-key pepper configuration") from None
 
 
 def _pepper() -> bytes:
@@ -53,8 +75,7 @@ def _hash_secret(secret: str) -> str:
     """HMAC-SHA256 of the secret half under the server pepper, stored as
     hmac256$<hex>. The secret is server generated (24 random bytes), so a
     slow password KDF buys nothing against guessing; the pepper is what a
-    dumped table lacks. Closes CodeQL py/weak-sensitive-data-hashing alert
-    11, which flagged the earlier plain SHA-256 on this line."""
+    dumped table lacks."""
     digest = hmac.new(_pepper(), secret.encode("utf-8"), hashlib.sha256).hexdigest()
     return f"{HASH_SCHEME}${digest}"
 
@@ -119,13 +140,38 @@ def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:
     row = db.execute(select(models.ApiKey).where(models.ApiKey.key_prefix == prefix)).scalar_one_or_none()
     if row is None or row.revoked_at is not None:
         return None
-    if "$" in row.key_hash:
-        if not hmac.compare_digest(row.key_hash, _hash_secret(secret)):
+    stored = row.key_hash
+    current = _hash_secret(secret)
+    if re.fullmatch(r"hmac256\$[0-9a-f]{64}", stored):
+        if hmac.compare_digest(stored, current):
+            return row
+        matches = False
+        for pepper in previous_peppers():
+            candidate = f"{HASH_SCHEME}$" + hmac.new(pepper.encode("utf-8"), secret.encode("utf-8"), hashlib.sha256).hexdigest()
+            matches |= hmac.compare_digest(stored, candidate)
+        if not matches:
             return None
-        return row
-    # Legacy row (plain SHA-256, no scheme marker): verify once, re-hash under the pepper.
-    if not hmac.compare_digest(row.key_hash, _legacy_hash_secret(secret)):
+    elif not re.fullmatch(r"[0-9a-f]{64}", stored) or not hmac.compare_digest(stored, _legacy_hash_secret(secret)):
         return None
-    row.key_hash = _hash_secret(secret)
+    # Upgrade only the credential that was verified. A concurrent rotation
+    # or revocation must not be overwritten by this successful old-key use.
+    prefix = row.key_prefix
+    credential_id = row.id
+    changed = db.execute(update(models.ApiKey).where(models.ApiKey.id == row.id,
+        models.ApiKey.key_prefix == prefix, models.ApiKey.key_hash == stored,
+        models.ApiKey.revoked_at.is_(None)).values(key_hash=current)
+        .execution_options(synchronize_session=False)).rowcount
+    if changed != 1:
+        db.rollback()
+        # Another valid request can win the same pepper upgrade. Refresh
+        # its result; rotation/revocation or a different secret still denies.
+        current_row = db.execute(select(models.ApiKey).where(models.ApiKey.id == credential_id,
+            models.ApiKey.key_prefix == prefix).execution_options(populate_existing=True)).scalar_one_or_none()
+        if current_row is not None and current_row.revoked_at is None and hmac.compare_digest(current_row.key_hash, current):
+            return current_row
+        return None
     db.commit()
+    db.refresh(row)
+    if row.revoked_at is not None or row.key_prefix != prefix or row.key_hash != current:
+        return None
     return row

@@ -29,11 +29,11 @@ def _secret(name):
 
 def good_revision(commit="abc123"):
     env = [_secret(n) for n in sorted(check_config.REQUIRED_SECRETS)]
+    env += [{"name": name, "value": value} for name, value in check_config.CAPACITY_DEFAULTS.items()]
     env += [
         {"name": "HCA_GOOGLE_CLIENT_IDS", "value": "id-a,id-b"},
         {"name": "HCA_OWNER_EMAILS", "value": "owner@example.com"},
         {"name": "HCA_REQUIRE_GOOGLE_LINK", "value": "1"},
-        {"name": "HCA_DB_POOL_SIZE", "value": "5"},
     ]
     return {"metadata": {"labels": {"commit": commit}}, "spec": {"containers": [{"env": env}]}}
 
@@ -125,9 +125,9 @@ def test_candidate_found():
 
 
 def test_candidate_missing_or_duplicated_fails():
-    with pytest.raises(SystemExit):
+    with pytest.raises(candidate_revision.CandidateError):
         candidate_revision.find_candidate(_service([{"revisionName": "a", "percent": 100}]))
-    with pytest.raises(SystemExit):
+    with pytest.raises(candidate_revision.CandidateError):
         candidate_revision.find_candidate(_service([
             {"revisionName": "a", "tag": "candidate", "url": "u"},
             {"revisionName": "b", "tag": "candidate", "url": "v"},

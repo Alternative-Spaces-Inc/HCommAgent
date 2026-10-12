@@ -1,57 +1,41 @@
-# Index
+# Documentation index
 
-Every file in the Human Collections Agent repo, one line each. Agents boot from this repo: start at [agents/hca/HCA_BOOTSTRAP.md](../agents/hca/HCA_BOOTSTRAP.md).
+Start with [README](../README.md), [current status and evidence](STATUS.md), [case study](CASE_STUDY.md) and [Architecture](ARCHITECTURE.md). Current source guidance takes precedence over dated plans/deployment records.
 
-- [.github/gates/check_client_data.py](../.github/gates/check_client_data.py): Gate script run by the CI workflow
-- [.github/gates/check_manifest.py](../.github/gates/check_manifest.py): Gate script run by the CI workflow
-- [.github/gates/check_no_dashes.py](../.github/gates/check_no_dashes.py): Gate script run by the CI workflow
-- [.github/gates/client_data_denylist.txt](../.github/gates/client_data_denylist.txt): Client-data denylist, owner maintained
-- [.github/workflows/gates.yml](../.github/workflows/gates.yml): CI: dash, client-data, manifest, OpenAPI, pytest, extension, ruff and pip-audit gates
-- [CONTRIBUTING.md](../CONTRIBUTING.md): Gates, how to fix each, local development commands
-- [README.md](../README.md): Repo front page and pointers
-- [ruff.toml](../ruff.toml): Lint profile for the Python parts (errors and bug-prone patterns only)
-- [agents/hca/CURRENT.md](../agents/hca/CURRENT.md): Current state of the seat and repo
-- [agents/hca/HCA_BOOTSTRAP.md](../agents/hca/HCA_BOOTSTRAP.md): Seat boot contract, long form, boot sequence
-- [agents/hca/IDENTITY.md](../agents/hca/IDENTITY.md): Seat identity: name, values, hard constraints
-- [agents/hca/MEMORY_SEED.md](../agents/hca/MEMORY_SEED.md): Day-one durable facts for a fresh clone
-- [api/openapi.yaml](../api/openapi.yaml): HCA collection API, OpenAPI 0.2.0 (four endpoints added 2026-09-29)
-- [bootstrap/HCA_MANIFEST.yaml](../bootstrap/HCA_MANIFEST.yaml): Seat manifest: skills with sha256, rules, surface files
-- [bootstrap/agents-surface/BOOTSTRAP.md](../bootstrap/agents-surface/BOOTSTRAP.md): The .agents/BOOTSTRAP.md installed into the sandbox
-- [bootstrap/agents-surface/rules/path_first_owner_instructions.md](../bootstrap/agents-surface/rules/path_first_owner_instructions.md): Seat rule installed into .agents/rules
-- [bootstrap/agents-surface/rules/repo_first_results.md](../bootstrap/agents-surface/rules/repo_first_results.md): Seat rule installed into .agents/rules
-- [bootstrap/agents-surface/rules/sub_agent_prompts_opus55.md](../bootstrap/agents-surface/rules/sub_agent_prompts_opus55.md): Seat rule installed into .agents/rules
-- [bootstrap/sandbox-bootstrap.sh](../bootstrap/sandbox-bootstrap.sh): Thin caller: finds or clones this repo, runs the installer
-- [bootstrap/seat_sandbox_bootstrap.sh](../bootstrap/seat_sandbox_bootstrap.sh): Installer: BOOTSTRAP.md, rules, mcps, manifest skills into the agent sandbox
-- [bootstrap/skills/agent_selfrecover.sh](../bootstrap/skills/agent_selfrecover.sh): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/approved_run.py](../bootstrap/skills/approved_run.py): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/boot_heartbeat.sh](../bootstrap/skills/boot_heartbeat.sh): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/gh_safe_commit.py](../bootstrap/skills/gh_safe_commit.py): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/mac_bridge.py](../bootstrap/skills/mac_bridge.py): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/sandbox_recovery.sh](../bootstrap/skills/sandbox_recovery.sh): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/secret-parity-check.sh](../bootstrap/skills/secret-parity-check.sh): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/skill_restore.py](../bootstrap/skills/skill_restore.py): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/task-journal.sh](../bootstrap/skills/task-journal.sh): Seat copy of a factory skill (provenance header at line 2)
-- [bootstrap/skills/typed_facts.py](../bootstrap/skills/typed_facts.py): Seat copy of a factory skill (provenance header at line 2)
-- [docs/HCA_CHARTER_v1.md](../docs/HCA_CHARTER_v1.md): Charter: purpose, surfaces ladder, controls, decisions applied
-- [docs/decisions/DECISIONS_20260929.md](../docs/decisions/DECISIONS_20260929.md): Al rulings of 2026-09-29: seven design decisions, creation shape
-- [docs/decisions/DECISIONS_20261012.md](decisions/DECISIONS_20261012.md): decision 9, P21b owner selections (scopes, rate limits, rotation)
-- [docs/plans/HCA_CLOUD_RUN_PLAN_v1.md](../docs/plans/HCA_CLOUD_RUN_PLAN_v1.md): Cloud Run hosting plan, reconciled with the charter and decisions
-- [docs/runbooks/HCA_FIRST_DEPLOY.md](../docs/runbooks/HCA_FIRST_DEPLOY.md): First Cloud Run deploy, one Terminal block per step, with `cloudbuild.yaml` at the repo root
-- [docs/runbooks/HCA_DEPLOY_ROLLBACK.md](../docs/runbooks/HCA_DEPLOY_ROLLBACK.md): How a build promotes a candidate revision (no traffic, config check, smoke, promote) and how to move traffic back to a known good revision
-- [docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md](../docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md): Prior art on universal human-in-the-loop interfaces
-- [platform/about-you/HCA_ABOUT_YOU.md](../platform/about-you/HCA_ABOUT_YOU.md): About you paste text (cap 3,144 characters)
-- [platform/soul-renders/hca.md](../platform/soul-renders/hca.md): Soul render for the Base44 Personalization, Identity field
-- docs/deploys/2026-10-01_p6_device_proof.md: P6 device key proof, PR 20 inbox request_id fix, revision 00004
-- [docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md](plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md): Verified gap inventory and the P19 to P27 hardening program (agentic retail control plane)
-- [docs/plans/HCA_P20_DURABLE_DELIVERY_v1.md](plans/HCA_P20_DURABLE_DELIVERY_v1.md): P20 plan v1: durable delivery
-- [docs/plans/HCA_P21A_WEBHOOK_SECURITY_v1.md](plans/HCA_P21A_WEBHOOK_SECURITY_v1.md): P21a plan v1: webhook security and durable outbox
-- [docs/plans/HCA_P21B_API_KEY_HARDENING_v1.md](plans/HCA_P21B_API_KEY_HARDENING_v1.md): P21b plan v1: api key scopes, rate limits, rotation, no credential in a query string
-- docs/ARCHITECTURE.md: components, data model, request state machine, surface routing, diagrams (2026-10-10)
-- docs/webhooks.md: webhook destination registration, delivery headers, signature verification snippets, retry and dead state (2026-10-11)
-- docs/reviews/2026-10-10_public_readiness_review.md: ten ranked gaps with evidence, the readiness baseline
-- [docs/reviews/2026-10-12_enforcement_verification.md](../docs/reviews/2026-10-12_enforcement_verification.md): Branch protection, CodeQL, secret scanning and Dependabot settings read through the API on 2026-10-12, with the solo maintainer exception
-- docs/deploys/2026-10-10_public_readiness_block.md: PR 78 and 80 to 87 plus Dependabot merged, gaps closed and still open
+## Current guidance
 
-## Repository move (2026-10-11)
+- [Threat model](THREAT_MODEL.md): assets, trust boundaries, defenses and assurance limits.
+- [Operations](OPERATIONS.md): production prerequisites, rotation, retention, incident response and evidence requirements.
+- [Webhook receiver contract](webhooks.md): signing, authenticated deduplication, retry and rotation.
+- [Release instructions](RELEASES.md): developer versioning, packaging, checksums, installation and upgrades.
+- [Change log](../CHANGELOG.md): candidate source/API/client changes and compatibility.
+- [Chrome instructions](../extension/README.md) and [Mac instructions](../macos/README.md): control support, registration, storage and platform validation.
+- [Contributing](../CONTRIBUTING.md), [Security](../SECURITY.md) and [Code of Conduct](../CODE_OF_CONDUCT.md): development, supported updates and reporting.
+- [Published OpenAPI](../api/openapi.yaml): full API contract, with complete parity checked against source.
+- [Migration/recovery](runbooks/HCA_MIGRATION_RECOVERY.md): separate principals, bounded serialization and explicit scoped recovery.
+- [Deployment/rollback](runbooks/HCA_DEPLOY_ROLLBACK.md): candidate validation, promotion and recovery; separate operator authorization remains necessary.
 
-The project moved from the private repository human-collections-agent to Alternative-Spaces-Inc/HCommAgent on 2026-10-11 (owner selection, 18:4x PT). Pull request numbers cited in records dated on or before 2026-10-11 (PR 1 to PR 112) refer to the former repository; numbering in HCommAgent restarts at 1. Commit shas are unchanged and resolve in both.
+## Evidence
+
+- [First twelve remediation items](SECURITY_REMEDIATION_01_12.md).
+- [Resource/client remediation](SECURITY_REMEDIATION_13_23.md).
+- [Repository/operations remediation](SECURITY_REMEDIATION_24_43.md).
+- [Owner-reported manual validation](reviews/2026-10-12_manual_validation_approval.md).
+- [Dated enforcement verification](reviews/2026-10-12_enforcement_verification.md).
+- [Security alert triage addendum](reviews/2026-10-12_security_alert_triage.md).
+- [Synthetic Chrome screenshot](../extension/docs/decision-review.png).
+
+## Historical references
+
+Files under `plans/`, `deploys/`, `decisions/`, `dispatches/`, `research/` and older `reviews/` preserve their original date and context. Historical implementation counts, source paths, setup commands and operational claims do not establish the current release. Privileged personal operations described there are outside the supported product; their removal from source does not erase history.
+
+- [Charter](HCA_CHARTER_v1.md): original purpose and interface decisions.
+- [P19 program](plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md), [P20 durable delivery](plans/HCA_P20_DURABLE_DELIVERY_v1.md), [P21a webhook design](plans/HCA_P21A_WEBHOOK_SECURITY_v1.md), [P21b caller keys](plans/HCA_P21B_API_KEY_HARDENING_v1.md): historical design context; consult current status before interpreting roadmap completion.
+- [Initial deployment](runbooks/HCA_FIRST_DEPLOY.md) and [Chrome Web Store setup](runbooks/HCA_CHROME_WEB_STORE.md): historical setup context requiring reconciliation with current source, identities and privacy policy.
+- [Public-readiness baseline](reviews/2026-10-10_public_readiness_review.md): historical review, superseded for current behavior by the remediation records and exact-commit evidence.
+- [Interface research](research/UNIVERSAL_INTERFACE_PATTERNS_v1.md): design prior art.
+- [September 29 decisions](decisions/DECISIONS_20260929.md), [October 10 decisions](decisions/DECISIONS_20261010.md), [October 11 decisions](decisions/DECISIONS_20261011.md), [October 12 decisions](decisions/DECISIONS_20261012.md): dated decisions; not execution authorization.
+
+## Repository move
+
+The project moved from `human-collections-agent` to `Alternative-Spaces-Inc/HCommAgent` on October 11, 2026. Earlier PR numbers in dated records refer to the previous repository; HCommAgent numbering starts again at 1. Use the source commit and dated evidence when comparing those records.

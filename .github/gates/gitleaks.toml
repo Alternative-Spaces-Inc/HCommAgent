@@ -1,0 +1,19 @@
+title = "HCA credential detection"
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "hca-agent-credential"
+description = "HCA agent bearer credential"
+regex = '''hca_live_[a-f0-9]{12}_[A-Za-z0-9_-]{32,}'''
+
+[[rules]]
+id = "hca-webhook-credential"
+description = "HCA webhook signing credential"
+regex = '''whsec_[A-Za-z0-9_-]{43,}'''
+
+[[rules]]
+id = "google-access-token"
+description = "Google access token"
+regex = '''ya29\.[A-Za-z0-9_-]{40,}'''

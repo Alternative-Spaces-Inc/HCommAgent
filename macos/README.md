@@ -17,9 +17,11 @@ open "$HOME/hca-notifier/HCA Notifier.app"
 Notifications require the app bundle; running the bare executable does not work.
 Release builds omit test-notification menu commands. Debug builds retain them.
 
-Use the existing local build and signing instructions in `scripts/bundle.sh`.
-This client safety change does not establish release packaging, Developer ID
-signing, hardened runtime, notarization, or public distribution readiness.
+The bundle script validates numeric 0.3.0 version/build metadata, records its source
+revision and produces a developer archive plus SHA256 sidecar. See
+[release instructions](../docs/RELEASES.md) for versioning and checksum verification.
+Local/ad-hoc signing does not establish Developer ID, hardened runtime, notarization
+or public distribution readiness.
 
 ## Configure and register
 
@@ -147,3 +149,5 @@ notification presentation, accessibility with assistive tools, real Google
 OAuth, launch-at-login behavior, and local Keychain dialogs still require
 manual checks on the target Mac; passing logic tests does not establish
 notarized release readiness.
+
+The owner reported manual client/sign-in/lifecycle/accessibility validation completed and approved on October 12, 2026; see [the dated record](../docs/reviews/2026-10-12_manual_validation_approval.md). This is owner-reported evidence for that source/client scope, not an invented independent deployment or public signing result.

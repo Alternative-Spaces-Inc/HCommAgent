@@ -1,122 +1,99 @@
----
-title: HCA architecture
-summary: Components, data model, request state machine, surface routing, concurrency and operations of the Human Collections Agent, with diagrams.
----
+# Architecture
 
-# HCA architecture
+HCA separates agent credentials, human device authorization and platform administration. FastAPI owns validation and the decision lifecycle; Postgres owns durable state. Chrome provides the complete decision UI. The Mac developer client provides radio and approve/deny decisions and directs other controls to Chrome.
 
-## Overview
-
-HCA is one FastAPI service in front of Postgres. Agents talk to it with API keys, humans talk to it through devices (a Chrome extension and a macOS menu bar app) that sign every call with a device key. The service owns the question lifecycle: validation, tenant scoping, surface routing, a single terminal transition per ask, the audit record and delivery of the answer back to the agent by webhook. Clients are thin: they render what the server says they may see and post signed answers.
+The supported audience is current tenant owners. `audience` is descriptive metadata, not a role or department authorization rule. Work-order orchestration, enterprise connectors, voice interaction and broader role-based audiences remain outside the implemented scope.
 
 ```mermaid
 flowchart LR
-    Agent[AI agent] -- POST /v1/requests, API key --> API[HCA API, FastAPI]
-    API -- signed webhook, durable outbox --> Agent
-    API --- PG[(Postgres)]
-    API -- SSE /v1/inbox/stream and GET /v1/inbox --> Ext[Chrome extension]
-    API -- SSE and poll --> Mac[macOS HCA Notifier]
-    Ext -- POST answer, device signature --> API
-    Mac -- POST answer, device signature --> API
-    Admin[Platform admin] -- admin bearer: tenants, owners, devices, keys --> API
-    Sweep[Expiry sweep, scheduled] -- sweep bearer --> API
+    Agent[Agent with tenant caller key] --> API[FastAPI decision service]
+    Chrome[Chrome six-control inbox] -->|Device signature| API
+    Mac[Mac radio and approve/deny] -->|Device signature| API
+    Admin[Administrator] -->|Separate admin bearer| API
+    Google[Google access-token verification] --- API
+    API --> DB[(Postgres state and outbox)]
+    DB --> Worker[Fenced leased jobs]
+    Worker -->|Signed delivery| Receiver[Agent webhook receiver]
+    API -->|SSE and paginated inbox| Chrome
+    API -->|SSE and paginated inbox| Mac
+    Sweep[Authenticated scheduler] --> API
 ```
 
-## One ask, end to end
+## A decision transaction
+
+An agent submits a request with its API key and an optional `Idempotency-Key`. The service resolves caller/tenant from that key, validates the control and payload limits, checks the tenant's active-request ceiling, resolves a registered webhook destination when applicable, and reserves the idempotency key under a database uniqueness constraint.
+
+The create transaction writes the ask, options, scheduled jobs, event and stored retry response. An answer or cancellation loads the ask under a row lock, rechecks state and authorization, and writes its terminal transition, audit, event, webhook delivery/job and idempotency response together. A failure before commit rolls back the group. Event dispatch is woken after commit, with database polling as recovery.
+
+The retry fingerprint binds the body to the canonical operation/resource. A key reused for a different request does not return the first request's answer. A concurrent duplicate create waits on the same reservation and receives the committed receipt. Idempotency responses have a bounded lifetime; callers must not treat the retry store as a permanent external-effect ledger.
 
 ```mermaid
 sequenceDiagram
     participant A as Agent
-    participant S as HCA API
-    participant D as Postgres
-    participant M as macOS Notifier, rank 0
-    participant C as Chrome extension, rank 1
-    A->>S: POST /v1/requests (API key, Idempotency-Key)
-    S->>S: validate control and options, resolve tenant from the key
-    S->>D: insert ask, options, deliveries
-    S-->>M: event request.created, visible_to names rank 0
-    S->>S: schedule escalation at created_at + window
-    Note over M: banner ignored for one window
-    S-->>C: event request.escalated, visible_to now names rank 1
-    C->>S: POST /v1/requests/{id}/answer (device signature)
-    S->>D: SELECT ask FOR UPDATE, state shown to answered
-    S->>D: insert audit row (device, surface, path, value)
-    S-->>M: event request.answered (card dropped)
-    S-->>C: event request.answered
-    S->>A: signed webhook request.answered from the outbox, up to 7 attempts over an hour, each recorded
-    A->>S: GET /v1/requests/{id} or GET /v1/audit
+    participant S as API
+    participant D as Database
+    participant H as Authorized human device
+    participant R as Webhook receiver
+    A->>S: Create with caller key and retry key
+    S->>D: Reserve key, ask, jobs, event, receipt
+    S->>D: Commit
+    S-->>H: SSE or reconciled inbox
+    H->>S: Signed explicit answer and retry key
+    S->>D: Lock, check membership and deadline
+    S->>D: Answer, audit, event, outbox, retry response
+    S->>D: Commit
+    S-->>H: Clear answered request
+    S->>R: Signed delivery with authenticated delivery_id
+    R->>R: Verify, deduplicate and apply effect atomically
+    R-->>S: Successful acknowledgement
 ```
 
-## Components
+## State and expiry
 
-| Module | Responsibility |
-| --- | --- |
-| `api/app/main.py` | Application assembly: routers for requests, audit, inbox, api keys, sweep, devices, tenants, privacy |
-| `api/app/requests_api.py` | Create, read, answer, cancel; row locking; terminal transition rule |
-| `api/app/controls.py` | Control catalogue (`approve_deny`, `radio`, `dropdown`, `checkbox`, `chat`, `confirm_rows`), size bounds, answer value validation, `GET /v1/controls` |
-| `api/app/inbox_api.py` | `GET /v1/inbox` and `GET /v1/inbox/stream` (server-sent events), filtered per device and tenant |
-| `api/app/routing.py` | Surface ladder: eligible devices, rank, visibility windows, escalation timers |
-| `api/app/events.py` | In-process event bus; event types `request.created`, `request.escalated`, `request.answered`, `request.cancelled`, `request.expired`; `visible_to` device lists |
-| `api/app/expiry.py` | Deadline sweep: auto deny, expire or hold per `expiry_policy`; idempotency table cleanup |
-| `api/app/webhooks.py` | Durable outbox: `webhook_deliveries` rows worked by `scheduled_jobs` (kind webhook), signed with HMAC-SHA256 under the destination secret, sent to a pinned checked address, retried 1 s to 1 h, dead after the 7th failure; one `webhook_attempts` row per attempt |
-| `api/app/webhook_destinations.py`, `api/app/ssrf.py`, `api/app/webhook_crypto.py` | Destination registry (register, rotate, revoke under the caller's key), the SSRF rules applied at registration and send, secrets encrypted at rest under a key derived from the api key pepper |
-| `api/app/idempotency.py` | `Idempotency-Key` replay store, 24 hour TTL by default |
-| `api/app/auth.py` | `require_agent_key`, `require_admin_bearer`, `require_device`, `require_linked_device` |
-| `api/app/devicesig.py` | Device signature contract: canonical string, P-256 verification, timestamp freshness, device id derivation |
-| `api/app/googleauth.py` | Google ID token verification for the owner link |
-| `api/app/tenancy.py` | Tenant and tenant owner administration routes |
-| `api/app/apikeys.py`, `apikeys_api.py` | Key format `hca_live_<prefix>_<secret>`, hashing, issue, list, revoke |
-| `api/app/devices_api.py` | Device registration, self view, priority, Google link, revoke |
-| `api/app/sweep_api.py` | `POST /expiry-sweep` behind its own bearer, called on a schedule |
-| `api/app/privacy.py` | `GET /privacy`, the page the Chrome Web Store listing points to |
-| `api/app/models.py`, `api/alembic/` | SQLAlchemy models and migrations; `scripts/check_migrated.py` asserts head after upgrade |
-| `extension/` | Manifest V3 extension: `background.js` (stream, poll, offline queue), `popup.js`, `options.js`, `lib/devicekey.js`, `lib/api.js`, `lib/hostaccess.js` |
-| `macos/` | `HCACore` (signing, API client, routing rules, tests) and `HCANotifier` (menu bar app, banners, launch at login) |
+Requests begin pending (`queued`, with `shown` also recognized). Answered, cancelled, expired and withdrawn states are terminal. A second terminal transition conflicts unless it is a valid idempotent replay.
 
-## Data model
+`auto_deny` applies the configured deny result, `expire` closes without a human answer, and `hold` deliberately leaves the request answerable after its deadline. The answer transaction applies/rejects overdue non-hold requests before accepting the submitted value. Expiry correctness therefore does not depend on a background worker being timely. Held requests do not generate an endless chain of reconciliation jobs. Material red-gate requests use the enforced expiry policy documented by the API.
 
-| Table | Purpose |
-| --- | --- |
-| `tenants` | One row per tenant; `disabled_at` blocks every route for that tenant |
-| `tenant_owners` | Google account emails allowed to link a device for the tenant |
-| `asks` | The question: caller, tenant, control, title, why, deadline, `expiry_policy`, `red_gate`, `state`, timestamps |
-| `options` | Options of an ask (id, label, description, order) |
-| `deliveries` | Which surface received the ask and when |
-| `api_keys` | Caller, tenant, prefix, secret hash, revoked_at; one live key per caller |
-| `audit_rows` | The answer record: ask, device, surface, path, value, answered_at |
-| `idempotency_keys` | Tenant, scope, route, key, body hash, stored response, expiry |
-| `webhook_destinations` | A caller's registered webhook URL: pinned addresses, encrypted secret and previous secret, rotation overlap, revoked_at |
-| `webhook_deliveries` | The outbox: one row per outcome owed to a destination (state queued, delivered, dead; attempts; next_run_at); the id is the receiver's dedupe key |
-| `webhook_attempts` | One row per HTTP attempt: ask, delivery, event, url, attempt number, status or error, ok flag |
-| `devices` | Device id (derived from the public key), label, surface, public key PEM, priority, Google link, last seen, revoked_at, tenant |
+## Authorization and audit
 
-Every tenant-owned table carries `tenant_id`; queries take the tenant from the authenticated key or device, never from the request body.
+Agents use tenant/caller API keys stored as HMAC-SHA256 hashes. Humans register a P-256 public key, sign each protected call, and link a Google access token whose verified account and OAuth audience are permitted. Production startup requires that link gate. Current membership, device revocation and tenant disablement are checked on protected calls and periodically on streams, including when events arrive continuously.
 
-## Request state machine
+Audit owner, role, device and surface come from verified server state. Client-reported path, duration, optional context and identity claims are retained only as untrusted metadata. This records the authenticated responder; it does not verify the truth of the agent's proposed command or that a webhook receiver performed the described action.
 
-States are strings on `asks.state`, typed as `queued`, `shown`, `answered`, `expired`, `withdrawn`, `cancelled` (`schemas.py`). A new ask starts `queued`; `queued` and `shown` are the pending states the inbox lists. The terminal set is `{"answered", "expired", "withdrawn", "cancelled"}` (`requests_api.py`). Transitions:
+## Events, replay and routing
 
-- pending to `answered`: `POST /v1/requests/{id}/answer` by a linked device that may see the ask, value valid for the control.
-- pending to `cancelled`: `POST /v1/requests/{id}/cancel` by the owning agent with a reason.
-- pending at the deadline, by the sweep, per `expiry_policy`: `auto_deny` (default) writes a deny answer and the ask becomes `answered`; `expire` makes it `expired`; `hold` leaves it pending and records the hold.
+Events are durable rows written with state changes. Postgres uses LISTEN/NOTIFY for wake-up and a polling fallback for recovery. Event insertion acquires a transaction-scoped ordering lock so a later sequence ID cannot commit first and advance the dispatch cursor past an earlier uncommitted event. That global insertion serialization is a correctness/throughput tradeoff that requires load measurement for a larger deployment. SQLite remains a local demonstration and unit-test path.
 
-Each transition loads the row with `SELECT ... FOR UPDATE`, re-checks that the state is still non-terminal inside the lock, and refuses a second terminal transition with a conflict response. A retried answer with the same `Idempotency-Key` returns the stored first response without a second decision.
+The routing ladder ranks eligible owner devices by configured priority and recent activity. Visibility expands at successive fallback windows (90 seconds by default, 45 for material red gates). It provides presentation timing within a tenant, not authorization for separate organizational audiences.
 
-## Surface routing
+Replay defaults to 24 hours and at most 1,000 scanned events. A future, expired or truncated cursor produces `stream.reset`; a full local subscriber queue also asks the client to reconcile. Chrome clears its scoped cursor, reconciles the paginated inbox and reconnects. Both clients poll as a recovery path. Stream revocation is rechecked on the server's elapsed interval (15 seconds by default), subject to normal server scheduling and database availability. The per-device local stream cap is per API process; an operator must also bound instances and edge concurrency.
 
-From `routing.py`: devices eligible for an ask are the tenant's non-revoked, Google-linked devices seen within `DEFAULT_ACTIVE_SECONDS` (600). They are ranked by `priority` (lower first; the Notifier runs at 10, the Chrome device at 200 in the reference setup). An ask is visible to rank *r* from `created_at + r * window`, where the window is `DEFAULT_FALLBACK_SECONDS` (90) or half that for a red gate. At each boundary the server publishes `request.escalated` with the enlarged `visible_to` list. Clients ignore envelopes that do not name them; the inbox applies the same filter server side, so a client cannot read ahead of its rank. The Mac app re-posts banners the owner swipes away until the ask is answered.
+## Workers and external delivery
 
-## Idempotency and concurrency
+Expiry, escalation and webhook jobs live in the database. Workers claim work near execution, renew leases for long operations, and condition mutations on their owner/generation. Losing a lease prevents stale database completion writes. A network request that already reached a receiver can still have an effect, so a lease is not an exactly-once external-delivery guarantee.
 
-`Idempotency-Key` (any string up to 200 characters) is scoped to tenant, caller scope and route; the same key with a different body is refused with 422. Stored responses expire after `HCA_IDEMPOTENCY_TTL_SECONDS` (default 24 hours) and are swept with expiry. Answers and cancellations take the row lock; the Postgres threaded tests race two writers and assert exactly one wins. Device sessions do not expire objects after commit, so long-lived streams never hold an idle transaction open.
+Webhook I/O occurs outside the business transaction. A bounded wall-clock deadline covers DNS and network work, redirects are refused, and the client does not consume an unlimited response. The signed body includes the delivery ID; the receiver must compare it with the header and atomically deduplicate effects. Read [the receiver contract](webhooks.md) for retries, rotation and dead deliveries.
 
-## Operations
+## Data and implementation map
 
-- **Pipeline** (`cloudbuild.yaml`): guard, pytest, smoke-local, pack-extension, build, push, migrate, deploy (candidate, no traffic), check-config, smoke-candidate, promote, smoke-live-live. The migrate step runs `alembic upgrade head` as a Cloud Run job and then `scripts/check_migrated.py`, which fails the build unless the database reports the expected head and every model table exists. A green step status is never read as proof; the job's own log and the live revision are.
-- **Smoke-live** (`scripts/`): mints a key, posts an ask, answers it with a test device, registers a webhook destination, reads audit, verifies the signed webhook delivery, revokes the destination and the key.
-- **Configuration**: all by environment variables and Secret Manager (database URL, admin bearer, sweep bearer, api key pepper HCA_API_KEY_PEPPER, Google client ids, owner allowlist fallback, webhook retry schedule WEBHOOK_RETRY_SCHEDULE, idempotency TTL, connection pool bounds HCA_DB_POOL_SIZE 3, HCA_DB_MAX_OVERFLOW 3, HCA_DB_POOL_TIMEOUT 10, HCA_DB_POOL_RECYCLE 300, sized for a 25 slot database). No project id or hostname is committed.
-- **Records**: every deploy and every proof has a dated file under `docs/deploys/`; every design decision and the alternatives declined under `docs/decisions/`.
+| Component | Main source | Responsibility |
+| --- | --- | --- |
+| Assembly/lifecycle | `api/app/main.py`, `config.py` | Routers, explicit production validation, worker/listener startup and shutdown |
+| Decision model | `requests_api.py`, `controls.py`, `schemas.py` | Tenant/caller boundaries, limits, value validation, transitions and audit |
+| Authentication | `auth.py`, `devicesig.py`, `nonces.py`, `googleauth.py`, `tenancy.py` | Signatures, replay, current owner membership and administration |
+| Durable delivery | `events.py`, `jobs.py`, `routing.py`, `expiry.py` | Event ordering/replay, fenced work, presentation ladder and expiry |
+| Webhook boundary | `webhooks.py`, `ssrf.py`, `webhook_destinations.py`, `webhook_crypto.py` | Registered URLs, checked DNS/address pinning, signatures, encryption and retries |
+| Resource/lifecycle limits | `middleware.py`, `limits.py`, `retention.py`, `data_api.py` | Body/rate limits, bounded cleanup and tenant export/purge |
+| Schema/storage | `models.py`, `api/alembic/` | Tenant-owned records, constraints and migrations |
+| Complete browser UI | `extension/` | Non-extractable keys, scoped state, durable bounded queue, explicit decisions |
+| Mac developer UI | `macos/` | Keychain signing, two controls, bounded OAuth callback, notification recovery |
 
-## Roadmap
+The primary records are tenants/owners, agent keys, devices, asks/options, audit rows, durable events, scheduled jobs, idempotency responses, webhook destinations/deliveries/attempts and rate buckets. Tenant authorization is derived from credentials. Administrators can export records in bounded pages and explicitly purge completed records; events/completed jobs, terminal deliveries/attempts and registry events have bounded cleanup. Purge preserves pending requests, queued deliveries and live leases. Backup/log/profile retention remains an operator obligation.
 
-The hardening program (P19 to P27) is in `docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md`: durable delivery with an events table and replay, webhook and auth hardening, work orders and connectors, extension and macOS hardening and release path, container and CI hardening, bootstrap isolation, documentation and policy.
+## Limits and verification
+
+Default limits include a 1 MiB request body, bounded nested data (depth 12 and 10,000 nodes), 1,000 active requests per tenant, 50 options for normal selection controls, 500 confirm rows, and 4,000 chat characters. Actor/tenant/admin fixed-window budgets are shared through the database; responses include retry guidance. Inbox/audit/export pages default to 200 records, cap at 500 and use `X-HCA-Next-Cursor` with an `after` parameter. These are enforced bounds, not measured throughput promises.
+
+The entire saved OpenAPI document is compared with FastAPI's generated definition, including schemas, constraints, security and headers. API fault/concurrency tests, real HTTP/SSE and two-process tests, Chromium DOM/IndexedDB tests, and Swift loopback tests exercise different boundaries. Postgres-specific checks need Postgres; owner-reported Google/client/operating-system validation is recorded separately from automated checks. Actual IAM, restore and load tests require operator evidence. See [Contributing](../CONTRIBUTING.md), [Threat model](THREAT_MODEL.md) and [Operations](OPERATIONS.md).
+
+The nominal default webhook schedule is eight attempts with seven waits totaling 6,156 seconds before request/queue elapsed time and up to twenty percent wait jitter. Encryption uses an optional independent versioned keyring with legacy dual-read support; see [Operations](OPERATIONS.md) before changing write formats or retiring peppers/keys. The immutable migration order remains the applied history; never copy reversed identifiers from an earlier draft.

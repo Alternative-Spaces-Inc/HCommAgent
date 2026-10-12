@@ -1,12 +1,9 @@
-"""HCA-P17: GET /privacy, the privacy policy page the Chrome Web Store listing
-links to. Static HTML, no database, no auth. The text describes what the
-browser extension (and the macOS app, same contract) sends to this server:
-a device public key once, the owner's Google ID token once at link time,
-and signed requests afterwards. Nothing else leaves the owner's machine
-and nothing is shared or sold. Keep this page in step with
-docs/runbooks/HCA_CHROME_WEB_STORE.md (the listing's justifications quote it).
-"""
+"""Public privacy disclosure for access tokens, decisions and local/server storage.
 
+Google access tokens are checked with Google and not persisted by HCA. Answers
+can be sent to configured webhook recipients. Deployment operators supply their
+actual contact details and backup/log retention policy.
+"""
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse
 
@@ -18,38 +15,65 @@ PRIVACY_HTML = """<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Human Collections Agent: privacy policy</title>
-<style>body{font-family:system-ui,sans-serif;max-width:40rem;margin:3rem auto;padding:0 1rem;line-height:1.5}</style>
+<style>body{font-family:system-ui,sans-serif;max-width:44rem;margin:3rem auto;padding:0 1rem;line-height:1.5}</style>
 </head>
 <body>
 <h1>Human Collections Agent: privacy policy</h1>
-<p>The Human Collections Agent (HCA) browser extension and menu bar app
-present decisions to the owner of this server and send the owner's
-answers back to it. This server is operated by the owner for the
-owner's own use.</p>
-<h2>What the extension sends to this server</h2>
+<p>Updated October 12, 2026. HCA is a self-hosted decision service. Your server
+operator controls its deployment and access policy. Use the operator contact
+provided with your installation for access, deletion and retention questions.
+Source-project support is available through
+<a href="https://github.com/Alternative-Spaces-Inc/HCommAgent/issues">the project issues</a>;
+do not post personal decision data or credentials in public issues.</p>
+<h2>Data sent and processed</h2>
 <ul>
-<li>Once, at registration: a public key the extension generates on the
-owner's device. The private half never leaves the device.</li>
-<li>Once, at sign-in: a Google ID token (email and account id) so the
-server can confirm the device belongs to a listed owner account. The
-server keeps the verified email address on the device record and does
-not keep the token.</li>
-<li>Afterwards: signed requests to read pending decisions and to record
-the owner's answers. Each answer is stored with the time, the device
-that gave it and the surface it was given on.</li>
+<li>The clients register a device public key, identifier, label and surface.
+The private signing key remains in browser IndexedDB or the Mac login Keychain.</li>
+<li>For Google linking, a Google access token is sent over HTTPS to your
+selected server and checked with Google. HCA does not persist that token.
+Verified account subject/email, linked client and link time are stored.</li>
+<li>Signed calls read pending decisions and submit answers. The server stores
+request context, options, answers, verified owner/device/surface, time and audit
+information. Optional client context is untrusted metadata. Operators may also
+retain network and infrastructure logs.</li>
+<li>Answers and request data are delivered to the agent's configured webhook
+receiver or read by the agent from the API. The operator's chosen hosting and
+database providers process server data; Google processes account verification.
+These recipients and providers have their own policies.</li>
 </ul>
-<h2>What it does not do</h2>
+<h2>Local data and notifications</h2>
+<p>Chrome stores an origin/device-scoped inbox, cursor, preferences and bounded
+unsent answers. A saved offline answer is not a server-accepted decision. Mac
+keeps the inbox in memory, preferences/cursor in UserDefaults and its signing key
+in Keychain. Notifications hide decision details by default. Enabling previews
+can expose titles and choices in system notification history or on a locked
+screen. System notification cleanup remains under your control.</p>
+<h2>Collection limits</h2>
 <ul>
-<li>No browsing history, page content, cookies or keystrokes are read or
-sent. Site access is requested only for this server's own address.</li>
-<li>Nothing is sold, shared with third parties or used for advertising.</li>
-<li>No analytics or tracking code runs in the extension.</li>
+<li>No browsing history, page content, cookies or keystrokes are read by the
+extension. Host access is requested for the configured API origin.</li>
+<li>The clients include no advertising or tracking analytics. HCA does not
+sell data; configured agent/webhook delivery and hosting are disclosed above.</li>
 </ul>
-<h2>Retention and contact</h2>
-<p>Decision records stay on this server as the owner's audit trail until
-the owner deletes them. The owner can revoke a device at any time, after
-which its requests are refused. Questions go to the operator of this
-server through the channel that gave you the install link.</p>
+<h2>Retention, export and deletion</h2>
+<p>Decision and audit records remain until the operator explicitly purges them.
+Administrators can export decisions in bounded pages and purge terminal records
+before an explicit cutoff. Pending decisions, queued webhook deliveries and
+actively leased work are preserved. Held requests remain pending; cancel or
+otherwise complete them before applying a deletion policy.</p>
+<p>Bounded cleanup normally retains transient events and completed jobs for
+seven days, terminal webhook deliveries/attempts for thirty days, and destination
+registry events for ninety days. Active work is preserved. Replay availability
+is twenty-four hours and has a count bound. Owner/device profiles and destination
+registrations require operator handling. Backups and infrastructure logs have
+separate operator-defined retention; running-database deletion does not erase
+older backups.</p>
+<p>Chrome offline answers expire within twenty-four hours or an earlier non-hold
+deadline, with size/attempt limits. Origin changes, key rotation and authorization
+refusal clear sensitive scoped state. Uninstalling a client removes its local
+application data but does not delete server records. Mac Keychain and system
+notifications require separate cleanup. Ask the operator to revoke the device
+and handle retained server/profile data under its published policy.</p>
 </body>
 </html>
 """

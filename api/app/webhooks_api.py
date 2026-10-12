@@ -84,7 +84,8 @@ def list_destinations(response: Response, include_revoked: bool = False, limit: 
     return [_view(d) for d in rows]
 
 
-@router.post("/{destination_id}/rotate", response_model=WebhookSecretResponse)
+@router.post("/{destination_id}/rotate", response_model=WebhookSecretResponse,
+             responses={409: {"description": "Previous signing secret is still within its 24-hour rotation overlap"}})
 def rotate_destination(destination_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     try:
         dest, secret = registry.rotate(db, tenant_id=key.tenant_id, caller=key.caller, destination_id=destination_id)

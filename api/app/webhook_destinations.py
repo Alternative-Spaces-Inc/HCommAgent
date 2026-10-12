@@ -17,7 +17,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import select, func
+from sqlalchemy import select, func, update
 from sqlalchemy.orm import Session
 
 from . import models, ssrf, webhook_crypto
@@ -34,6 +34,10 @@ class RegistryError(ValueError):
 
 class NotFound(RegistryError):
     status_code = 404
+
+
+class Conflict(RegistryError):
+    status_code = 409
 
 
 def _now() -> datetime:
@@ -76,8 +80,16 @@ def find_active_by_url(db: Session, tenant_id: str, caller: str, url: str) -> Op
     return None
 
 
-def get_own(db: Session, tenant_id: str, caller: str, destination_id: str) -> models.WebhookDestination:
-    dest = db.get(models.WebhookDestination, destination_id)
+def get_own(db: Session, tenant_id: str, caller: str, destination_id: str, *, lock=False) -> models.WebhookDestination:
+    if lock:
+        scope = (models.WebhookDestination.id == destination_id, models.WebhookDestination.tenant_id == tenant_id,
+                 models.WebhookDestination.caller == caller)
+        if db.get_bind().dialect.name == "sqlite":
+            db.execute(update(models.WebhookDestination).where(*scope).values(secret_prefix=models.WebhookDestination.secret_prefix))
+        dest = db.execute(select(models.WebhookDestination).where(*scope)
+                          .with_for_update().execution_options(populate_existing=True)).scalar_one_or_none()
+    else:
+        dest = db.get(models.WebhookDestination, destination_id)
     if dest is None or dest.tenant_id != tenant_id or dest.caller != caller:
         raise NotFound("webhook destination not found")
     return dest
@@ -118,9 +130,11 @@ def register(db: Session, *, tenant_id: str, caller: str, url: str, now: Optiona
 
 def rotate(db: Session, *, tenant_id: str, caller: str, destination_id: str, now: Optional[datetime] = None) -> tuple[models.WebhookDestination, str]:
     now = now or _now()
-    dest = get_own(db, tenant_id, caller, destination_id)
+    dest = get_own(db, tenant_id, caller, destination_id, lock=True)
     if dest.revoked_at is not None:
         raise RegistryError("webhook destination is revoked")
+    if (dest.previous_secret_hash or dest.previous_secret_enc) and dest.previous_valid_until and dest.previous_valid_until > _naive(now):
+        raise Conflict("previous signing secret is still within its 24-hour rotation overlap")
     secret = _new_secret()
     dest.previous_secret_hash = dest.secret_hash
     dest.previous_secret_enc = dest.secret_enc
@@ -137,7 +151,7 @@ def rotate(db: Session, *, tenant_id: str, caller: str, destination_id: str, now
 
 def revoke(db: Session, *, tenant_id: str, caller: str, destination_id: str, now: Optional[datetime] = None) -> models.WebhookDestination:
     now = now or _now()
-    dest = get_own(db, tenant_id, caller, destination_id)
+    dest = get_own(db, tenant_id, caller, destination_id, lock=True)
     if dest.revoked_at is None:
         dest.revoked_at = _naive(now)
         _audit(db, dest, "revoked", caller, None, now)

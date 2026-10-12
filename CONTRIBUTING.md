@@ -1,73 +1,88 @@
-# Contributing to the Human Collections Agent repo
+# Contributing
 
-Changes land through a branch and a pull request. Nobody pushes to main, and
-the owner merges every PR after the gates are green; a merge to main deploys
-the API through Cloud Build (see [cloudbuild.yaml](cloudbuild.yaml)). Agents
-working in this repo follow the same path and never merge.
+Use a branch and a pull request. Describe the concrete behavior change, failure case, checks and remaining limits. Review the exact candidate and its CI before merging. Main can trigger deployment; source review and cloud authorization are separate.
 
-## Gates every PR must pass
+## Reproducible development
 
-CI runs [.github/workflows/gates.yml](.github/workflows/gates.yml). CodeQL
-default setup also analyses Python, Swift, JavaScript and Actions on every PR
-and reports as separate checks.
+Use Python 3.12, Node 22 or 24 and macOS 14+ with Swift 5.9 or later. From the repository root:
 
-| Check | What it enforces | Script or command |
+```sh
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install --require-hashes -r api/requirements-dev.lock
+python scripts/demo_workflow.py
+```
+
+Runtime dependencies are in `api/requirements.txt` and `api/requirements.lock`; development inputs and their compiled dependencies are in `api/requirements-dev.in` and `api/requirements-dev.lock`. Update source inputs and regenerate both hashed locks together. Use `npm ci` with `extension/package-lock.json`. Changes to locks, action pins or image digests need review and the relevant checks.
+
+The current locks were generated with uv 0.11.14 for Python 3.12 across supported platforms. After changing direct pins, extras or markers:
+
+```sh
+uv pip compile api/requirements.txt --universal --python-version 3.12 --generate-hashes --output-file api/requirements.lock
+uv pip compile api/requirements-dev.in --universal --python-version 3.12 --generate-hashes --output-file api/requirements-dev.lock
+python .github/gates/update_dependency_inputs.py
+python .github/gates/check_dependency_locks.py
+```
+
+Review both resolved locks and the input digest change together. CI installs with `--require-hashes` and rejects input drift, including unchanged-version extra or marker edits.
+
+For a persistent disposable local API, `python scripts/dev_setup.py` creates `.env.development` with mode 0600 and migrates `api/hca_development.db`. `python scripts/dev_setup.py --serve` validates that local configuration before starting a loopback server. An existing configuration is not overwritten unless `--force` is explicit; regenerating credentials can invalidate older local records, so use a new disposable database or clean up first. The script does not inherit production API settings or database connections.
+
+Stop the API before removing `.env.development` and `api/hca_development.db` for local cleanup. These files contain disposable development state; do not run cleanup against another deployment. The self-contained demo uses a temporary directory and removes it automatically. Browser and Mac local data have separate cleanup instructions in their component READMEs.
+
+## Checks
+
+| Area | Command from the repository root | Scope |
 | --- | --- | --- |
-| Check No Dash Characters | no em-dash (U+2014) or en-dash (U+2013) in any tracked text file | `python3 .github/gates/check_no_dashes.py` |
-| Check Client Data Hygiene | no term from the owner-maintained denylist in any tracked file | `python3 .github/gates/check_client_data.py` |
-| Check Bootstrap Manifest Integrity | every skill in `bootstrap/HCA_MANIFEST.yaml` exists and its sha256 matches | `python3 .github/gates/check_manifest.py` |
-| Validate OpenAPI Specification | `api/openapi.yaml` is a valid OpenAPI document | `openapi-spec-validator api/openapi.yaml` |
-| API Tests (Postgres) | pytest suite against Postgres 16 after `alembic upgrade head` | `cd api && pytest -v` |
-| Extension Tests (Node 20) | Chrome extension unit tests | `cd extension && npm test` |
-| Python Lint (ruff) | errors and bug-prone patterns in `api`, `.github/gates`, `scripts` (profile in [ruff.toml](ruff.toml)) | `ruff check api .github/gates scripts` |
-| Python Dependency Audit (pip-audit) | no known vulnerability in the pinned `api/requirements-dev.txt` (runtime plus test pins) | `cd api && pip-audit -r requirements-dev.txt` |
+| API | `cd api && ../.venv/bin/pytest -q` | Disposable SQLite by default; Postgres-specific skips remain visible |
+| Postgres API | Set `HCA_TEST_DATABASE_URL` to a local disposable test database, then run the API suite | Locks, delayed event commit ordering and multiprocess paths |
+| Node | `cd extension && npm ci && npm test` | Signed calls, queue/key/state races, revocation and reconnect |
+| Chromium | `cd extension && npx playwright install chromium && npm run test:browser` | Actual DOM, IndexedDB, worker restart and all controls |
+| Swift | `cd macos && swift test` | Complete concurrency checking, warnings as errors and real loopback TCP tests |
+| Developer Mac bundle | `bash macos/scripts/bundle.sh` | Local bundle, archive and checksum; no notarization claim |
+| Python lint | `.venv/bin/ruff check api .github/gates scripts` | Declared repository profile |
+| API contract | `.venv/bin/python .github/gates/check_openapi_parity.py` | Complete saved-versus-served contract |
+| OpenAPI syntax | `.venv/bin/openapi-spec-validator api/openapi.yaml` | Document validity |
+| Dependencies | `.venv/bin/pip-audit -r api/requirements-dev.lock --disable-pip --no-deps --progress-spinner off` | Known vulnerabilities at run time |
+| Credentials/history | `.venv/bin/python .github/gates/check_secrets.py --scanner /tmp/hca-tools/gitleaks` | Current source and complete fetched history; exact reviewed exceptions |
+| Client-data hygiene | `.venv/bin/python .github/gates/check_client_data.py` | Tracked text against the maintained public-safe denylist |
+| Product isolation | `.venv/bin/python .github/gates/check_manifest.py` | Privileged personal operations excluded from product source |
+| Current document links | `.venv/bin/python .github/gates/check_doc_links.py` | Relative files and heading anchors; dated history is preserved |
+| Prose | `.venv/bin/python .github/gates/check_no_dashes.py` | No U+2013/U+2014 characters in tracked text |
 
-Swift tests for the macOS app run on the owner's Mac, not in CI:
-`cd macos && swift test`.
+For a separate local Postgres test server, an example container command is:
 
-## Fixing the common failures
+```sh
+docker run --rm --name hca-test-postgres -e POSTGRES_USER=hca -e POSTGRES_PASSWORD=hca -e POSTGRES_DB=hca_test -p 127.0.0.1:5432:5432 postgres:16
+```
 
-Dash gate: the output lists `path:line`. Replace the dash with a period,
-comma, colon or parentheses. Prose in this repo never uses em or en dashes.
+In a second terminal, activate the environment and run:
 
-Client data gate: the output shows the file and line and a masked form of
-the term. Remove the client name, project id, host or business fact; the
-denylist itself is owner maintained and is not edited to make a PR pass.
+```sh
+cd api
+HCA_TEST_DATABASE_URL=postgresql+psycopg2://hca:hca@127.0.0.1:5432/hca_test ../.venv/bin/pytest -q
+```
 
-Manifest gate: after changing a file under `bootstrap/skills/`, update its
-`sha256` in `bootstrap/HCA_MANIFEST.yaml` to the value printed by
-`shasum -a 256 bootstrap/skills/<file>` (the gate output also prints it as
-"got").
+The example credentials are only for that loopback disposable container. Stop it with Control-C when finished. Tests reject remote/production-looking database URLs before app imports and rebuild their database. Each independent CI process needs its own test database. Real HTTP/TCP tests require loopback socket permission. A passing SQLite suite does not substitute for Postgres checks.
 
-Ruff: run `ruff check api .github/gates scripts --fix` for the automatic
-fixes, then read what remains. The profile is deliberately narrow (E4, E7,
-E9, F, W, B006, B904) so it does not impose formatting; widen it only in a
-PR that fixes what the new rules find.
+## API changes
 
-pip-audit: bump the flagged pin in `api/requirements.txt` or `api/requirements-dev.txt` to the fix version
-pip-audit prints, run the pytest suite, and note the upgrade in the PR body.
-A vulnerability without a fix version is recorded in the PR body and ignored
-with `--ignore-vuln <id>` in the workflow, with the reason in a comment.
+FastAPI models and route declarations are authoritative. After changing a shape, constraint, security declaration, header or route:
 
-## Local development
+```sh
+.venv/bin/python .github/gates/export_openapi.py
+.venv/bin/python .github/gates/check_openapi_parity.py
+.venv/bin/openapi-spec-validator api/openapi.yaml
+```
 
-API (SQLite is the default when `DATABASE_URL` is unset; CI uses Postgres):
+Review the complete schema diff and clients. Contract tests include real responses and deliberate drift; do not add an exception to conceal a mismatch. Preserve the immutable migration chain and test upgrading a previous schema. API response timestamps use an explicit UTC zone without rewriting idempotency fingerprints or stored input.
 
-    cd api && pip install -r requirements-dev.txt && alembic upgrade head && pytest -q
+## Security and evidence
 
-Extension:
+Do not put live tokens, keys, personal/client records or internal endpoints in source, issues, logs or screenshots. Use synthetic data and preserve upstream notices/publication rights. A public OAuth client ID, manifest public key or signing test vector is not a production secret. A scanner exception must identify its exact public test material and rationale.
 
-    cd extension && npm test
+Install the checksum-pinned scanner on Linux x64 or Mac arm64 with `python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks`; other architectures require a separately verified Gitleaks 8.30.1 binary. Fetch complete Git history before scanning. Do not put real credentials in a filename, scanner exception or test fixture.
 
-macOS app (on a Mac with Xcode):
+The workflow's explicit Bash shell preserves pipeline failures, and Swift diagnostics are retained. Pinned references, scans, SBOM/provenance and security analyses establish evidence for their revision and scope, not certification or an absence of every vulnerability. Read [current status](docs/STATUS.md), including outstanding alert dispositions, before making release claims.
 
-    cd macos && swift test && bash scripts/bundle.sh ~/hca-notifier
-
-## Conventions
-
-- Plans live under `docs/plans/`, proof and deploy records under
-  `docs/deploys/`, decisions under `docs/decisions/`; every file is listed in
-  [docs/INDEX.md](docs/INDEX.md) with one line.
-- Evidence over assertion: a record cites the commit, PR number, Cloud Build
-  id and the observed output, not the intent.
-- Secrets never appear in files; name the Secret Manager entry or env var.
+The owner-reported manual validation is recorded separately from automated and production evidence. Keep historical records intact and label their date/source. State AI assistance and the maintainer's review responsibility accurately; do not invent authorship, customer outcomes, measured savings or performance results. Conduct/support channels and private security reports have distinct purposes. See [Security](SECURITY.md) and [Code of Conduct](CODE_OF_CONDUCT.md).
