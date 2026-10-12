@@ -13,7 +13,6 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_local.db")
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select, func

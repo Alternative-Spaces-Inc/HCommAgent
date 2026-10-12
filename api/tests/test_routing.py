@@ -9,7 +9,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_test_routing.db")
 os.environ["HCA_SURFACE_FALLBACK_SECONDS"] = "90"
 
 from datetime import datetime, timedelta, timezone
