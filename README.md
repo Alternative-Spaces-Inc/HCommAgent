@@ -20,7 +20,7 @@ The server decides who sees an ask first. Each device carries a priority; eligib
 3. Human clients read `GET /v1/inbox` and `GET /v1/inbox/stream` with a device signature; the server filters both to the asks that device may see right now.
 4. The human answers on the surface that reached them; the client posts `POST /v1/requests/{id}/answer`, signed by the device key.
 5. The server locks the ask row (`SELECT ... FOR UPDATE`), accepts exactly one terminal transition, validates the answer value against the control, and writes the audit row: device, surface, path taken, value, timestamps.
-6. A `request.answered` event goes to every open stream so other surfaces drop the card; the agent's webhook is called with retries, each attempt recorded.
+6. A `request.answered` event goes to every open stream so other surfaces drop the card; a signed delivery to the agent's registered webhook destination is queued durably and retried for about an hour, each attempt recorded ([docs/webhooks.md](docs/webhooks.md)).
 7. Asks nobody answers are swept at their deadline per the ask's expiry policy: auto denied (the default), expired, or held (`api/app/expiry.py`).
 8. `GET /v1/audit` returns the answer records with filters by agent, window, surface and outcome.
 
@@ -66,7 +66,7 @@ Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
 ## Deployment
 
-Cloud Build runs `cloudbuild.yaml` on every merge to main: `guard` (gates), `pytest`, `smoke-local`, `pack-extension`, `build`, `push`, `migrate` (an Alembic job that then asserts the database is at head with every model table present), `deploy` (Cloud Run, new revision at 100 percent), `smoke-live` (end to end against the new revision: mint a key, post an ask, answer with a test device, check audit and webhook, revoke the key). The first-time setup is in [docs/runbooks/HCA_FIRST_DEPLOY.md](docs/runbooks/HCA_FIRST_DEPLOY.md). Project ids, hostnames and secrets are runbook and Secret Manager values; none live in this repository.
+Cloud Build runs `cloudbuild.yaml` on every merge to main: `guard` (gates), `pytest`, `smoke-local`, `pack-extension`, `build`, `push`, `migrate` (an Alembic job that then asserts the database is at head with every model table present), `deploy` (Cloud Run, new revision at 100 percent), `check-config` (no local only switch on the live service), `smoke-live` (end to end against the new revision: mint a key, post an ask, answer with a test device, check audit and webhook, revoke the key). The first-time setup is in [docs/runbooks/HCA_FIRST_DEPLOY.md](docs/runbooks/HCA_FIRST_DEPLOY.md). Project ids, hostnames and secrets are runbook and Secret Manager values; none live in this repository.
 
 ## Quality gates (CI, every PR)
 
