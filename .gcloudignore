@@ -4,5 +4,6 @@
 **/__pycache__
 **/*.db
 **/node_modules
-extension
+extension/node_modules
+extension/tests
 docs
