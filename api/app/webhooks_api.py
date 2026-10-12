@@ -19,6 +19,7 @@ from sqlalchemy import select
 from . import models, webhook_destinations as registry
 from .auth import require_agent_key
 from .db import get_db
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 
@@ -27,7 +28,7 @@ class WebhookRegisterRequest(BaseModel):
     url: str = Field(min_length=1, max_length=2048)
 
 
-class WebhookDestinationView(BaseModel):
+class WebhookDestinationView(UTCJSONModel):
     """A destination without secret material; secret_prefix identifies the
     secret in use so a receiver can tell which one it holds."""
     id: str

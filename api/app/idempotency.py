@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import models
+from .json_dates import utc_datetime
 
 HEADER = "Idempotency-Key"
 MAX_KEY = 200
@@ -108,10 +109,8 @@ def reserve(db: Session, tenant_id: str, scope: str, route: str, key: Optional[s
 
 
 def _datetime_as_pydantic_json(value: datetime) -> str:
-    """The string Pydantic v2 writes for a datetime in JSON mode (what FastAPI
-    sends for a response_model field): UTC-aware values end in Z, other
-    offsets keep their offset, naive values have none."""
-    text = value.isoformat()
+    """Match UTCJSONModel on the first response and every stored replay."""
+    text = utc_datetime(value).isoformat()
     return text[:-6] + "Z" if text.endswith("+00:00") else text
 
 

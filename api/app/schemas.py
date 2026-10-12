@@ -1,33 +1,50 @@
 from datetime import datetime
-from typing import Any, List, Optional, Literal
+from typing import Any, ClassVar, List, Optional, Literal, get_args
 
 from pydantic import BaseModel, Field, ConfigDict, field_validator
 import math
+from .json_dates import UTCJSONModel
 
 Surface = Literal["browser_overlay", "browser_notification", "macos_notification", "macos_app", "web"]
 RequestState = Literal["queued", "shown", "answered", "expired", "withdrawn", "cancelled"]
 Control = Literal["radio", "checkbox", "approve_deny", "dropdown", "chat", "confirm_rows"]
 
 
-class BoundedModel(BaseModel):
+def _contains_typed_model(annotation):
+    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
+        return True
+    return any(_contains_typed_model(argument) for argument in get_args(annotation))
+
+
+class BoundedModel(UTCJSONModel):
     model_config = ConfigDict(str_max_length=4000, extra="forbid")
+    JSON_POLICY: ClassVar[dict] = {
+        "maxDepth": 12, "maxNodesPerField": 10000, "maxStringLength": 4000,
+        "maxObjectKeyLength": 100, "finiteNumbersOnly": True,
+    }
 
     @field_validator("*", mode="before")
     @classmethod
-    def bounded_json(cls, value):
+    def bounded_json(cls, value, info):
+        # A typed nested model validates each of its own fields. Recounting
+        # its complete serialized dictionary would incorrectly charge the
+        # enclosing RequestView for independent request/answer fields.
+        if _contains_typed_model(cls.model_fields[info.field_name].annotation):
+            return value
+        policy = cls.JSON_POLICY
         count = 0
         def walk(item, depth):
             nonlocal count
             count += 1
             if isinstance(item, float) and not math.isfinite(item):
                 raise ValueError("non-finite numbers are not permitted")
-            if depth > 12 or count > 10000:
+            if depth > policy["maxDepth"] or count > policy["maxNodesPerField"]:
                 raise ValueError("nested data exceeds allowed complexity")
-            if isinstance(item, str) and len(item) > 4000:
+            if isinstance(item, str) and len(item) > policy["maxStringLength"]:
                 raise ValueError("nested string exceeds 4000 characters")
             if isinstance(item, dict):
                 for key, child in item.items():
-                    if len(str(key)) > 100:
+                    if len(str(key)) > policy["maxObjectKeyLength"]:
                         raise ValueError("field name exceeds 100 characters")
                     walk(child, depth + 1)
             elif isinstance(item, list):
@@ -125,6 +142,9 @@ class AnswerSubmission(BoundedModel):
 
 
 class AnswerRecord(BoundedModel):
+    # Human audit wrapping adds exactly two levels and nine nodes to the
+    # accepted passthrough field. Input limits remain on AnswerSubmission.
+    JSON_POLICY: ClassVar[dict] = {**BoundedModel.JSON_POLICY, "maxDepth": 14, "maxNodesPerField": 10009}
     request_id: str
     control: str
     value: Any = None

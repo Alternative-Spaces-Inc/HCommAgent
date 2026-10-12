@@ -8,6 +8,7 @@ from .requests_api import router as requests_router, audit_router
 from .inbox_api import router as inbox_router
 from .apikeys_api import router as apikeys_router
 from .sweep_api import router as sweep_router
+from .controls_api import router as controls_router
 from .metrics_api import router as metrics_router
 from .devices_api import router as devices_router
 from .privacy import router as privacy_router
@@ -57,6 +58,7 @@ app.include_router(audit_router)
 app.include_router(inbox_router)
 app.include_router(apikeys_router)
 app.include_router(sweep_router)
+app.include_router(controls_router)
 app.include_router(metrics_router)
 app.include_router(devices_router)
 app.include_router(tenants_router)
@@ -100,17 +102,8 @@ _default_openapi = app.openapi
 
 
 def correlated_openapi():
-    schema = _default_openapi()
-    for path in schema["paths"].values():
-        for operation in path.values():
-            if not isinstance(operation, dict):
-                continue
-            for response in operation.get("responses", {}).values():
-                response.setdefault("headers", {})["X-Request-ID"] = {
-                    "description": "Server-generated correlation identifier; excludes request content",
-                    "schema": {"type": "string"},
-                }
-    return schema
+    from .openapi import enrich_schema
+    return enrich_schema(_default_openapi())
 
 
 app.openapi = correlated_openapi

@@ -30,6 +30,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .auth import require_admin_bearer
 from .db import get_db
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/tenants", tags=["tenants"])
 
@@ -62,7 +63,7 @@ class OwnerAdd(BaseModel):
     email: str = Field(min_length=3, max_length=320)
 
 
-class TenantView(BaseModel):
+class TenantView(UTCJSONModel):
     tenant_id: str
     slug: str
     name: str

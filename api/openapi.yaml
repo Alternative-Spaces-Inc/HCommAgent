@@ -2,13 +2,14 @@ openapi: 3.1.0
 info:
   title: Human Collections Agent (HCA) API
   version: 0.3.0
-  description: Collects tenant-authorized human decisions. Request bodies are limited to 1 MiB; nested JSON is limited
-    to depth 12 and 10,000 visited values per field, with strings at most 4,000 characters and names at most 100
-    unless a tighter schema bound applies. Shared fixed-minute actor/tenant/admin limits and active-request quotas
-    return 429 with Retry-After. Lists default to 200 records, at most 500; follow X-HCA-Next-Cursor with after,
-    including after a filtered empty page. Identity, authorized role and registered surface are server-derived.
-    Path/audience/client telemetry are descriptive. See docs/SECURITY_REMEDIATION_01_12.md and docs/SECURITY_REMEDIATION_13_23.md
-    for policy and validation boundaries.
+  description: Requests are limited to 1 MiB before parsing or signature verification.
+    Shared rate and tenant quotas return 429 with Retry-After. Collection reads use
+    bounded limit/after parameters and optional X-HCA-Next-Cursor; continue even if
+    visibility filtering leaves an empty page. Nested JSON policies are published
+    as x-nested-json-policy because depth, total nodes and non-finite numbers are
+    not fully expressible in JSON Schema. Control values are checked against the original
+    ask's option IDs.
+  x-max-request-body-bytes: 1048576
 paths:
   /v1/requests:
     post:
@@ -30,21 +31,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/RequestReceipt'
           headers:
-            X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
-              schema:
-                type: string
             Idempotent-Replayed:
+              description: Present with true only when returning a stored idempotent
+                response
               schema:
                 type: string
-              description: true for a stored idempotent response
+                enum:
+                - 'true'
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -53,24 +65,81 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '400':
+          description: Invalid operation or webhook destination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Missing bearer token
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Invalid or revoked api key, or body.caller does not match the key's caller
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
       security:
       - AgentKey: []
       parameters:
@@ -81,8 +150,9 @@ paths:
           type: string
           minLength: 1
           maxLength: 200
-        description: Persist one key per operation. The same key/body/resource returns its stored result; reuse
-          for a different body/resource returns 422.
+        description: Optional caller/device-scoped key retained for the configured
+          TTL (default 24 hours). Retries return the committed original status/body.
+          Different input or resource with the same key returns 422.
   /v1/requests/{request_id}:
     get:
       tags:
@@ -107,16 +177,24 @@ paths:
                 $ref: '#/components/schemas/RequestView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -125,20 +203,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/requests/{request_id}/answer:
     post:
       tags:
@@ -147,6 +273,9 @@ paths:
       operationId: answer_request_v1_requests__request_id__answer_post
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - name: request_id
         in: path
@@ -155,38 +284,47 @@ paths:
           type: string
           title: Request Id
       - in: header
+        name: X-HCA-Device
+        required: true
+        description: Registered device ID
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - in: header
+        name: X-HCA-Timestamp
+        required: true
+        description: Unix seconds within 300 seconds of server time
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 16
+      - in: header
+        name: X-HCA-Nonce
+        required: true
+        description: Fresh random nonce; replayed nonces are refused
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - in: header
         name: Idempotency-Key
         required: false
         schema:
           type: string
           minLength: 1
           maxLength: 200
-        description: Persist one key per operation. The same key/body/resource returns its stored result; reuse
-          for a different body/resource returns 422.
-      - in: header
-        name: X-HCA-Device
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
-      - in: header
-        name: X-HCA-Timestamp
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
-      - in: header
-        name: X-HCA-Nonce
-        required: true
-        schema:
-          type: string
-          minLength: 1
-          maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+        description: Optional caller/device-scoped key retained for the configured
+          TTL (default 24 hours). Retries return the committed original status/body.
+          Different input or resource with the same key returns 422.
       requestBody:
         required: true
         content:
@@ -201,21 +339,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/AnswerRecord'
           headers:
-            X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
-              schema:
-                type: string
             Idempotent-Replayed:
+              description: Present with true only when returning a stored idempotent
+                response
               schema:
                 type: string
-              description: true for a stored idempotent response
+                enum:
+                - 'true'
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -224,26 +373,81 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
-        '409':
-          description: Request already answered, expired, withdrawn or cancelled
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/TerminalConflict'
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/requests/{request_id}/cancel:
     post:
       tags:
@@ -266,8 +470,9 @@ paths:
           type: string
           minLength: 1
           maxLength: 200
-        description: Persist one key per operation. The same key/body/resource returns its stored result; reuse
-          for a different body/resource returns 422.
+        description: Optional caller/device-scoped key retained for the configured
+          TTL (default 24 hours). Retries return the committed original status/body.
+          Different input or resource with the same key returns 422.
       requestBody:
         required: true
         content:
@@ -282,21 +487,32 @@ paths:
               schema:
                 $ref: '#/components/schemas/RequestReceipt'
           headers:
-            X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
-              schema:
-                type: string
             Idempotent-Replayed:
+              description: Present with true only when returning a stored idempotent
+                response
               schema:
                 type: string
-              description: true for a stored idempotent response
+                enum:
+                - 'true'
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -305,20 +521,81 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/audit:
     get:
       tags:
@@ -327,6 +604,9 @@ paths:
       operationId: query_audit_v1_audit_get
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - name: limit
         in: query
@@ -400,27 +680,35 @@ paths:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
       responses:
         '200':
           description: Successful Response
@@ -437,16 +725,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -455,20 +751,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/inbox:
     get:
       tags:
@@ -477,6 +808,9 @@ paths:
       operationId: list_inbox_v1_inbox_get
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - name: limit
         in: query
@@ -498,27 +832,35 @@ paths:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
       responses:
         '200':
           description: Successful Response
@@ -535,16 +877,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -553,20 +903,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/inbox/stream:
     get:
       tags:
@@ -575,6 +960,9 @@ paths:
       operationId: stream_inbox_v1_inbox_stream_get
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - name: since
         in: query
@@ -583,9 +971,11 @@ paths:
           anyOf:
           - type: string
           - type: 'null'
-          description: Last event id seen, for clients that cannot set the Last-Event-ID header
+          description: Last event id seen, for clients that cannot set the Last-Event-ID
+            header
           title: Since
-        description: Last event id seen, for clients that cannot set the Last-Event-ID header
+        description: Last event id seen, for clients that cannot set the Last-Event-ID
+          header
       - name: Last-Event-ID
         in: header
         required: false
@@ -597,27 +987,35 @@ paths:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
       responses:
         '200':
           description: Successful Response
@@ -627,16 +1025,24 @@ paths:
                 type: string
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -645,26 +1051,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
-      description: Server-Sent Events for authorized inbox changes. Resume with Last-Event-ID or since; the header
-        wins. Replay uses current device/tenant/owner authorization and stored routing. Invalid, expired, future
-        or truncated replay and live queue overflow emit stream.reset; reconcile the complete paginated inbox and
-        clear the old cursor. stream.closed reports revocation/supersession. Authorization is checked on a 15-second
-        elapsed interval independent of traffic, with database/scheduler delay as documented. This stream is not
-        a complete permanent audit log.
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/api-keys:
     post:
       tags:
@@ -688,16 +1123,24 @@ paths:
                 $ref: '#/components/schemas/ApiKeyIssueResponse'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -706,25 +1149,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
-      description: 'Added in dispatch hca-p3-20260929, not one of the endpoints the 2026-09-29 decisions log reconciled
-        (see docs/decisions/DECISIONS_20260929.md); this path awaits the same review cancel, inbox, inbox/stream,
-        and audit already got before it is treated as settled canon.
-
-        '
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
     get:
       tags:
       - api-keys
@@ -766,16 +1239,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -784,29 +1265,67 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/api-keys/{prefix}/revoke:
     post:
       tags:
       - api-keys
       summary: Revoke Key
-      description: 'Idempotent, like device revoke. After this every agent route answers 403 for the key. The smoke
-        script calls it on the key it minted so a merge leaves no live credential behind.
+      description: 'Revoke by the visible prefix (HCA-P10). Idempotent like device
 
-        '
+        revoke: a second call returns the same row with its original
+
+        revoked_at. From then on verify_api_key refuses the key, so every
+
+        agent route answers 403 for it.'
       operationId: revoke_key_v1_api_keys__prefix__revoke_post
       security:
       - AdminToken: []
@@ -826,16 +1345,24 @@ paths:
                 $ref: '#/components/schemas/ApiKeyView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -844,53 +1371,102 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: No key with that prefix
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/internal/expiry-sweep:
     post:
       tags:
       - internal
       summary: Trigger Expiry Sweep
       operationId: trigger_expiry_sweep_v1_internal_expiry_sweep_post
-      parameters:
-      - name: authorization
-        in: header
-        required: false
-        schema:
-          type: string
-          title: Authorization
+      parameters: []
       responses:
         '200':
           description: Successful Response
           content:
             application/json:
-              schema: {}
+              schema:
+                $ref: '#/components/schemas/SweepResult'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -899,20 +1475,107 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+      security:
+      - SweepBearer: []
+  /v1/controls:
+    get:
+      tags:
+      - controls
+      summary: List Controls
+      operationId: list_controls_v1_controls_get
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                items:
+                  additionalProperties: true
+                  type: object
+                type: array
+                title: Response List Controls V1 Controls Get
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/internal/metrics:
     get:
       tags:
@@ -927,16 +1590,24 @@ paths:
               schema: {}
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -945,22 +1616,44 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '401':
-          description: Missing bearer
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Wrong admin token or admin token not configured
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
       security:
       - AdminToken: []
-      description: 'Operational metrics for durable delivery, computed on request for the instance that answers:
-        newest events row id and dispatcher lag, open streams with the last id written to each client and the largest
-        lag, queue drops per device, reconnect replays served and replay gaps, LISTEN/NOTIFY listener state, the
-        jobs worker counters with the shared due backlog and the age of the oldest due job, database pool occupancy,
-        and the instance identity (hostname, pid, Cloud Run revision and instance id). Platform admin bearer.
-
-        '
   /v1/devices:
     post:
       tags:
@@ -984,16 +1677,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1002,30 +1703,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Missing bearer
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Wrong admin token or admin token not configured
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '409':
-          description: Key was revoked
-      description: 'The owner registers the key the extension''s options page shows, once per browser profile. Posting
-        the same key again is idempotent (201, label updated); a revoked key is 409 and needs a new key.
-
-        '
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
     get:
       tags:
       - devices
@@ -1067,16 +1806,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1085,20 +1832,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/devices/{device_id}/revoke:
     post:
       tags:
@@ -1123,16 +1905,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1141,28 +1931,75 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown device
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/devices/self:
     get:
       tags:
       - devices
       summary: Self View
-      description: The calling device's own row; the options page shows the linked account from it.
+      description: The calling device's own row; the options page shows the linked
+        account from it.
       operationId: self_view_v1_devices_self_get
       responses:
         '200':
@@ -1173,16 +2010,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1191,47 +2036,93 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '401':
-          description: Device signature missing, stale, replayed or not verifying
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Device unknown or revoked
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
     patch:
       tags:
       - devices
       summary: Patch Self
-      description: Same gate as answering (device signature, Google link when the gate is on). Lets the owner choose
-        the primary surface from the Mac menu or the extension options page without the admin token. Lower is earlier;
-        equal values share a rank.
+      description: 'The calling device sets its own place in the surface ladder (HCA-P14
+
+        priority controls). Same gate as answering: a registered, signed and,
+
+        when the gate is on, Google-linked device. Only the owner''s own devices
+
+        can move themselves; nobody can move another device this way. Declared
+
+        before the admin PATCH /{device_id} so the literal path self wins.'
       operationId: patch_self_v1_devices_self_patch
       requestBody:
         content:
@@ -1248,16 +2139,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1266,62 +2165,104 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Device signature missing, stale, replayed or not verifying
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Device unknown, revoked or not Google-linked
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
       security:
       - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
   /v1/devices/{device_id}:
     patch:
       tags:
       - devices
       summary: Patch Device
-      description: 'Lower priority is earlier; devices with equal values share a rank and see an ask together. An
-        ask is visible to rank r from created_at plus r times the fallback window (HCA_SURFACE_FALLBACK_SECONDS,
-        default 90; half for a red gate). Devices not seen within HCA_DEVICE_ACTIVE_SECONDS (default 600) are left
-        out of the ranking.
+      description: 'Set the device''s place in the surface ladder (HCA-P14). Lower
+        is
 
-        '
+        earlier; equal values share a rank. The owner sets this once from the
+
+        runbook Terminal block.'
       operationId: patch_device_v1_devices__device_id__patch
       security:
       - AdminToken: []
@@ -1347,16 +2288,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1365,22 +2314,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown device
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/devices/self/google-link:
     post:
       tags:
@@ -1402,16 +2397,24 @@ paths:
                 $ref: '#/components/schemas/DeviceView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1420,62 +2423,106 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Device signature failed, or the Google token did not verify or has expired
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Device unknown or revoked, token issued to another client, email unverified, or account not
-            on the owner list
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '503':
-          description: HCA_GOOGLE_CLIENT_ID not configured (fails closed)
+          description: Required database or Google verification configuration unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
       security:
       - DeviceSignature: []
-      description: 'The extension obtains an access token for its Chrome Extension OAuth client (chrome.identity.getAuthToken,
-        manifest oauth2 block) and posts it over a device-signed call. The server verifies it at Google''s tokeninfo
-        endpoint and accepts it only when it was issued to HCA_GOOGLE_CLIENT_ID, the email is verified, the token
-        is unexpired and, when HCA_OWNER_EMAILS is set, the email is on that list. Linking again replaces the account.
-        When HCA_REQUIRE_GOOGLE_LINK is "1" the human routes (inbox, inbox/stream, answer, audit) refuse an unlinked
-        device with 403; this route always accepts a signed device so it can link.
-
-        '
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
       parameters:
       - in: header
         name: X-HCA-Device
         required: true
+        description: Registered device ID
         schema:
           type: string
           minLength: 1
           maxLength: 100
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Timestamp
         required: true
+        description: Unix seconds within 300 seconds of server time
         schema:
           type: string
           minLength: 1
           maxLength: 16
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
       - in: header
         name: X-HCA-Nonce
         required: true
+        description: Fresh random nonce; replayed nonces are refused
         schema:
           type: string
           minLength: 1
           maxLength: 128
-        description: Required input to the canonical device signature; see docs/SECURITY_REMEDIATION_01_12.md.
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
   /v1/tenants:
     post:
       tags:
@@ -1499,16 +2546,24 @@ paths:
                 $ref: '#/components/schemas/TenantView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1517,31 +2572,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Missing bearer
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '403':
-          description: Wrong admin token
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '409':
-          description: Slug already exists
-      description: 'Platform admin only. Every ask, device, api key and audit row belongs to exactly one tenant;
-        a key acts for its tenant and a device answers for its tenant, taken from server state, never from the request.
-        The default tenant exists from the P19 migration.
-
-        '
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
     get:
       tags:
       - tenants
@@ -1583,16 +2675,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1601,20 +2701,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}:
     get:
       tags:
@@ -1639,16 +2774,24 @@ paths:
                 $ref: '#/components/schemas/TenantView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1657,22 +2800,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown tenant
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/disable:
     post:
       tags:
@@ -1697,16 +2886,24 @@ paths:
                 $ref: '#/components/schemas/TenantView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1715,24 +2912,81 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown tenant
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '409':
-          description: The default tenant cannot be disabled
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/owners:
     post:
       tags:
@@ -1763,16 +3017,24 @@ paths:
                 $ref: '#/components/schemas/TenantView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1781,22 +3043,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown tenant
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/owners/{email}:
     delete:
       tags:
@@ -1827,16 +3135,24 @@ paths:
                 $ref: '#/components/schemas/TenantView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1845,22 +3161,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Unknown tenant or email not on the list
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/records:
     get:
       tags:
@@ -1909,16 +3271,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1927,20 +3297,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/records/purge:
     post:
       tags:
@@ -1971,16 +3389,24 @@ paths:
                 $ref: '#/components/schemas/PurgeResult'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -1989,20 +3415,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/webhooks:
     post:
       tags:
@@ -2026,16 +3500,24 @@ paths:
                 $ref: '#/components/schemas/WebhookSecretResponse'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2044,37 +3526,68 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '400':
-          description: url rejected by the destination rules, or already registered
+          description: Invalid operation or webhook destination
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '401':
-          description: Missing or invalid agent key
-      description: 'The url must be https (no userinfo, port 443 or above 1023) and must not point at a loopback,
-        private, link local, multicast, reserved or cloud metadata address, by literal or by resolution (IPv4 mapped,
-        6to4 and Teredo IPv6 forms are judged by the inner address). The addresses it resolved to are pinned on
-        the row and re-checked at every send. The same url cannot be registered twice while active; rotate or revoke.
-        Each registration writes a registry audit row. Deliveries to the destination carry X-HCA-Delivery-Id (stable
-        across retries, must equal delivery_id in the signed body before deduplication), X-HCA-Timestamp (unix seconds),
-        X-HCA-Event, X-HCA-Request-Id and X-HCA-Signature "t=<ts>,v1=<hex>" where v1 is HMAC-SHA256 under the secret
-        over "<ts>.<raw body>"; during a rotation overlap a second v1 under the previous secret follows. Failed
-        deliveries retry at 1 s, 5 s, 30 s, 2 min, 10 min, 30 min and 1 h (jittered) and are marked dead after the
-        8th failure. One overall 10 second deadline includes DNS. Only HTTP status is consumed; response bodies
-        are not read or decompressed.
-
-        '
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
     get:
       tags:
       - webhooks
@@ -2123,16 +3636,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2141,20 +3662,55 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/webhooks/{destination_id}/rotate:
     post:
       tags:
@@ -2179,16 +3735,24 @@ paths:
                 $ref: '#/components/schemas/WebhookSecretResponse'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2197,28 +3761,81 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
-        '400':
-          description: The destination is revoked
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Not a destination of this caller
-      description: 'The previous secret stays valid for 24 hours (previous_valid_until) so the receiver can switch;
-        deliveries carry signatures under both during the overlap. Writes a registry audit row.
-
-        '
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/webhooks/{destination_id}:
     delete:
       tags:
@@ -2243,16 +3860,24 @@ paths:
                 $ref: '#/components/schemas/WebhookDestinationView'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2261,30 +3886,73 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
         '422':
           description: Validation Error
           content:
             application/json:
               schema:
-                $ref: '#/components/schemas/HTTPValidationError'
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '404':
-          description: Not a destination of this caller
-      description: 'Idempotent. New asks naming its url are rejected with 400; deliveries still owed to it fail
-        dead with the reason recorded. Writes a registry audit row.
-
-        '
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /health:
     get:
       summary: Healthz
-      description: '200 {"status": "ok", "db": "ok"} when the database answers SELECT 1;
+      description: '200 {"status": "ok", "db": "ok"} when the database answers SELECT
+        1;
 
         503 {"status": "degraded", "db": "down"} when it does not. Cloud Run''s
 
@@ -2311,16 +3979,24 @@ paths:
               schema: {}
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2329,13 +4005,29 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '503':
+          description: Required database or Google verification configuration unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDegraded'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /healthz:
     get:
       summary: Healthz
-      description: '200 {"status": "ok", "db": "ok"} when the database answers SELECT 1;
+      description: '200 {"status": "ok", "db": "ok"} when the database answers SELECT
+        1;
 
         503 {"status": "degraded", "db": "down"} when it does not. Cloud Run''s
 
@@ -2362,16 +4054,24 @@ paths:
               schema: {}
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '413':
           description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
           headers:
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
         '429':
           description: Shared rate limit or tenant quota reached
           headers:
@@ -2380,9 +4080,24 @@ paths:
               schema:
                 type: string
             X-Request-ID:
-              description: Server-generated correlation identifier; excludes request content
+              description: Server-generated correlation identifier; excludes request
+                content
               schema:
                 type: string
+                pattern: ^[0-9a-f]{32}$
+        '503':
+          description: Required database or Google verification configuration unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HealthDegraded'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
 components:
   schemas:
     AnswerRecord:
@@ -2403,12 +4118,16 @@ components:
             maxLength: 4000
           - type: 'null'
           title: Answered By
+          description: 'Server-derived audit field: authenticated device/Google owner
+            for a human answer; agent or system for automatic outcomes.'
         answered_role:
           anyOf:
           - type: string
             maxLength: 4000
           - type: 'null'
           title: Answered Role
+          description: 'Server-derived audit field: authenticated device/Google owner
+            for a human answer; agent or system for automatic outcomes.'
         answered_at:
           anyOf:
           - type: string
@@ -2424,6 +4143,9 @@ components:
           - macos_app
           - web
           title: Surface
+          maxLength: 4000
+          description: 'Server-derived audit field: authenticated device/Google owner
+            for a human answer; agent or system for automatic outcomes.'
         device:
           anyOf:
           - type: string
@@ -2457,6 +4179,11 @@ components:
             type: object
           - type: 'null'
           title: Passthrough
+          description: For human answers, verified_identity snapshots Google subject/email
+            and device_id; client_metadata holds untrusted descriptions separately.
+            The output allows two extra levels and nine extra nodes for this server-derived
+            wrapper; the original client payload remains limited to depth 12 and 10000
+            nodes.
       additionalProperties: false
       type: object
       required:
@@ -2464,11 +4191,14 @@ components:
       - control
       - surface
       title: AnswerRecord
-      description: 'Server-derived identity, authorized role and registered surface; passthrough.verified_identity
-        snapshots subject, email and device ID. passthrough.client_metadata preserves untrusted identity claims.
-        path_taken, duration_ms and voice_used remain client telemetry.
-
-        '
+      x-nested-json-policy:
+        maxDepth: 14
+        maxNodesPerField: 10009
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     AnswerSubmission:
       properties:
         control:
@@ -2477,18 +4207,25 @@ components:
           title: Control
         value:
           title: Value
+          description: 'radio/dropdown/approve_deny: one option ID; checkbox/confirm_rows:
+            distinct option IDs (confirm_rows requires at least one); chat: nonempty
+            text up to 4000 characters. IDs must belong to the ask.'
         answered_by:
           anyOf:
           - type: string
             maxLength: 4000
           - type: 'null'
           title: Answered By
+          description: Untrusted descriptive client metadata; audit identity, role
+            and surface come from authenticated server state.
         answered_role:
           anyOf:
           - type: string
             maxLength: 4000
           - type: 'null'
           title: Answered Role
+          description: Untrusted descriptive client metadata; audit identity, role
+            and surface come from authenticated server state.
         surface:
           type: string
           enum:
@@ -2498,6 +4235,9 @@ components:
           - macos_app
           - web
           title: Surface
+          maxLength: 4000
+          description: Untrusted descriptive client metadata; audit identity, role
+            and surface come from authenticated server state.
         device:
           anyOf:
           - type: string
@@ -2538,11 +4278,14 @@ components:
       - value
       - surface
       title: AnswerSubmission
-      description: 'Body of POST /v1/requests/{request_id}/answer. Claimed identity, role and surface are untrusted
-        client metadata. The returned audit uses authenticated identity and registered surface. path_taken, duration_ms
-        and voice_used are descriptive client telemetry.
-
-        '
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     ApiKeyIssueRequest:
       properties:
         caller:
@@ -2629,6 +4372,14 @@ components:
       required:
       - reason
       title: CancelRequestBody
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     CollectionRequest:
       properties:
         caller:
@@ -2672,6 +4423,7 @@ components:
           - chat
           - confirm_rows
           title: Control
+          maxLength: 4000
         options_or_fields:
           items:
             $ref: '#/components/schemas/Option'
@@ -2702,6 +4454,10 @@ components:
           - hold
           title: Expiry Policy
           default: auto_deny
+          maxLength: 4000
+          description: auto_deny or expire closes an overdue ask before accepting
+            an answer; hold permits later answers. The default lifetime is 7 days
+            and deadlines may be at most 30 days away, configurable by the operator.
         deliveries:
           anyOf:
           - items:
@@ -2723,6 +4479,33 @@ components:
       - suggested
       - deliver_to
       title: CollectionRequest
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
+      x-control-option-counts:
+        radio:
+          minItems: 1
+          maxItems: 50
+        dropdown:
+          minItems: 1
+          maxItems: 50
+        approve_deny:
+          minItems: 2
+          maxItems: 2
+        checkbox:
+          minItems: 1
+          maxItems: 50
+        chat:
+          minItems: 0
+          maxItems: 0
+        confirm_rows:
+          minItems: 1
+          maxItems: 500
     DeliverTo:
       properties:
         mode:
@@ -2732,6 +4515,7 @@ components:
             - webhook
             - poll
             - websocket
+            maxLength: 4000
           - type: 'null'
           title: Mode
         url:
@@ -2749,6 +4533,14 @@ components:
       additionalProperties: false
       type: object
       title: DeliverTo
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     Delivery:
       properties:
         surface:
@@ -2760,6 +4552,7 @@ components:
           - macos_app
           - web
           title: Surface
+          maxLength: 4000
         delivered_at:
           type: string
           format: date-time
@@ -2775,6 +4568,14 @@ components:
       - delivered_at
       - state
       title: Delivery
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     DevicePatch:
       properties:
         priority:
@@ -2933,6 +4734,7 @@ components:
           - chat
           - confirm_rows
           title: Control
+          maxLength: 4000
         options_or_fields:
           items:
             $ref: '#/components/schemas/Option'
@@ -2963,6 +4765,7 @@ components:
           - hold
           title: Expiry Policy
           default: auto_deny
+          maxLength: 4000
         deliveries:
           anyOf:
           - items:
@@ -2995,6 +4798,14 @@ components:
       - deliver_to
       - request_id
       title: InboxItem
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     Option:
       properties:
         id:
@@ -3019,6 +4830,14 @@ components:
       - id
       - label
       title: Option
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     OwnerAdd:
       properties:
         email:
@@ -3059,6 +4878,14 @@ components:
       additionalProperties: false
       type: object
       title: PathHint
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     PurgeRecords:
       properties:
         confirm_slug:
@@ -3126,6 +4953,14 @@ components:
       additionalProperties: false
       type: object
       title: RedGate
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     RequestReceipt:
       properties:
         request_id:
@@ -3142,12 +4977,21 @@ components:
           - withdrawn
           - cancelled
           title: State
+          maxLength: 4000
       additionalProperties: false
       type: object
       required:
       - request_id
       - state
       title: RequestReceipt
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     RequestView:
       properties:
         request_id:
@@ -3164,6 +5008,7 @@ components:
           - withdrawn
           - cancelled
           title: State
+          maxLength: 4000
         created_at:
           anyOf:
           - type: string
@@ -3189,6 +5034,14 @@ components:
       - state
       - request
       title: RequestView
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     Suggested:
       properties:
         option_id:
@@ -3206,6 +5059,14 @@ components:
       additionalProperties: false
       type: object
       title: Suggested
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     TenantCreate:
       properties:
         slug:
@@ -3296,6 +5157,14 @@ components:
       additionalProperties: false
       type: object
       title: Voice
+      x-nested-json-policy:
+        maxDepth: 12
+        maxNodesPerField: 10000
+        maxStringLength: 4000
+        maxObjectKeyLength: 100
+        finiteNumbersOnly: true
+        appliesTo: Each untyped dictionary/array field; typed nested models validate
+          their own fields
     WebhookDestinationView:
       properties:
         id:
@@ -3351,7 +5220,8 @@ components:
       - secret_prefix
       - created_at
       title: WebhookDestinationView
-      description: 'A destination without secret material; secret_prefix identifies the
+      description: 'A destination without secret material; secret_prefix identifies
+        the
 
         secret in use so a receiver can tell which one it holds.'
     WebhookRegisterRequest:
@@ -3424,94 +5294,98 @@ components:
       - created_at
       - secret
       title: WebhookSecretResponse
-    TerminalConflict:
+    HTTPError:
       type: object
       required:
       - detail
       properties:
-        detail:
-          type: object
-          required:
-          - error
-          - request_id
-          - state
-          properties:
-            error:
-              type: string
-              enum:
-              - request_terminal
-            request_id:
-              type: string
-            state:
-              type: string
-              enum:
-              - queued
-              - shown
-              - answered
-              - expired
-              - withdrawn
-              - cancelled
-      description: HCA-P19 Day 2 - the one 409 body every losing terminal transition gets (second answer, cancel
-        after answer, answer after expiry, second cancel).
-    Surface:
-      type: string
-      enum:
-      - browser_overlay
-      - browser_notification
-      - macos_notification
-      - macos_app
-      - web
-      description: The surface on which a request is delivered or answered.
-    InboxStreamEvent:
+        detail: {}
+      description: HTTP errors have detail as text, a terminal-state object or a redacted
+        validation list.
+    HealthDegraded:
       type: object
       required:
-      - id
-      - event
-      - data
-      - timestamp
+      - status
+      - db
       properties:
-        id:
-          type: integer
-          description: Events row id (HCA-P20); also sent as the SSE id line, so Last-Event-ID replay can resume
-            from it.
-        event:
-          type: string
-          enum:
-          - request.created
-          - request.escalated
-          - request.answered
-          - request.cancelled
-          - request.expired
-        data:
-          type: object
-          description: 'Event payload (such as CollectionRequest, AnswerRecord, or RequestReceipt). For request.created
-            and request.escalated it also carries request_id and visible_to (array of device ids, HCA-P14).
-
-            '
-        timestamp:
-          type: string
-          format: date-time
-    ControlSpec:
+        status:
+          const: degraded
+        db:
+          const: down
+    SweepResult:
       type: object
+      required:
+      - swept
+      - results
+      - idempotency_swept
+      - jobs_run
+      - reconciled
+      - retention
       properties:
-        control:
-          type: string
-        request_schema:
+        swept:
+          type: integer
+        idempotency_swept:
+          type: integer
+        jobs_run:
+          type: integer
+        reconciled:
+          type: integer
+        retention:
           type: object
-        answer_schema:
-          type: object
-        example:
-          type: object
+          additionalProperties:
+            type: integer
+        results:
+          type: array
+          items:
+            type: object
+            required:
+            - request_id
+            - expiry_policy
+            - action
+            properties:
+              request_id:
+                type: string
+              expiry_policy:
+                type:
+                - string
+                - 'null'
+              action:
+                type:
+                - string
+                - 'null'
   securitySchemes:
     AgentKey:
       type: http
       scheme: bearer
     DeviceSignature:
       type: apiKey
-      description: 'See app/devicesig.py: X-HCA-Device, X-HCA-Timestamp, X-HCA-Nonce and X-HCA-Signature over the
-        canonical request string'
       in: header
       name: X-HCA-Signature
+      description: 'Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        All four device headers are required together. Canonical fields joined by
+        newline: HCA1, timestamp, nonce, METHOD, path-and-query, SHA256(body). Timestamp
+        skew is at most 300 seconds; nonce retention is 601 seconds. Production human
+        decision routes also require current Google owner membership.'
     AdminToken:
       type: http
       scheme: bearer
+    DeviceID:
+      type: apiKey
+      in: header
+      name: X-HCA-Device
+      description: Registered device ID
+    DeviceTimestamp:
+      type: apiKey
+      in: header
+      name: X-HCA-Timestamp
+      description: Unix seconds within 300 seconds of server time
+    DeviceNonce:
+      type: apiKey
+      in: header
+      name: X-HCA-Nonce
+      description: Fresh random nonce; replayed nonces are refused
+    SweepBearer:
+      type: http
+      scheme: bearer
+      description: SWEEP_TRIGGER_TOKEN used only by the internal scheduler; missing
+        server configuration fails closed.

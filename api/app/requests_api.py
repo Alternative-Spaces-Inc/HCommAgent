@@ -130,7 +130,9 @@ def _audit_to_answer_record(row: models.AuditRow) -> dict:
 def create_request(body: CollectionRequest, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     if body.caller != key.caller:
         raise HTTPException(status_code=403, detail="caller does not match the api key")
-    payload = body.model_dump(mode="json")
+    # Keep fingerprints of legacy naive datetime inputs stable while response
+    # models publish the database's UTC timestamps with an explicit zone.
+    payload = body.model_dump(mode="json", context={"preserve_datetime_input": True})
     idem_key = idempotency.key_from(request)
     replayed = idempotency.reserve(db, key.tenant_id, key.caller, "create", idem_key, payload, "/v1/requests")
     if replayed is not None:

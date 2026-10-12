@@ -49,6 +49,7 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - docs/ARCHITECTURE.md: components, data model, request state machine, surface routing, diagrams (2026-10-10)
 - docs/webhooks.md: webhook destination registration, delivery headers, signature verification snippets, retry and dead state (2026-10-11)
 - docs/reviews/2026-10-10_public_readiness_review.md: ten ranked gaps with evidence, the readiness baseline
+- [docs/reviews/2026-10-12_enforcement_verification.md](../docs/reviews/2026-10-12_enforcement_verification.md): Branch protection, CodeQL, secret scanning and Dependabot settings read through the API on 2026-10-12, with the solo maintainer exception
 - docs/deploys/2026-10-10_public_readiness_block.md: PR 78 and 80 to 87 plus Dependabot merged, gaps closed and still open
 
 ## Repository move (2026-10-11)

@@ -41,6 +41,7 @@ from . import tenancy
 from .db import get_db
 from .devicesig import device_id_for_public_key_pem
 from .schemas import Surface
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/devices", tags=["devices"])
 MAX_ACTIVE_DEVICES = max(1, int(os.environ.get("HCA_MAX_ACTIVE_DEVICES", "100")))
@@ -63,7 +64,7 @@ class DevicePatch(BaseModel):
     priority: int
 
 
-class DeviceView(BaseModel):
+class DeviceView(UTCJSONModel):
     device_id: str
     tenant_id: str
     label: str

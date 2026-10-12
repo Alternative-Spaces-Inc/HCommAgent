@@ -10,6 +10,7 @@ from . import models
 from .db import get_db
 from .apikeys import issue_api_key
 from .auth import require_admin_bearer
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
 
@@ -21,7 +22,7 @@ class ApiKeyIssueRequest(BaseModel):
     tenant_id: str = Field(default=models.DEFAULT_TENANT_ID, min_length=1, max_length=100)
 
 
-class ApiKeyIssueResponse(BaseModel):
+class ApiKeyIssueResponse(UTCJSONModel):
     api_key: str
     prefix: str
     caller: str
@@ -29,7 +30,7 @@ class ApiKeyIssueResponse(BaseModel):
     created_at: datetime
 
 
-class ApiKeyView(BaseModel):
+class ApiKeyView(UTCJSONModel):
     """One key row without any secret material: the prefix is the lookup
     handle, the hash is never returned."""
     prefix: str

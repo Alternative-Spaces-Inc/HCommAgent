@@ -1,6 +1,6 @@
 # Client and API remediation: review items 13 to 23
 
-This branch builds on the approval security fixes in [items 1 to 12](SECURITY_REMEDIATION_01_12.md). It addresses API resource bounds, record lifecycle and the supported browser/Mac decision surfaces. CI, container, deployment, dependency locking, governance and portfolio changes are coordinated separately.
+This branch builds on the approval security fixes in [items 1 to 12](SECURITY_REMEDIATION_01_12.md). It addresses API resource bounds, record lifecycle and the supported browser/Mac decision surfaces. CI, container, deployment, dependency locking, governance and project presentation changes are coordinated separately.
 
 | Item | Implementation | Evidence |
 | --- | --- | --- |
@@ -19,6 +19,10 @@ This branch builds on the approval security fixes in [items 1 to 12](SECURITY_RE
 ## API resource and retention defaults
 
 The maximum HTTP request body is 1 MiB. Collection requests permit 500 options/rows and 50 delivery descriptors; answer paths permit 30 segments. Default strings are at most 4,000 characters, with tighter limits on identity/title/labels and other documented fields. Nested dictionaries/lists permit depth 12 and 10,000 visited values per field, with field names at most 100 characters. Non-finite numbers and unknown typed model fields are rejected.
+
+Typed nested records validate their own fields rather than applying one aggregate cap to a complete request and answer. Human answer output permits depth 14 and 10,009 nodes for the server's audit wrapper while preserving the input limits above. Boundary regressions cover successful answers, original metadata retention, identical idempotent replay and valid readback. Response timestamps identify UTC explicitly; input fingerprints and database storage retain their existing representation.
+
+The integrated API contract also covers the static control route from review item 25. CI compares the entire saved contract with the served schema, including constraints, security, request and response bodies, status codes and headers, with no exceptions. Real response validation and deliberate contract mutations verify those checks.
 
 Paginated lists default to 200 records and accept a maximum of 500. Follow `X-HCA-Next-Cursor` using `after`; filtering or visibility can leave an empty page with a next cursor. Cursors are scoped to the authenticated endpoint/tenant and are not authorization proofs. Responses carry `X-Request-ID` for correlation without logging request bodies or credentials.
 
@@ -55,3 +59,7 @@ Server audit records remain until an explicit authorized purge. Export records b
 Automated browser checks use synthetic fixtures and actual Chromium DOM/IndexedDB contexts. Mac socket tests exercise the real local TCP listener without a Google account. These checks do not establish real Google owner OAuth, unpacked Chrome permission/alarm scheduling, native notification/Keychain lifecycle, assistive-technology accessibility or production load/recovery behavior. Those checks require a configured test account and the operator's environment. No production deployment, traffic change or account sign-in is performed by the regression tests.
 
 Before rollout, assess existing records exceeding the new schema bounds or registration quotas. Archive or migrate them under the operator's policy; bounded response validation can refuse oversized legacy records. Do not rotate or discard existing webhook encryption material as part of this client/API change.
+
+## Owner validation approval
+
+The owner reported the requested manual validation finished and approved on October 12, 2026. The [approval record](reviews/2026-10-12_manual_validation_approval.md) distinguishes that confirmation from automated integration results and deployment code requirements. The validated browser/Mac behavior is preserved during integration.
