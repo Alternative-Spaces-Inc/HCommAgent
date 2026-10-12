@@ -213,6 +213,25 @@ paths:
               schema:
                 type: array
                 items: { $ref: '#/components/schemas/ControlSpec' }
+  /v1/internal/expiry-sweep:
+    post:
+      summary: Scheduler trigger for the expiry and job sweep (internal)
+      description: >
+        Hit by Cloud Scheduler with the SweepBearer token. Reconciles overdue
+        asks that have no expire job, runs one claim and run pass of the
+        leased job queue (the worker thread in every instance is the other
+        trigger), and retires idempotency rows past their TTL. Not an agent or
+        human route; a missing server side token fails closed with 403.
+      security:
+        - SweepBearer: []
+      responses:
+        '200':
+          description: Counts of the sweep
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/SweepResult' }
+        '401': { description: Missing bearer }
+        '403': { description: Wrong token or no token configured on the server }
   /v1/tenants:
     post:
       summary: Create a tenant (HCA-P19)
@@ -686,6 +705,12 @@ components:
         creating as another caller is 403, another caller's request reads
         and cancels as 404. Human surface routes (inbox, inbox/stream,
         answer) and audit take DeviceSignature instead.
+    SweepBearer:
+      type: http
+      scheme: bearer
+      description: >
+        SWEEP_TRIGGER_TOKEN from Secret Manager, presented by the scheduler
+        on POST /v1/internal/expiry-sweep only.
     AdminToken:
       type: http
       scheme: bearer
@@ -997,6 +1022,21 @@ components:
         timestamp:
           type: string
           format: date-time
+    SweepResult:
+      type: object
+      properties:
+        swept: { type: integer }
+        results:
+          type: array
+          items:
+            type: object
+            properties:
+              request_id: { type: string }
+              expiry_policy: { type: string, nullable: true }
+              action: { type: string, nullable: true }
+        idempotency_swept: { type: integer }
+        jobs_run: { type: integer }
+        reconciled: { type: integer }
     ControlSpec:
       type: object
       properties:

@@ -75,7 +75,7 @@ Rollback: [docs/runbooks/HCA_DEPLOY_ROLLBACK.md](docs/runbooks/HCA_DEPLOY_ROLLBA
 
 ## Quality gates (CI, every PR)
 
-Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity, Validate OpenAPI Specification (including parity between the yaml and the running app), API Tests (Postgres, with an 85 percent coverage floor), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), CodeQL (Python, JavaScript, Swift, Actions). How to fix a red gate: [CONTRIBUTING.md](CONTRIBUTING.md).
+Check No Dash Characters, Check Client Data Hygiene, Check Bootstrap Manifest Integrity, Validate OpenAPI Specification (plus a parity gate: every path, method and response status in the yaml exists in the running app and the other way round; request and response schemas are not compared, the contract tests cover those), API Tests (Postgres, with an 85 percent coverage floor), Extension Tests (Node 20), Swift Tests (macOS), Python Lint (ruff), Python Dependency Audit (pip-audit), CodeQL (Python, JavaScript, Swift, Actions). How to fix a red gate: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
