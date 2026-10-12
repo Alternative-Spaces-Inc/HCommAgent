@@ -49,10 +49,10 @@ Each day ships as its own PR to main, merged by the owner, with the Cloud Build 
 
 ## 5 Status
 
-Plan v1 drafted 2026-10-12 against main c79821a8. Selections 1 and 2 taken (four fixed scopes; shared database rate counters, decision 9 in docs/decisions/DECISIONS_20261012.md); selection 3 pending. Days not started.
+Plan v1 drafted 2026-10-12 against main c79821a8. All three selections taken 2026-10-12 08:3x PT (four fixed scopes; shared database rate counters; admin and self rotate with a 24 h overlap), decision 9 in docs/decisions/DECISIONS_20261012.md. Day 1 in progress on p21b/day1-scopes.
 
 ## 6 Owner selections
 
 1. Taken 2026-10-12 08:0x PT: fixed four scopes with all four as the default at issuance. Declined: no scopes in v1, free form scope strings.
 2. Taken 2026-10-12 08:3x PT: per key 600 calls and 60 asks per minute in a shared database counter with 429 and Retry-After. Declined: per instance in memory counters, no limits in v1.
-3. Rotation: admin rotate and agent self rotate, 24 h overlap (suggested), or admin rotate only, or immediate cut over with no overlap.
+3. Taken 2026-10-12 08:3x PT: admin rotate and agent self rotate, 24 h overlap. Declined: admin rotate only, immediate cut over.
