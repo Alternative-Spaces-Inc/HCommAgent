@@ -48,4 +48,4 @@ class RequestBounds:
                 log.info(json.dumps({"request_id": request_id, "method": scope["method"],
                                      "status": message["status"], "elapsed_ms": round((time.monotonic() - started) * 1000)}))
             await send(message)
-        await self.app(scope, bounded_receive, correlated_send)
+        return await self.app(scope, bounded_receive, correlated_send)
