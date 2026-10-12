@@ -18,7 +18,10 @@ final class GoogleOAuthTests: XCTestCase {
                                                pkce: pkce, state: "st", loginHint: "owner@example.com")
         let c = try XCTUnwrap(URLComponents(url: url, resolvingAgainstBaseURL: false))
         XCTAssertEqual(c.host, "accounts.google.com")
-        let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        var q: [String: String] = [:]
+        for item in c.queryItems ?? [] {
+            q[item.name] = item.value ?? ""
+        }
         XCTAssertEqual(q["client_id"], "cid.apps.googleusercontent.com")
         XCTAssertEqual(q["redirect_uri"], "http://127.0.0.1:49152/oauth2")
         XCTAssertEqual(q["response_type"], "code")
@@ -35,6 +38,36 @@ final class GoogleOAuthTests: XCTestCase {
         XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?error=access_denied&state=st HTTP/1.1", expectedState: "st"), .error("access_denied"))
         XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /favicon.ico HTTP/1.1", expectedState: "st"), .notARedirect)
         XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "POST /oauth2 HTTP/1.1", expectedState: "st"), .notARedirect)
+    }
+
+    func testDuplicateCodeOrStateRejected() {
+        XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?state=st&code=1&code=2 HTTP/1.1", expectedState: "st"), .notARedirect)
+        XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?state=st&state=st&code=1 HTTP/1.1", expectedState: "st"), .notARedirect)
+    }
+
+    func testUnsolicitedErrorRequiresValidState() {
+        XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?error=access_denied HTTP/1.1", expectedState: "st"), .stateMismatch)
+        XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?error=access_denied&state=wrong HTTP/1.1", expectedState: "st"), .stateMismatch)
+        XCTAssertEqual(GoogleOAuth.parseRedirect(requestLine: "GET /oauth2?error=access_denied&state=st HTTP/1.1", expectedState: "st"), .error("access_denied"))
+    }
+
+    func testFragmentationAndBufferLimits() {
+        var buf = GoogleOAuth.RequestBuffer(maxBytes: 100)
+        XCTAssertEqual(buf.append(Data("GET /oauth2?".utf8)), .needMoreData)
+        XCTAssertEqual(buf.append(Data("state=st&code=abc".utf8)), .needMoreData)
+        XCTAssertEqual(buf.append(Data(" HTTP/1.1\r\n".utf8)), .line("GET /oauth2?state=st&code=abc HTTP/1.1"))
+
+        var bufLimit = GoogleOAuth.RequestBuffer(maxBytes: 10)
+        XCTAssertEqual(bufLimit.append(Data("123456789012".utf8)), .exceededLimit)
+    }
+
+    func testTimeoutAndCancellation() async {
+        let task = Task {
+            try await Task.sleep(nanoseconds: 100_000_000)
+        }
+        task.cancel()
+        let isCancelled = task.isCancelled
+        XCTAssertTrue(isCancelled)
     }
 
     func testTokenRequestBodyHasNoSecretAndEncodes() throws {

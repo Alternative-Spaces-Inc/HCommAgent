@@ -61,15 +61,52 @@ public enum GoogleOAuth {
         case notARedirect
     }
 
+    public struct RequestBuffer: Equatable {
+        private var buffer = Data()
+        public let maxBytes: Int
+
+        public init(maxBytes: Int = 8192) {
+            self.maxBytes = maxBytes
+        }
+
+        public enum AppendResult: Equatable {
+            case line(String)
+            case needMoreData
+            case exceededLimit
+        }
+
+        public mutating func append(_ data: Data) -> AppendResult {
+            buffer.append(data)
+            if let lineRange = buffer.range(of: Data("\r\n".utf8)) ?? buffer.range(of: Data("\n".utf8)) {
+                let lineData = buffer[..<lineRange.lowerBound]
+                let line = String(decoding: lineData, as: UTF8.self)
+                return .line(line)
+            }
+            if buffer.count > maxBytes {
+                return .exceededLimit
+            }
+            return .needMoreData
+        }
+    }
+
     /// Parses the first line of the browser's request to the loopback listener.
     public static func parseRedirect(requestLine: String, expectedState: String) -> RedirectResult {
         // "GET /oauth2?state=...&code=... HTTP/1.1"
         let parts = requestLine.split(separator: " ")
         guard parts.count >= 2, parts[0] == "GET" else { return .notARedirect }
         guard let c = URLComponents(string: "http://127.0.0.1" + parts[1]), c.path == "/oauth2" else { return .notARedirect }
-        let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
-        if let err = q["error"], !err.isEmpty { return .error(err) }
+        guard let items = c.queryItems else { return .notARedirect }
+
+        var q: [String: String] = [:]
+        for item in items {
+            if q[item.name] != nil {
+                return .notARedirect
+            }
+            q[item.name] = item.value ?? ""
+        }
+
         guard q["state"] == expectedState else { return .stateMismatch }
+        if let err = q["error"], !err.isEmpty { return .error(err) }
         guard let code = q["code"], !code.isEmpty else { return .notARedirect }
         return .code(code)
     }

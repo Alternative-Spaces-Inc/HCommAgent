@@ -9,6 +9,8 @@ import Network
 final class GoogleLinker {
     static let defaultsKey = "googleClientId"
     static let secretDefaultsKey = "googleClientSecret"
+    private static let maxConnections = 10
+    private static let maxRequestLineBytes = 8192
 
     enum LinkError: Error, LocalizedError {
         case noClientId, listenFailed, browserFailed, denied(String), stateMismatch, exchangeFailed(String), timeout
@@ -96,24 +98,49 @@ final class GoogleLinker {
         }
 
         listener.newConnectionHandler = { [weak self] conn in
-            self?.connections.append(conn)
-            conn.start(queue: self?.queue ?? .global())
-            conn.receive(minimumIncompleteLength: 1, maximumLength: 16384) { data, _, _, _ in
-                let text = data.map { String(decoding: $0, as: UTF8.self) } ?? ""
-                let firstLine = text.split(separator: "\r\n", maxSplits: 1).first.map(String.init) ?? ""
-                let result = GoogleOAuth.parseRedirect(requestLine: firstLine, expectedState: expectedState)
-                var ok = false
-                if case .code = result { ok = true }
-                let html = GoogleOAuth.responseHTML(ok: ok)
-                let head = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n"
-                conn.send(content: Data((head + html).utf8), completion: .contentProcessed { _ in conn.cancel() })
-                switch result {
-                case .code(let c): yield?(c); finish?(nil)
-                case .error(let e): finish?(LinkError.denied(e))
-                case .stateMismatch: finish?(LinkError.stateMismatch)
-                case .notARedirect: break
+            guard let self = self else { return }
+            self.connections.removeAll { $0.state == .cancelled }
+            guard self.connections.count < Self.maxConnections else {
+                conn.cancel()
+                return
+            }
+            self.connections.append(conn)
+            var buffer = GoogleOAuth.RequestBuffer(maxBytes: Self.maxRequestLineBytes)
+            conn.start(queue: self.queue)
+
+            func receiveNext() {
+                conn.receive(minimumIncompleteLength: 1, maximumLength: 4096) { [weak self, weak conn] data, _, isComplete, error in
+                    guard let conn = conn else { return }
+                    if let data = data, !data.isEmpty {
+                        switch buffer.append(data) {
+                        case .line(let line):
+                            let result = GoogleOAuth.parseRedirect(requestLine: line, expectedState: expectedState)
+                            var ok = false
+                            if case .code = result { ok = true }
+                            let html = GoogleOAuth.responseHTML(ok: ok)
+                            let head = "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: \(html.utf8.count)\r\nConnection: close\r\n\r\n"
+                            conn.send(content: Data((head + html).utf8), completion: .contentProcessed { _ in conn.cancel() })
+                            switch result {
+                            case .code(let c): yield?(c); finish?(nil)
+                            case .error(let e): finish?(LinkError.denied(e))
+                            case .stateMismatch, .notARedirect: break
+                            }
+                            return
+                        case .exceededLimit:
+                            conn.cancel()
+                            return
+                        case .needMoreData:
+                            break
+                        }
+                    }
+                    if isComplete || error != nil {
+                        conn.cancel()
+                        return
+                    }
+                    receiveNext()
                 }
             }
+            receiveNext()
         }
 
         final class Once { var done = false }
