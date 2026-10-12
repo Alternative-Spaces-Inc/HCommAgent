@@ -1,0 +1,3 @@
+# HCA design decisions (2026-10-12)
+
+9. P21b owner selections (08:0x PT, one widget per decision, after HCommAgent PR 3 merged as main c79821a8 and the plan v1 PR 4 opened): (1) api keys carry a fixed scope vocabulary of four scopes, `asks:create`, `asks:read`, `asks:cancel`, `webhooks:manage`, stored as a JSON list on the key row; issuance without a list grants all four, the migration backfills all four on existing rows, and a call without the needed scope is refused with 403 naming the scope. Declined: no scopes in v1 (rate limits and rotation only), free form scope strings matched by prefix. Plan: docs/plans/HCA_P21B_API_KEY_HARDENING_v1.md section 6.

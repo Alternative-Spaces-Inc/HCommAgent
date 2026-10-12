@@ -34,6 +34,7 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [bootstrap/skills/typed_facts.py](../bootstrap/skills/typed_facts.py): Seat copy of a factory skill (provenance header at line 2)
 - [docs/HCA_CHARTER_v1.md](../docs/HCA_CHARTER_v1.md): Charter: purpose, surfaces ladder, controls, decisions applied
 - [docs/decisions/DECISIONS_20260929.md](../docs/decisions/DECISIONS_20260929.md): Al rulings of 2026-09-29: seven design decisions, creation shape
+- [docs/decisions/DECISIONS_20261012.md](decisions/DECISIONS_20261012.md): decision 9, P21b owner selections (scopes, rate limits, rotation)
 - [docs/plans/HCA_CLOUD_RUN_PLAN_v1.md](../docs/plans/HCA_CLOUD_RUN_PLAN_v1.md): Cloud Run hosting plan, reconciled with the charter and decisions
 - [docs/runbooks/HCA_FIRST_DEPLOY.md](../docs/runbooks/HCA_FIRST_DEPLOY.md): First Cloud Run deploy, one Terminal block per step, with `cloudbuild.yaml` at the repo root
 - [docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md](../docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md): Prior art on universal human-in-the-loop interfaces
