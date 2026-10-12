@@ -4,7 +4,9 @@ from sqlalchemy.orm import sessionmaker, declarative_base
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./hca_local.db")
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
+# application_name lets the migrate job (alembic/env.py) tell API backends apart
+# from an operator's psql session when it clears idle-in-transaction locks.
+connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {"application_name": "hca-api"}
 
 
 def pool_kwargs(url: str, env: dict | None = None) -> dict:
