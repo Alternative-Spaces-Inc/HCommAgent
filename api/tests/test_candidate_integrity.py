@@ -19,7 +19,7 @@ BUILD = '01234567-89ab-cdef-0123-456789abcdef'
 RESOURCE = 'projects/demo-project/locations/us-west1/services/hca-api-service'
 REVISION = 'hca-api-service-00042-abc'
 IMAGE = 'us-west1-docker.pkg.dev/demo-project/hca-services/hca-api@sha256:' + 'b' * 64
-TAG = 'candidate-' + BUILD
+TAG = 'candidate-' + BUILD[:8]
 URL = 'https://' + TAG + '---hca.example.run.app'
 
 
@@ -208,7 +208,8 @@ def test_image_validation_precedes_production_mutations_and_pipeline_shells_pars
     assert steps['build']['args'] == ['build', '-t',
         '${_REGION}-docker.pkg.dev/${PROJECT_ID}/${_AR_REPO}/${_IMAGE}:${COMMIT_SHA}', '.']
     assert '--to-latest' not in json.dumps(pipeline)
-    assert 'candidate-${BUILD_ID}' in steps['deploy']['args'][-1]
+    assert 'candidate-$$(printf \'%s\' \'${BUILD_ID}\' | cut -c1-8)' in steps['deploy']['args'][-1]
+    assert 'candidate-${BUILD_ID}' not in json.dumps(pipeline)
     assert '${_MIGRATE_SA}' in steps['migrate']['args'][-1]
     assert '${_MIGRATE_DB_URL_SECRET}' in steps['migrate']['args'][-1]
     for name in ('check-config', 'smoke-candidate', 'promote'):
