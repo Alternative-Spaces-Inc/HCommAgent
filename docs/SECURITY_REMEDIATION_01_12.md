@@ -1,6 +1,6 @@
 # Security remediation: review items 1 to 12
 
-Scope: security and approval correctness changes against the public repository at `0f78e630e99444f85d666409aa4d6f4537e88331`. Client, packaging, dependency, data lifecycle, deployment and portfolio work is coordinated separately. This document records the focused implementation and its limits.
+Scope: security and approval correctness changes against the public repository at `0f78e630e99444f85d666409aa4d6f4537e88331`. Client, packaging, dependency, data lifecycle, deployment and project presentation work is coordinated separately. This document records the focused implementation and its limits.
 
 | Item | Result | Evidence |
 | --- | --- | --- |
