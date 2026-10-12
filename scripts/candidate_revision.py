@@ -47,6 +47,18 @@ def _url(value):
     return str(value).rstrip("/")
 
 
+def candidate_tag(build: str) -> str:
+    """Build-scoped traffic tag short enough for Cloud Run's combined tag and service name limit.
+
+    The full build id is a 36 character UUID; Cloud Run refuses a tag whose length combined with
+    the service name exceeds its DNS label budget, so the tag carries the first UUID segment
+    (8 hex characters). The full build id stays on the revision label `build` for exact binding.
+    """
+    if not re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", build):
+        raise CandidateError("build id must be a lowercase UUID")
+    return "candidate-" + build[:8]
+
+
 def find_candidate(service: dict, tag: str = TAG) -> dict:
     if not isinstance(service, dict):
         raise CandidateError("service description must be an object")
@@ -104,7 +116,7 @@ def make_snapshot(service_v1, revision, service_v2, *, commit, build, image, res
     validate_lease(lease, service_v2)
     if lease["build"] != build or lease["resource"] != resource:
         raise CandidateError("deployment lease belongs to another build")
-    tag = "candidate-" + build
+    tag = candidate_tag(build)
     target = find_candidate(service_v1, tag)
     revision_name = target["revisionName"]
     if not re.fullmatch(re.escape(_name(resource)) + r"-[a-z0-9-]+", revision_name):
@@ -149,7 +161,7 @@ def load_snapshot(path):
     with open(path) as source:
         snapshot = json.load(source)
     _validate_identity(snapshot["commit"], snapshot["build"], snapshot["image"], snapshot["resource"])
-    if snapshot.get("version") != 1 or snapshot.get("tag") != "candidate-" + snapshot["build"] or not snapshot.get("etag"):
+    if snapshot.get("version") != 1 or snapshot.get("tag") != candidate_tag(snapshot["build"]) or not snapshot.get("etag"):
         raise CandidateError("invalid candidate snapshot")
     _url(snapshot["url"])
     return snapshot
