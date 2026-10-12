@@ -42,6 +42,8 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - docs/deploys/2026-10-01_p6_device_proof.md: P6 device key proof, PR 20 inbox request_id fix, revision 00004
 - [docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md](plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md): Verified gap inventory and the P19 to P27 hardening program (agentic retail control plane)
 - [docs/plans/HCA_P20_DURABLE_DELIVERY_v1.md](plans/HCA_P20_DURABLE_DELIVERY_v1.md): P20 plan v1: durable delivery
+- [docs/plans/HCA_P21A_WEBHOOK_SECURITY_v1.md](plans/HCA_P21A_WEBHOOK_SECURITY_v1.md): P21a plan v1: webhook security and durable outbox
+- [docs/plans/HCA_P21B_API_KEY_HARDENING_v1.md](plans/HCA_P21B_API_KEY_HARDENING_v1.md): P21b plan v1: api key scopes, rate limits, rotation, no credential in a query string
 - docs/ARCHITECTURE.md: components, data model, request state machine, surface routing, diagrams (2026-10-10)
 - docs/webhooks.md: webhook destination registration, delivery headers, signature verification snippets, retry and dead state (2026-10-11)
 - docs/reviews/2026-10-10_public_readiness_review.md: ten ranked gaps with evidence, the readiness baseline
