@@ -1,6 +1,6 @@
 ---
 name: Bug Report
-about: Create a report to help us improve human-collections-agent
+about: Create a report to help us improve HCommAgent
 labels: bug
 ---
 

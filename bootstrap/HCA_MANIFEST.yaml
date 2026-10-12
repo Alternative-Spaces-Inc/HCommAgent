@@ -1,5 +1,5 @@
 seat: hca
-repo: Alternative-Spaces-Inc/human-collections-agent
+repo: Alternative-Spaces-Inc/HCommAgent
 skills:
 - name: approved_run.py
   path: bootstrap/skills/approved_run.py

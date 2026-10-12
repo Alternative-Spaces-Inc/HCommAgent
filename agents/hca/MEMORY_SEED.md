@@ -1,9 +1,9 @@
 # Human Collections Agent (HCA) Day-One Memory Seed
 
 ## Primary Repository Facts
-- Repository: `Alternative-Spaces-Inc/human-collections-agent`
+- Repository: `Alternative-Spaces-Inc/HCommAgent`
 - Seat: Human Collections Agent (HCA)
-- Bootstrap Source: This repository (`Alternative-Spaces-Inc/human-collections-agent`) is the full seat source.
+- Bootstrap Source: This repository (`Alternative-Spaces-Inc/HCommAgent`) is the full seat source.
 
 ## Commit and PR History
 - PR 1 (commit 24c7ec2): initial repository setup.
@@ -22,7 +22,7 @@
 5. Inbox listing: GET /v1/inbox.
 6. Inbox stream: GET /v1/inbox/stream (SSE).
 7. Audit log: GET /v1/audit with filters.
-8. Creation decision: HCA bootstraps from its own repo (`Alternative-Spaces-Inc/human-collections-agent`). Al clones Andy Superagent and re-fits to HCA seat.
+8. Creation decision: HCA bootstraps from its own repo (`Alternative-Spaces-Inc/HCommAgent`). Al clones Andy Superagent and re-fits to HCA seat.
 
 ## Standing Rules
 - Repo-first rule: repository content is the single source of truth; recover state from repo, not memory.

@@ -59,7 +59,7 @@ representative at an online or offline event.
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
 reported to the project maintainers via the private advisory reporting form:
-https://github.com/Alternative-Spaces-Inc/human-collections-agent/security/advisories/new
+https://github.com/Alternative-Spaces-Inc/HCommAgent/security/advisories/new
 
 All complaints will be reviewed and investigated promptly and fairly.
 

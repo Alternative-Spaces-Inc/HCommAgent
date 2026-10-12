@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security Vulnerability Report
-    url: https://github.com/Alternative-Spaces-Inc/human-collections-agent/security/advisories/new
+    url: https://github.com/Alternative-Spaces-Inc/HCommAgent/security/advisories/new
     about: Please report security vulnerabilities privately using the advisory form or refer to SECURITY.md.
