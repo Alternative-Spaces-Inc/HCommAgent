@@ -30,6 +30,13 @@ macos/.build/
 macos/*.xcodeproj
 macos/swift-test.log
 
+# Release outputs and local development state
+dist/
+.hca-dev/
+*.log
+*.dmg
+*.app/
+
 # Editors and OS
 .DS_Store
 .idea/

@@ -1,5 +1,7 @@
 # HCA Chrome Web Store runbook (HCA-P17)
 
+> Historical setup record. For the 0.3.0 candidate, use [current release instructions](../RELEASES.md) and the [served privacy disclosure](../../api/app/privacy.py). Listing text must describe Google access-token verification, agent/webhook recipients and hosting, local storage/notification previews, and actual export/deletion/retention limits. Do not reuse older token or sharing claims. Source changes alone do not update the live privacy URL or Web Store listing; the operator must verify the deployed policy and configured extension/OAuth IDs before publication.
+
 Plan: docs/plans/HCA_P17_CHROME_WEB_STORE_v1.md. Every owner step below
 is a dashboard click because the Chrome Web Store has no Terminal
 equivalent for registration, upload or review. The agent fetches the zip,

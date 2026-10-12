@@ -1,4 +1,4 @@
-# Base image pinned by digest (python:3.12-slim, bookworm) so a rebuild cannot
+# Base image pinned by digest (python:3.12-slim) so a rebuild cannot
 # silently pick up a different image; the digest is refreshed by a reviewed PR.
 FROM python:3.12-slim@sha256:a6e34c598f2467ed0e9a8d349809fcd8b5c603269512df273a0bb1784edc11b1
 
@@ -10,8 +10,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Runtime dependencies only (requirements-dev.txt holds the test tooling).
-COPY requirements.txt .
-RUN pip install -r requirements.txt
+COPY requirements.lock .
+RUN pip install --require-hashes -r requirements.lock
 
 COPY app ./app
 COPY alembic.ini .

@@ -3770,6 +3770,20 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/HTTPError'
+        '409':
+          description: Previous signing secret is still within its 24-hour rotation
+            overlap
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
         '422':
           description: Validation Error
           content:
@@ -3812,19 +3826,6 @@ paths:
                 pattern: ^[0-9a-f]{32}$
         '404':
           description: Resource not found within the authenticated caller or tenant
-          content:
-            application/json:
-              schema:
-                $ref: '#/components/schemas/HTTPError'
-          headers:
-            X-Request-ID:
-              description: Server-generated correlation identifier; excludes request
-                content
-              schema:
-                type: string
-                pattern: ^[0-9a-f]{32}$
-        '409':
-          description: Conflicting resource state or incomplete idempotent operation
           content:
             application/json:
               schema:

@@ -1,3 +1,5 @@
+> Historical first-deploy procedure. Use the current [deployment and bootstrap prerequisites](HCA_DEPLOY_ROLLBACK.md) and [migration recovery guidance](HCA_MIGRATION_RECOVERY.md) for the 0.3.0 candidate. The current pipeline separates migration privileges, requires an existing-service deployment lease, and refuses ungated production configuration. `_APPROVED_COMMIT` defaults to empty and blocks every cloud mutation until an operator authorizes the exact tested `COMMIT_SHA`; publishing source or completing manual client checks does not authorize a rollout. The historical build blocks below are not a supported first-service bootstrap for the current pipeline.
+
 # HCA first deploy runbook (P5b)
 
 Every block below goes into the Mac Terminal application, one block at a time, each waiting for its output before the next. Each block is self-contained: it sets its own variables and never relies on a block run earlier. Replace the two placeholders once, everywhere: `<PROJECT_ID>` (your GCP project id) and `<REGION>` (one Cloud Run region, for example `us-west1`). Every other name is fixed by this runbook and by `cloudbuild.yaml`; change them together or not at all.

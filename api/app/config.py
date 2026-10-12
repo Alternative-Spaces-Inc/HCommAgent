@@ -9,6 +9,14 @@ def validate_environment(env=None):
         raise RuntimeError("HCA_ENV must be development or production")
     if env.get("K_SERVICE") and mode != "production":
         raise RuntimeError("Managed service requires production configuration")
+    from .apikeys import previous_peppers
+    from .webhook_crypto import keyring
+    from .webhooks import retry_schedule
+    # Optional transition configuration is validated in both modes; no new
+    # secret is required while the installation still uses legacy writes.
+    previous_peppers(env)
+    keyring(env)
+    retry_schedule(env)
     if mode != "production":
         return
     failures = []

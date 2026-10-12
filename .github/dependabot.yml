@@ -44,6 +44,11 @@ updates:
     schedule:
       interval: "weekly"
     open-pull-requests-limit: 5
+    # Python minor upgrades require a deliberate support/lockfile migration.
+    # Continue receiving digest refreshes for the supported Python 3.12 line.
+    ignore:
+      - dependency-name: "python"
+        update-types: ["version-update:semver-major", "version-update:semver-minor"]
     groups:
       minor-and-patch:
         patterns:

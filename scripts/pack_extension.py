@@ -17,7 +17,7 @@ development ID; the store assigns its own ID to the published item (plan,
 Path B). Pass --keep-key only for a zip meant for an unpacked load.
 Nothing here reads a private key.
 
-Output: dist/extension-<version>-<commit7|local>.zip and one JSON line on
+Output: dist/extension-<version>-<commit7|local>.zip, a SHA256 sidecar and one JSON line on
 stdout: {"zip": ..., "version": ..., "version_name": ..., "key_present":
 false, "files": N, "sha256": ...}. Exit 1 if a required file is missing or
 the manifest version is not a plain dotted number.
@@ -34,20 +34,23 @@ import zipfile
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT = os.path.join(ROOT, "extension")
 REQUIRED = ["manifest.json", "background.js", "popup.html", "popup.js", "options.html", "options.js"]
-EXCLUDE_DIRS = {"tests", "node_modules"}
-EXCLUDE_FILES = {"package.json", "package-lock.json"}
 
 
 def collect():
-    files = []
-    for dirpath, dirnames, filenames in os.walk(EXT):
-        dirnames[:] = sorted(d for d in dirnames if d not in EXCLUDE_DIRS and not d.startswith("."))
-        for fn in sorted(filenames):
-            if fn in EXCLUDE_FILES or fn.startswith("."):
-                continue
-            rel = os.path.relpath(os.path.join(dirpath, fn), EXT)
-            files.append(rel)
-    return files
+    # Ship the declared runtime surface, not arbitrary local files that happen
+    # to be under extension/. This excludes tooling, docs and private scratch data.
+    files = list(REQUIRED)
+    for directory, suffix in (("lib", ".js"), ("icons", ".png")):
+        for dirpath, dirnames, filenames in os.walk(os.path.join(EXT, directory)):
+            dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+            for fn in sorted(filenames):
+                if fn.endswith(suffix) and not fn.startswith("."):
+                    files.append(os.path.relpath(os.path.join(dirpath, fn), EXT))
+    for rel in files:
+        path = os.path.join(EXT, rel)
+        if os.path.islink(path) or os.path.commonpath([os.path.realpath(path), os.path.realpath(EXT)]) != os.path.realpath(EXT):
+            raise ValueError("pack refuses linked or external runtime assets")
+    return sorted(files)
 
 
 def main():
@@ -56,6 +59,9 @@ def main():
     ap.add_argument("--commit", default="")
     ap.add_argument("--keep-key", action="store_true", help="keep the manifest key (unpacked loads only)")
     args = ap.parse_args()
+    if args.commit and not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.commit):
+        print("pack: commit must be a hexadecimal source revision", file=sys.stderr)
+        return 1
 
     for req in REQUIRED:
         if not os.path.isfile(os.path.join(EXT, req)):
@@ -77,12 +83,22 @@ def main():
     files = collect()
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for rel in files:
+            # Stable archive order, timestamps and permissions permit rebuilding
+            # identical extension bytes from the same source and Python/zlib toolchain.
+            entry = zipfile.ZipInfo(rel.replace(os.sep, "/"), (1980, 1, 1, 0, 0, 0))
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.create_system = 3
+            entry.external_attr = 0o100644 << 16
             if rel == "manifest.json":
-                zf.writestr("manifest.json", json.dumps(manifest, indent=2) + "\n")
+                zf.writestr(entry, json.dumps(manifest, indent=2) + "\n")
             else:
-                zf.write(os.path.join(EXT, rel), rel)
+                with open(os.path.join(EXT, rel), "rb") as source:
+                    zf.writestr(entry, source.read())
     with open(zip_path, "rb") as fh:
         digest = hashlib.sha256(fh.read()).hexdigest()
+    checksum_path = zip_path + ".sha256"
+    with open(checksum_path, "w", encoding="utf-8") as checksum:
+        checksum.write(f"{digest}  {os.path.basename(zip_path)}\n")
     print(json.dumps({
         "zip": zip_path,
         "version": version,
@@ -90,6 +106,8 @@ def main():
         "key_present": bool(manifest.get("key")),
         "files": len(files),
         "sha256": digest,
+        "checksum": checksum_path,
+        "source_revision": args.commit or "local",
     }))
     return 0
 

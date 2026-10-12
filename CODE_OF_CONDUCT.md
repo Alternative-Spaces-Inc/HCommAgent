@@ -58,8 +58,12 @@ representative at an online or offline event.
 ## Enforcement
 
 Instances of abusive, harassing, or otherwise unacceptable behavior may be
-reported to the project maintainers via the private advisory reporting form:
-https://github.com/Alternative-Spaces-Inc/HCommAgent/security/advisories/new
+reported to the maintainer, [alfarmer](https://github.com/alfarmer), through
+contact information they choose to publish on their profile. The project does
+not currently publish a dedicated confidential conduct-reporting address. Do
+not put private conduct details in public issues or use the security advisory
+form for unrelated complaints. Public issues are available for general project
+support and for requesting a suitable contact route without personal details.
 
 All complaints will be reviewed and investigated promptly and fairly.
 

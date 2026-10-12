@@ -344,6 +344,13 @@ def run_claimed(jobs: List[models.ScheduledJob], session_factory=None, now: Opti
                 try:
                     guard(db, lease, clock())
                     if attempts >= MAX_ATTEMPTS:
+                        if kind == KIND_WEBHOOK:
+                            from .webhooks import fail_job_delivery
+                            result = fail_job_delivery(db, ref_id or "",
+                                f"internal webhook job exhausted {attempts} attempts ({type(exc).__name__})", clock(), lease=lease)
+                            worker_state["done"] += 1
+                            results.append({"job_id": job_id, "kind": kind, "request_id": ask_id, **result})
+                            continue
                         values = dict(done_at=_naive(clock()), last_error=str(exc)[:500], lease_owner=None, lease_expires_at=None)
                     else:
                         backoff = timedelta(seconds=min(2 ** attempts, 60))

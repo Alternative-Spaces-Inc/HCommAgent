@@ -20,10 +20,12 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Run dash gate
         run: python3 .github/gates/check_no_dashes.py
 
@@ -34,26 +36,28 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Run client data gate
         run: python3 .github/gates/check_client_data.py
 
   manifest:
-    name: Check Bootstrap Manifest Integrity
+    name: Check Product Isolation
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
-      - name: Install PyYAML
-        run: pip install pyyaml==6.0.2
+          python-version: '3.12'
       - name: Run manifest gate
         run: python3 .github/gates/check_manifest.py
 
@@ -64,12 +68,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
-          python-version: '3.11'
+          python-version: '3.12'
       - name: Install openapi-spec-validator
-        run: pip install openapi-spec-validator==0.9.0
+        run: pip install --require-hashes -r api/requirements-dev.lock
       - name: Validate OpenAPI spec
         run: openapi-spec-validator api/openapi.yaml
 
@@ -94,19 +100,24 @@ jobs:
           --health-retries 5
     env:
       DATABASE_URL: postgresql+psycopg2://hca:hca@localhost:5432/hca_test
+      HCA_GITLEAKS_BINARY: /tmp/hca-tools/gitleaks
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Install dependencies
         working-directory: api
-        run: pip install -r requirements-dev.txt
+        run: pip install --require-hashes -r requirements-dev.lock
+      - name: Install checksum-pinned credential scanner for regressions
+        run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
       - name: Run migrations
         working-directory: api
-        run: alembic upgrade head
+        run: alembic upgrade b8c9d0e1f2a3 && alembic upgrade head
       - name: Check the database is at head (catches a rolled back upgrade)
         working-directory: api
         run: python3 scripts/check_migrated.py
@@ -114,22 +125,29 @@ jobs:
         working-directory: api
         run: pytest -v --cov=app --cov-report=term-missing --cov-fail-under=85
       - name: Check OpenAPI parity (yaml versus generated schema)
-        run: pip install pyyaml==6.0.2 && python3 .github/gates/check_openapi_parity.py
+        run: python3 .github/gates/check_openapi_parity.py
 
   extension:
-    name: Extension Tests (Node 20)
+    name: Extension Tests (Node 24)
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Node
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '20'
+          node-version: '24'
       - name: Run the extension unit tests
         working-directory: extension
-        run: npm test
+        run: |
+          npm ci
+          npm test
+          npx playwright install --with-deps chromium
+          npm run test:browser
+          npm audit
 
   swift-tests:
     name: Swift Tests (macOS)
@@ -138,18 +156,23 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Run the HCACore and HCANotifier XCTests
         working-directory: macos
         shell: bash
         run: |
           set -o pipefail
           swift test 2>&1 | tee swift-test.log | tail -40
+          swift build -c release 2>&1 | tee swift-release.log | tail -40
       - name: Upload the full Swift test log
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: swift-test-log
-          path: macos/swift-test.log
+          path: |
+            macos/swift-test.log
+            macos/swift-release.log
           retention-days: 7
 
   ruff:
@@ -159,12 +182,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Install ruff
-        run: pip install ruff==0.17.0
+        run: pip install --require-hashes -r api/requirements-dev.lock
       - name: Lint api, gate scripts and scripts (profile in ruff.toml)
         run: ruff check api .github/gates scripts
 
@@ -175,12 +200,130 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
       - name: Set up Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Install pip-audit
-        run: pip install pip-audit==2.10.1
+        run: pip install --require-hashes -r api/requirements-dev.lock
       - name: Audit the pinned API requirements
         working-directory: api
-        run: pip-audit -r requirements-dev.txt --progress-spinner off
+        run: pip-audit -r requirements-dev.lock --disable-pip --no-deps --progress-spinner off
+
+  sqlite-http:
+    name: API Tests (SQLite and HTTP)
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      DATABASE_URL: sqlite:////tmp/hca_sqlite_test.db
+      HCA_GITLEAKS_BINARY: /tmp/hca-tools/gitleaks
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - name: Install checksum-pinned credential scanner for regressions
+        run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
+      - name: Upgrade from previous schema and run isolated regressions
+        working-directory: api
+        run: |
+          alembic upgrade b8c9d0e1f2a3
+          alembic upgrade head
+          python scripts/check_migrated.py
+          pytest -q --cov=app --cov-fail-under=85
+      - name: Credential-free decision and signed delivery demonstration
+        run: python scripts/demo_workflow.py
+
+  secrets:
+    name: Credential and History Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - name: Install checksum-pinned credential scanner
+        run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
+      - name: Scan current source and every fetched ref
+        run: python .github/gates/check_secrets.py --scanner /tmp/hca-tools/gitleaks
+      - name: Prove new and deleted credentials fail the scanner without printing them
+        env:
+          HCA_GITLEAKS_BINARY: /tmp/hca-tools/gitleaks
+        run: pytest -q api/tests/test_secret_gate.py
+
+  build-contract:
+    name: Build Configuration and Documentation
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
+        with:
+          python-version: '3.12'
+      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - name: Check lock inputs, current document links and failure propagation
+        run: |
+          python .github/gates/check_dependency_locks.py
+          python .github/gates/check_doc_links.py
+          python .github/gates/check_ci_failure.py
+
+  container-security:
+    name: Container Security and SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f
+        with:
+          version: v0.38.0
+          driver-opts: image=moby/buildkit@sha256:cec9f139f45e93c5c69c60f8b07cfad9f43f4ef6b6a6cd917527fea5ff2e3dea
+      - name: Build the non-root image with retained provenance
+        env:
+          BUILDX_METADATA_PROVENANCE: max
+        run: docker buildx build --provenance=mode=max --attest=type=sbom,generator=docker/buildkit-syft-scanner@sha256:ae4f3b554449e7e25548e7d8ccc029d17357348e30c6e3df01b92bc93654d6a9 --output type=oci,dest=hca-release.oci,tar=false --metadata-file hca-provenance.json -t hca-review:ci api
+      - name: Load a cached runtime export from the same Dockerfile
+        run: docker buildx build --load --provenance=false -t hca-review:runtime api
+      - name: Exercise non-root startup, filesystem, HTTP and SIGTERM shutdown
+        run: python3 scripts/smoke_container.py --image hca-review:runtime --output hca-container-runtime.json
+      - name: Scan the exact OCI image for vulnerabilities
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.75.0
+          input: hca-release.oci
+          scanners: vuln
+          format: table
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+      - name: Export a CycloneDX inventory of that same image
+        if: always()
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25
+        with:
+          version: v0.75.0
+          input: hca-release.oci
+          scanners: vuln
+          format: cyclonedx
+          output: hca-sbom.json
+      - name: Retain image inventory and provenance
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
+        with:
+          name: hca-container-evidence
+          path: |
+            hca-sbom.json
+            hca-provenance.json
+            hca-container-runtime.json
+          retention-days: 30
