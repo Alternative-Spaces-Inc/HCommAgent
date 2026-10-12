@@ -160,7 +160,7 @@ def test_lock_input_extra_change_requires_regeneration(tmp_path):
     for name in ("check_dependency_locks.py", "dependency_inputs.json"):
         shutil.copyfile(GATES / name, copied_gates / name)
     source_api = GATES.parents[1] / "api"
-    for name in ("requirements.txt", "requirements.lock", "requirements-dev.in", "requirements-dev.lock"):
+    for name in ("requirements.txt", "requirements.lock.txt", "requirements-dev.in", "requirements-dev.lock.txt"):
         shutil.copyfile(source_api / name, api / name)
     command = [sys.executable, str(copied_gates / "check_dependency_locks.py")]
     clean = subprocess.run(command, text=True, capture_output=True, timeout=20)

@@ -1,6 +1,6 @@
 # Repository and operations remediation: items 24 to 43
 
-This record maps the remaining October 12, 2026 source review to the 0.3.0 developer-release candidate. [Items 1 to 12](SECURITY_REMEDIATION_01_12.md) and [items 13 to 23](SECURITY_REMEDIATION_13_23.md) cover the authorization, durable delivery and client fixes. [Current status](STATUS.md) separates source checks, owner-reported validation and operator evidence. Completion of these source changes is not a promise of employment, a security certification or proof of a production rollout.
+This record maps the remaining October 12, 2026 source review to the 0.3.0 developer release. [Items 1 to 12](SECURITY_REMEDIATION_01_12.md) and [items 13 to 23](SECURITY_REMEDIATION_13_23.md) cover the authorization, durable delivery and client fixes. [Current status](STATUS.md) separates source checks, owner-reported validation and operator evidence. Completion of these source changes is not a promise of employment, a security certification or proof of a production rollout.
 
 | Item | Source change and executable evidence | Remaining evidence or responsibility |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ This record maps the remaining October 12, 2026 source review to the 0.3.0 devel
 | 35: Local setup | Documented generated disposable local secrets, mode-0600 ignored configuration, loopback-only serve and database migration; a one-command temporary demonstration with synthetic signed decisions and receiver effects. | Google-backed production authorization requires separately configured identities. |
 | 36: Privacy | Served policy and client guidance describe actual access-token verification, configured receivers, local/offline storage, notification previews, logs and explicit export/purge limits. | Operators supply deployment contacts and retention for backups/logs; policy accuracy is not a legal compliance determination. |
 | 37: Governance | Valid verified maintainer CODEOWNER, private vulnerability reporting, current cryptography/version support, upgrade guidance and third-party notices; conduct reporting limitation stated. | Owner has not supplied a dedicated confidential conduct address. No private address or publishing rights are invented. |
-| 38: Enforcement | Append-only dated settings verification now records 13 strict GitHub Actions quality checks and active no-bypass CodeQL ruleset `24952962`; administrator, force/deletion, conversation and solo-maintainer controls are preserved. | CodeQL security threshold is high or higher and other-alert threshold is error; incomplete analysis blocks within [documented exceptions](https://docs.github.com/en/code-security/concepts/code-scanning/merge-protection). Swift analysis is pending at this update; passing analyses do not close historical alerts. |
+| 38: Enforcement | Append-only dated settings verification now records 13 strict GitHub Actions quality checks and active no-bypass CodeQL ruleset `24952962`; administrator, force/deletion, conversation and solo-maintainer controls are preserved. | CodeQL security threshold is high or higher and other-alert threshold is error; incomplete analysis blocks within [documented exceptions](https://docs.github.com/en/code-security/concepts/code-scanning/merge-protection). Final-head Swift and all other CodeQL analyses passed as recorded in the publication addendum below; passing analyses alone do not close historical alerts. |
 | 39: Product isolation | Privileged personal operations removed from the product head and preserved outside this checkout; product-isolation gate replaces the obsolete bootstrap-manifest requirement. | Retained Git history is unchanged. A separately hosted private operations repository and hardened approval bridge are outside this product release. |
 | 40: Documentation | One current status, architecture, threat model, operations/release instructions and indexed dated evidence; maintained file/heading link checks; unsupported capabilities clearly identified. | Refresh evidence links for the final tested revision rather than claiming old runs cover later changes. |
 | 41: Demonstration | Credential-free real HTTP workflow: create, signed human decision, receiver HMAC/freshness/authenticated ID, resume, single external mock effect, audit and retry/deduplication. Synthetic Chrome screenshot and short/deep review paths are provided. | Personal design/implementation/review contributions require the owner's factual statement; they cannot be inferred from agent work. |
@@ -44,10 +44,39 @@ and actual developer bundling. The Alpine container functional and selected
 HIGH/CRITICAL scan evidence is identified in item 29 above. These are dated
 exact-source results, not a permanent count or proof for later image/tool changes.
 
-CodeQL Swift analysis is still in progress; [PR15 checks](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15/checks)
-show its actual state. The appended [enforcement snapshot](reviews/2026-10-12_enforcement_verification.md#final-policy-update-october-12-2026)
+The final-head CodeQL analyses, including Swift, subsequently passed; the
+publication addendum below records their exact run. The appended [enforcement snapshot](reviews/2026-10-12_enforcement_verification.md#final-policy-update-october-12-2026)
 records 13 required quality checks and the active CodeQL ruleset without claiming
 zero alerts or independent review. Main builds refuse cloud mutation unless the
 empty-by-default `_APPROVED_COMMIT` explicitly matches the exact source commit.
 No actual key rotation or production rollout was performed; final tags/assets
 must follow their own reviewed-revision validation.
+
+## Verified publication addendum, October 12, 2026
+
+[PR15](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15) merged as
+`402c27f` at `2026-10-12T21:37:07Z`. Final head
+`fc4add0571187bbca3ddb2008e7339f238275bc3` passed all 13 quality checks in
+[run 38309676048](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38309676048) and all four CodeQL analyses in
+[run 38309671632](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38309671632), including Swift. Postgres: 428 passed,
+one SQLite-specific skip, 93.41 percent coverage. SQLite: 425 passed, four
+Postgres-only skips, 92.13 percent coverage. The final container inventory has
+70 components and zero vulnerabilities reported by Trivy; its runtime smoke
+passed. This supersedes the earlier candidate's lower-severity inventory and
+pending-analysis state without erasing that dated evidence.
+
+The [v0.3.0 developer prerelease](https://github.com/Alternative-Spaces-Inc/HCommAgent/releases/tag/v0.3.0) is published at that head with
+14 checksum-verified assets. Its Mac artifact is arm64, locally signed and not
+notarized. Post-merge verification found zero open CodeQL, secret-scanning and
+Dependabot alerts at that time. Cloud Build
+`85da85c3-7cd8-49c4-9152-aa35e216c060` stopped at its first exact-commit guard;
+all later steps remained `QUEUED`, with no rollout by that build. The approved
+owner manual validation remains accepted. Production prerequisites, the owner's
+factual contribution statement and a confidential conduct contact remain
+separate responsibilities.
+
+[PR17](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/17) only adjusts
+lock filenames/references and dated evidence. Follow its [checks](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/17/checks)
+and [dependency update runs](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/workflows/dependabot/dependabot-updates)
+for maintenance validation and hosted updater results; the frozen v0.3.0 release
+is unchanged.

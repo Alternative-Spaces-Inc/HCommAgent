@@ -11,10 +11,10 @@ WORKDIR /app
 
 # Runtime dependencies only. Require hash-approved musllinux/pure wheels;
 # refuse an unexpected source build or added compiler/toolchain dependency.
-COPY requirements.lock .
+COPY requirements.lock.txt .
 # Explicit Alpine patch; keep the version and official source in the pin record.
 RUN apk add --upgrade --no-cache zlib=1.3.2-r1 \
-    && pip install --require-hashes --only-binary=:all: -r requirements.lock \
+    && pip install --require-hashes --only-binary=:all: -r requirements.lock.txt \
     && python -m pip uninstall --yes pip setuptools wheel \
     && python -c 'import shutil, sysconfig; from pathlib import Path; shutil.rmtree(Path(sysconfig.get_path("stdlib")) / "ensurepip")'
 # Installation tooling and its bundled installer are absent from the runtime.
