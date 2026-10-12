@@ -66,7 +66,12 @@ Vulnerability reports: see [SECURITY.md](SECURITY.md).
 
 ## Deployment
 
-Cloud Build runs `cloudbuild.yaml` on every merge to main: `guard` (gates), `pytest`, `smoke-local`, `pack-extension`, `build`, `push`, `migrate` (an Alembic job that then asserts the database is at head with every model table present), `deploy` (Cloud Run, new revision at 100 percent), `check-config` (no local only switch on the live service), `smoke-live` (end to end against the new revision: mint a key, post an ask, answer with a test device, check audit and webhook, revoke the key). The first-time setup is in [docs/runbooks/HCA_FIRST_DEPLOY.md](docs/runbooks/HCA_FIRST_DEPLOY.md). Project ids, hostnames and secrets are runbook and Secret Manager values; none live in this repository.
+Cloud Build runs `cloudbuild.yaml` on every merge to main: `guard` (gates), `pytest`, `smoke-local`, `pack-extension`, `build`,
+`push`, `migrate` (Cloud Run job, `alembic upgrade head` plus a head assertion), `deploy` (a candidate revision with no traffic,
+tagged `candidate`), `check-config` (the candidate carries every required secret and setting and no local only switch, fails
+closed), `smoke-candidate` (the agent path on the candidate's tag URL), `promote` (100 percent of traffic to the candidate) and
+`smoke-live` (the same path on the production URL). A failure before `promote` leaves production on the previous revision.
+Rollback: [docs/runbooks/HCA_DEPLOY_ROLLBACK.md](docs/runbooks/HCA_DEPLOY_ROLLBACK.md). The first-time setup is in [docs/runbooks/HCA_FIRST_DEPLOY.md](docs/runbooks/HCA_FIRST_DEPLOY.md). Project ids, hostnames and secrets are runbook and Secret Manager values; none live in this repository.
 
 ## Quality gates (CI, every PR)
 
