@@ -12,7 +12,7 @@ HCA is one FastAPI service in front of Postgres. Agents talk to it with API keys
 ```mermaid
 flowchart LR
     Agent[AI agent] -- POST /v1/requests, API key --> API[HCA API, FastAPI]
-    API -- webhook, retries --> Agent
+    API -- signed webhook, durable outbox --> Agent
     API --- PG[(Postgres)]
     API -- SSE /v1/inbox/stream and GET /v1/inbox --> Ext[Chrome extension]
     API -- SSE and poll --> Mac[macOS HCA Notifier]
@@ -43,7 +43,7 @@ sequenceDiagram
     S->>D: insert audit row (device, surface, path, value)
     S-->>M: event request.answered (card dropped)
     S-->>C: event request.answered
-    S->>A: webhook request.answered, up to 3 attempts, each recorded
+    S->>A: signed webhook request.answered from the outbox, up to 7 attempts over an hour, each recorded
     A->>S: GET /v1/requests/{id} or GET /v1/audit
 ```
 
@@ -58,7 +58,8 @@ sequenceDiagram
 | `api/app/routing.py` | Surface ladder: eligible devices, rank, visibility windows, escalation timers |
 | `api/app/events.py` | In-process event bus; event types `request.created`, `request.escalated`, `request.answered`, `request.cancelled`, `request.expired`; `visible_to` device lists |
 | `api/app/expiry.py` | Deadline sweep: auto deny, expire or hold per `expiry_policy`; idempotency table cleanup |
-| `api/app/webhooks.py` | Delivery to the agent's callback with retries and one `webhook_attempts` row per attempt |
+| `api/app/webhooks.py` | Durable outbox: `webhook_deliveries` rows worked by `scheduled_jobs` (kind webhook), signed with HMAC-SHA256 under the destination secret, sent to a pinned checked address, retried 1 s to 1 h, dead after the 7th failure; one `webhook_attempts` row per attempt |
+| `api/app/webhook_destinations.py`, `api/app/ssrf.py`, `api/app/webhook_crypto.py` | Destination registry (register, rotate, revoke under the caller's key), the SSRF rules applied at registration and send, secrets encrypted at rest under a key derived from the api key pepper |
 | `api/app/idempotency.py` | `Idempotency-Key` replay store, 24 hour TTL by default |
 | `api/app/auth.py` | `require_agent_key`, `require_admin_bearer`, `require_device`, `require_linked_device` |
 | `api/app/devicesig.py` | Device signature contract: canonical string, P-256 verification, timestamp freshness, device id derivation |
@@ -84,7 +85,9 @@ sequenceDiagram
 | `api_keys` | Caller, tenant, prefix, secret hash, revoked_at; one live key per caller |
 | `audit_rows` | The answer record: ask, device, surface, path, value, answered_at |
 | `idempotency_keys` | Tenant, scope, route, key, body hash, stored response, expiry |
-| `webhook_attempts` | One row per HTTP attempt: ask, event, url, attempt number, status or error, ok flag |
+| `webhook_destinations` | A caller's registered webhook URL: pinned addresses, encrypted secret and previous secret, rotation overlap, revoked_at |
+| `webhook_deliveries` | The outbox: one row per outcome owed to a destination (state queued, delivered, dead; attempts; next_run_at); the id is the receiver's dedupe key |
+| `webhook_attempts` | One row per HTTP attempt: ask, delivery, event, url, attempt number, status or error, ok flag |
 | `devices` | Device id (derived from the public key), label, surface, public key PEM, priority, Google link, last seen, revoked_at, tenant |
 
 Every tenant-owned table carries `tenant_id`; queries take the tenant from the authenticated key or device, never from the request body.
@@ -110,8 +113,8 @@ From `routing.py`: devices eligible for an ask are the tenant's non-revoked, Goo
 ## Operations
 
 - **Pipeline** (`cloudbuild.yaml`): guard, pytest, smoke-local, pack-extension, build, push, migrate, deploy, smoke-live. The migrate step runs `alembic upgrade head` as a Cloud Run job and then `scripts/check_migrated.py`, which fails the build unless the database reports the expected head and every model table exists. A green step status is never read as proof; the job's own log and the live revision are.
-- **Smoke-live** (`scripts/`): mints a key, posts an ask, answers it with a test device, reads audit and webhook, revokes the key.
-- **Configuration**: all by environment variables and Secret Manager (database URL, admin bearer, sweep bearer, api key pepper HCA_API_KEY_PEPPER, Google client ids, owner allowlist fallback, webhook retry settings, idempotency TTL, connection pool bounds HCA_DB_POOL_SIZE 3, HCA_DB_MAX_OVERFLOW 3, HCA_DB_POOL_TIMEOUT 10, HCA_DB_POOL_RECYCLE 300, sized for a 25 slot database). No project id or hostname is committed.
+- **Smoke-live** (`scripts/`): mints a key, posts an ask, answers it with a test device, registers a webhook destination, reads audit, verifies the signed webhook delivery, revokes the destination and the key.
+- **Configuration**: all by environment variables and Secret Manager (database URL, admin bearer, sweep bearer, api key pepper HCA_API_KEY_PEPPER, Google client ids, owner allowlist fallback, webhook retry schedule WEBHOOK_RETRY_SCHEDULE, idempotency TTL, connection pool bounds HCA_DB_POOL_SIZE 3, HCA_DB_MAX_OVERFLOW 3, HCA_DB_POOL_TIMEOUT 10, HCA_DB_POOL_RECYCLE 300, sized for a 25 slot database). No project id or hostname is committed.
 - **Records**: every deploy and every proof has a dated file under `docs/deploys/`; every design decision and the alternatives declined under `docs/decisions/`.
 
 ## Roadmap

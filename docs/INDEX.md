@@ -43,5 +43,10 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [docs/plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md](plans/HCA_P19_PRODUCTION_HARDENING_PROGRAM_v1.md): Verified gap inventory and the P19 to P27 hardening program (agentic retail control plane)
 - [docs/plans/HCA_P20_DURABLE_DELIVERY_v1.md](plans/HCA_P20_DURABLE_DELIVERY_v1.md): P20 plan v1: durable delivery
 - docs/ARCHITECTURE.md: components, data model, request state machine, surface routing, diagrams (2026-10-10)
+- docs/webhooks.md: webhook destination registration, delivery headers, signature verification snippets, retry and dead state (2026-10-11)
 - docs/reviews/2026-10-10_public_readiness_review.md: ten ranked gaps with evidence, the readiness baseline
 - docs/deploys/2026-10-10_public_readiness_block.md: PR 78 and 80 to 87 plus Dependabot merged, gaps closed and still open
+
+## Repository move (2026-10-11)
+
+The project moved from the private repository human-collections-agent to Alternative-Spaces-Inc/HCommAgent on 2026-10-11 (owner selection, 18:4x PT). Pull request numbers cited in records dated on or before 2026-10-11 (PR 1 to PR 112) refer to the former repository; numbering in HCommAgent restarts at 1. Commit shas are unchanged and resolve in both.

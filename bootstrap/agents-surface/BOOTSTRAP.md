@@ -9,7 +9,7 @@ The Human Collections Agent (HCA) turns agent questions into UI selections for t
 3. `api/openapi.yaml` - canonical OpenAPI specification for the HCA collection API.
 
 ## Recovery Rule
-HCA identity and memory live in this repository (Alternative-Spaces-Inc/human-collections-agent). On container or sandbox reset, state is recovered by executing `bootstrap/sandbox-bootstrap.sh`.
+HCA identity and memory live in this repository (Alternative-Spaces-Inc/HCommAgent). On container or sandbox reset, state is recovered by executing `bootstrap/sandbox-bootstrap.sh`.
 
 ## Seat Constraints
 1. PR path only: write changes exclusively to a topic branch and open a PR. Never push to main, never merge PRs.

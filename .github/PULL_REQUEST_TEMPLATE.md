@@ -1,6 +1,6 @@
 ## Summary
 
-Briefly describe the changes in this pull request for human-collections-agent, a human control plane for agentic retail, marketing, merchandising and creative operations.
+Briefly describe the changes in this pull request for HCommAgent, a human control plane for agentic retail, marketing, merchandising and creative operations.
 
 ## Checklist
 

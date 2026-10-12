@@ -1,6 +1,6 @@
 # Security Policy
 
-Security policy for human-collections-agent, a human control plane for agentic retail, marketing, merchandising and creative operations.
+Security policy for HCommAgent, a human control plane for agentic retail, marketing, merchandising and creative operations.
 
 ## Supported Versions
 
@@ -16,7 +16,7 @@ Only the `main` branch receives security updates. Previous releases or feature b
 Do not report security vulnerabilities through public GitHub issues.
 
 Please report vulnerabilities via GitHub Private Vulnerability Reporting using the form at:
-https://github.com/Alternative-Spaces-Inc/human-collections-agent/security/advisories/new
+https://github.com/Alternative-Spaces-Inc/HCommAgent/security/advisories/new
 
 ### Response Targets
 
