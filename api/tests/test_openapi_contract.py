@@ -96,7 +96,7 @@ def test_error_and_scheduler_responses_match_contract(monkeypatch):
     denied = client.post("/v1/internal/expiry-sweep")
     assert denied.status_code == 401
     _validate(denied.json(), _response_schema("/v1/internal/expiry-sweep", "post", 401))
-    monkeypatch.setattr(app, "db_ping", lambda: False)
+    monkeypatch.setattr("app.main.db_ping", lambda: False)
     degraded = client.get("/health")
     assert degraded.status_code == 503
     _validate(degraded.json(), _response_schema("/health", "get", 503))
