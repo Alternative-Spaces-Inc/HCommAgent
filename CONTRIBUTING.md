@@ -20,7 +20,7 @@ and reports as separate checks.
 | API Tests (Postgres) | pytest suite against Postgres 16 after `alembic upgrade head` | `cd api && pytest -v` |
 | Extension Tests (Node 20) | Chrome extension unit tests | `cd extension && npm test` |
 | Python Lint (ruff) | errors and bug-prone patterns in `api`, `.github/gates`, `scripts` (profile in [ruff.toml](ruff.toml)) | `ruff check api .github/gates scripts` |
-| Python Dependency Audit (pip-audit) | no known vulnerability in the pinned `api/requirements.txt` | `cd api && pip-audit -r requirements.txt` |
+| Python Dependency Audit (pip-audit) | no known vulnerability in the pinned `api/requirements-dev.txt` (runtime plus test pins) | `cd api && pip-audit -r requirements-dev.txt` |
 
 Swift tests for the macOS app run on the owner's Mac, not in CI:
 `cd macos && swift test`.
@@ -44,7 +44,7 @@ fixes, then read what remains. The profile is deliberately narrow (E4, E7,
 E9, F, W, B006, B904) so it does not impose formatting; widen it only in a
 PR that fixes what the new rules find.
 
-pip-audit: bump the flagged pin in `api/requirements.txt` to the fix version
+pip-audit: bump the flagged pin in `api/requirements.txt` or `api/requirements-dev.txt` to the fix version
 pip-audit prints, run the pytest suite, and note the upgrade in the PR body.
 A vulnerability without a fix version is recorded in the PR body and ignored
 with `--ignore-vuln <id>` in the workflow, with the reason in a comment.
@@ -53,7 +53,7 @@ with `--ignore-vuln <id>` in the workflow, with the reason in a comment.
 
 API (SQLite is the default when `DATABASE_URL` is unset; CI uses Postgres):
 
-    cd api && pip install -r requirements.txt && alembic upgrade head && pytest -q
+    cd api && pip install -r requirements-dev.txt && alembic upgrade head && pytest -q
 
 Extension:
 
