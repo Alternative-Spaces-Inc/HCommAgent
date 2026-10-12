@@ -11,10 +11,10 @@ from sqlalchemy.exc import IntegrityError
 from . import models
 from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, CancelRequestBody
-from .events import publish
+from . import events
 from . import webhooks
 from . import webhook_destinations
-from .auth import require_agent_key, require_linked_device, google_link_required
+from .auth import require_agent_key, require_linked_device, google_link_required, require_current_device
 from . import routing, jobs
 from . import controls
 from . import idempotency
@@ -70,6 +70,8 @@ def _own_ask(db: Session, request_id: str, key: models.ApiKey, lock: bool = Fals
     return ask
 
 
+
+
 def _ask_to_collection_request(ask: models.Ask) -> dict:
     return {
         "caller": ask.caller,
@@ -119,7 +121,7 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
         raise HTTPException(status_code=403, detail="caller does not match the api key")
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
-    replayed = idempotency.replay(db, key.tenant_id, key.caller, "create", idem_key, payload)
+    replayed = idempotency.reserve(db, key.tenant_id, key.caller, "create", idem_key, payload, "/v1/requests")
     if replayed is not None:
         return replayed
     try:
@@ -176,11 +178,13 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
                       for r in range(1, max(routing.rank_count(eligible), 1))]
     jobs.schedule_for_ask(db, ask, escalation_due, now=now)
 
-    db.commit()
+    db.flush()  # options/deliveries must be present in the event payload
     receipt = {"request_id": ask.id, "state": ask.state}
-    publish("request.created", _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": visible},
-            tenant_id=ask.tenant_id, device_ids=visible)
-    idempotency.store(db, key.tenant_id, key.caller, "create", idem_key, payload, 201, receipt)
+    events.enqueue(db, "request.created", _ask_to_collection_request(ask) | {"request_id": ask.id, "visible_to": visible, "expires_at": ask.expires_at},
+                   tenant_id=ask.tenant_id, device_ids=visible)
+    idempotency.store(db, key.tenant_id, key.caller, "create", idem_key, payload, 201, receipt, "/v1/requests")
+    db.commit()
+    events.wake_all()
     return receipt
 
 
@@ -207,16 +211,26 @@ def get_request(request_id: str, db: Session = Depends(get_db), key: models.ApiK
 def answer_request(request_id: str, body: AnswerSubmission, request: Request, db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
-    replayed = idempotency.replay(db, device.tenant_id, device.id, "answer", idem_key, payload)
+    replayed = idempotency.reserve(db, device.tenant_id, device.id, "answer", idem_key, payload, f"/v1/requests/{request_id}/answer")
     if replayed is not None:
         return replayed
 
     ask = _locked_ask(db, request_id)
+    device = require_current_device(db, device)
     # Another tenant's ask is indistinguishable from a missing one.
     if ask is None or ask.tenant_id != device.tenant_id:
         raise HTTPException(status_code=404, detail="request not found")
 
     if ask.state in TERMINAL_STATES:
+        raise _conflict(ask)
+
+    now = datetime.now(timezone.utc)
+    if ask.expiry_policy != "hold" and ask.expires_at is not None and _utc(ask.expires_at) <= now:
+        # Enforce policy in the locked answer transaction even during a
+        # worker outage. Expiry commits its event/outbox with the decision.
+        from .expiry import expire_ask
+        idempotency.discard(db, device.tenant_id, device.id, "answer", idem_key)
+        expire_ask(db, ask.id, now)
         raise _conflict(ask)
 
     # The submitted control must be the ask's control: a radio answer to an
@@ -235,15 +249,20 @@ def answer_request(request_id: str, body: AnswerSubmission, request: Request, db
         tenant_id=ask.tenant_id,
         control=body.control,
         value=value,
-        answered_by=body.answered_by or device.label,
-        answered_role=body.answered_role,
+        answered_by=device.google_email or device.google_sub or device.label,
+        answered_role="owner" if device.google_sub else "device",
         answered_at=now,
-        surface=body.surface,
+        surface=device.surface,
         device=device.id,
         path_taken=body.path_taken,
         duration_ms=body.duration_ms,
         voice_used=body.voice_used,
-        passthrough=body.passthrough,
+        passthrough={
+            "verified_identity": {"subject": device.google_sub, "email": device.google_email,
+                                  "device_id": device.id},
+            "client_metadata": {"answered_by": body.answered_by, "answered_role": body.answered_role,
+                                "surface": body.surface, "passthrough": body.passthrough},
+        },
     )
     db.add(row)
     ask.state = "answered"
@@ -251,6 +270,9 @@ def answer_request(request_id: str, body: AnswerSubmission, request: Request, db
         db.flush()  # the audit_rows INSERT runs here; a race loser fails on its unique ask_id
         record = _audit_to_answer_record(row)
         webhooks.enqueue(db, ask, "request.answered", ask.state, record, now)
+        events.enqueue(db, "request.answered", record, tenant_id=ask.tenant_id)
+        idempotency.store(db, ask.tenant_id, device.id, "answer", idem_key, payload, 201, record,
+                          f"/v1/requests/{request_id}/answer")
         db.commit()
     except IntegrityError:
         # Two answers for the same ask raced past the state check above
@@ -263,8 +285,7 @@ def answer_request(request_id: str, body: AnswerSubmission, request: Request, db
         raise _conflict(current) from None
 
     record = _audit_to_answer_record(row)
-    publish("request.answered", record, tenant_id=ask.tenant_id)
-    idempotency.store(db, ask.tenant_id, device.id, "answer", idem_key, payload, 201, record)
+    events.wake_all()
     return record
 
 
@@ -280,7 +301,7 @@ def _outcome_of(value) -> Optional[str]:
 def cancel_request(request_id: str, body: CancelRequestBody, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
-    replayed = idempotency.replay(db, key.tenant_id, key.caller, "cancel", idem_key, payload)
+    replayed = idempotency.reserve(db, key.tenant_id, key.caller, "cancel", idem_key, payload, f"/v1/requests/{request_id}/cancel")
     if replayed is not None:
         return replayed
 
@@ -295,8 +316,8 @@ def cancel_request(request_id: str, body: CancelRequestBody, request: Request, d
         tenant_id=ask.tenant_id,
         control=ask.control,
         value={"decision": "cancel", "reason": body.reason},
-        answered_by=None,
-        answered_role=None,
+        answered_by=key.caller,
+        answered_role="agent",
         answered_at=now,
         surface="web",
         device=None,
@@ -311,15 +332,16 @@ def cancel_request(request_id: str, body: CancelRequestBody, request: Request, d
         db.flush()  # the audit_rows INSERT runs here; a race loser fails on its unique ask_id
         record = _audit_to_answer_record(row)
         webhooks.enqueue(db, ask, "request.cancelled", ask.state, record, now)
+        events.enqueue(db, "request.cancelled", record, tenant_id=ask.tenant_id)
+        receipt = {"request_id": ask.id, "state": ask.state}
+        idempotency.store(db, key.tenant_id, key.caller, "cancel", idem_key, payload, 200, receipt,
+                          f"/v1/requests/{request_id}/cancel")
         db.commit()
     except IntegrityError:
         db.rollback()
         raise _conflict(db.get(models.Ask, request_id)) from None
 
-    record = _audit_to_answer_record(row)
-    publish("request.cancelled", record, tenant_id=ask.tenant_id)
-    receipt = {"request_id": ask.id, "state": ask.state}
-    idempotency.store(db, key.tenant_id, key.caller, "cancel", idem_key, payload, 200, receipt)
+    events.wake_all()
     return receipt
 
 

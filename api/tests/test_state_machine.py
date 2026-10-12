@@ -19,15 +19,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models
 from app.expiry import run_expiry_sweep
 from authhelper import agent_auth
 from deviceauth import human_post, ensure_registered
 from overdue import backdate
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 CALLER = "sm-agent"

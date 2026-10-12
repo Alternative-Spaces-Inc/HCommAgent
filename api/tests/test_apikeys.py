@@ -8,13 +8,11 @@ os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_test_apikeys.db")
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app.apikeys import verify_api_key
 from sqlalchemy import select
 from authhelper import ADMIN_AUTH
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 

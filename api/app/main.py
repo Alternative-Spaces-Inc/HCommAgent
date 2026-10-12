@@ -28,6 +28,8 @@ app.include_router(webhooks_router)
 
 @app.on_event("startup")
 async def _ensure_default_tenant():
+    from .config import validate_environment
+    validate_environment()
     from .db import SessionLocal
     from . import models
     with SessionLocal() as db:

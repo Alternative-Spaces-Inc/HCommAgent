@@ -12,13 +12,11 @@ from overdue import backdate
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app.expiry import run_expiry_sweep
 from authhelper import agent_auth
 from deviceauth import human_get, human_post
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
@@ -147,9 +145,11 @@ def test_no_deadline_never_swept():
 
 
 def test_terminal_states_are_never_reswept():
-    past = datetime.now(timezone.utc) - timedelta(hours=1)
-    request_id = _create("agent-answered", past)
-    human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
+    future = datetime.now(timezone.utc) + timedelta(hours=1)
+    request_id = _create("agent-answered", future)
+    answered = human_post(client, f"/v1/requests/{request_id}/answer", json={"control": "radio", "value": "a", "surface": "browser_overlay"})
+    assert answered.status_code == 201
+    backdate(request_id)
 
     db = SessionLocal()
     try:

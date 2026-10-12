@@ -18,10 +18,9 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from app.db import Base, engine, SessionLocal
+from app.db import engine, SessionLocal
 from app import models, events, nonces, devicesig
 
-Base.metadata.create_all(bind=engine)
 
 POSTGRES = engine.dialect.name == "postgresql"
 postgres_only = pytest.mark.skipif(not POSTGRES, reason="needs Postgres LISTEN/NOTIFY")
@@ -191,7 +190,7 @@ def test_nonce_is_refused_the_second_time_even_after_the_in_memory_guard_forgets
 
 def test_nonce_prune_removes_only_rows_older_than_the_window():
     dev = "dev-prune-" + uuid.uuid4().hex[:8]
-    old = datetime.now(timezone.utc) - timedelta(seconds=devicesig.MAX_SKEW_SECONDS + 60)
+    old = datetime.now(timezone.utc) - timedelta(seconds=devicesig.NONCE_RETENTION_SECONDS + 60)
     assert nonces.check_and_record(dev, "old", now=old)
     assert nonces.check_and_record(dev, "fresh")
     removed = nonces.prune()

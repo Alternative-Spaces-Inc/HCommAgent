@@ -116,19 +116,29 @@ class _Hook(BaseHTTPRequestHandler):
         pass
 
 
-def verify_signature(secret: str, header: str, body: bytes, tolerance: int = 300) -> bool:
+def verify_signature(secret: str, header: str, body: bytes, delivery_id: str, tolerance: int = 300) -> bool:
     """Receiver side check of X-HCA-Signature "t=<ts>,v1=<hex>[,v1=<hex>]":
     recompute HMAC-SHA256(secret, "<ts>.<body>") and accept when any v1
     matches and ts is within tolerance of now."""
+    try:
+        payload = json.loads(body)
+    except (ValueError, UnicodeDecodeError):
+        return False
+    if not delivery_id or not isinstance(payload, dict) or payload.get("delivery_id") != delivery_id:
+        return False
     ts, sigs = None, []
     for item in header.split(","):
         k, _, v = item.strip().partition("=")
         if k == "t":
+            if ts is not None:
+                return False
             try:
                 ts = int(v)
             except ValueError:
                 return False
         elif k == "v1":
+            if len(v) != 64 or any(c not in "0123456789abcdef" for c in v):
+                return False
             sigs.append(v)
     if ts is None or not sigs or abs(int(time.time()) - ts) > tolerance:
         return False
@@ -242,7 +252,7 @@ def main():
     # registration; this is the receiver check docs/webhooks.md documents.
     sig_ok = False
     if got is not None:
-        sig_ok = verify_signature(hook_secret, got["headers"].get("X-HCA-Signature", ""), got["raw"])
+        sig_ok = verify_signature(hook_secret, got["headers"].get("X-HCA-Signature", ""), got["raw"], got["headers"].get("X-HCA-Delivery-Id", ""))
     check("webhook signature verifies", sig_ok and bool(got and got["headers"].get("X-HCA-Delivery-Id", "").startswith("whdl_")),
           "" if sig_ok else f"header {got['headers'].get('X-HCA-Signature') if got else None}")
 

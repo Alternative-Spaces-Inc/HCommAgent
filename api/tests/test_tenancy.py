@@ -24,7 +24,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models
 from app.apikeys import issue_api_key
 from app.devicesig import canonical_string, device_id_for_public_key_pem
@@ -32,8 +32,6 @@ from app.inbox_api import inbox_event_source
 from authhelper import ADMIN_AUTH
 from deviceauth import raw_signature
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
@@ -102,7 +100,7 @@ class S:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _env():
+def _env(isolated_module_database):
     S.ALPHA = _tenant("alpha")
     S.BETA = _tenant("beta")
     S.KEY_A = _key(S.ALPHA, "alpha-agent")
@@ -273,5 +271,44 @@ def test_google_link_uses_the_tenant_allowlist(monkeypatch):
         assert r.status_code == 200 and r.json()["google_email"] == "lead@beta.example"
         # alpha's allowlist does not contain that account
         assert S.A1.post("/v1/devices/self/google-link", {"access_token": "t"}).status_code == 403
+    finally:
+        googleauth.set_fetcher(None)
+
+
+def test_removing_owner_refuses_reads_answers_priority_and_closes_stream(monkeypatch):
+    from app import googleauth
+    tenant = _tenant("removed-owner")
+    victim = Dev(tenant, "removed owner device")
+    key = _key(tenant, "removed-owner-agent")
+    email = "removed@example.test"
+    assert client.post(f"/v1/tenants/{tenant}/owners", json={"email": email}, headers=ADMIN_AUTH).status_code == 201
+    monkeypatch.setenv("HCA_REQUIRE_GOOGLE_LINK", "1")
+    monkeypatch.setenv("HCA_GOOGLE_CLIENT_IDS", "synthetic-owner-client")
+    googleauth.set_fetcher(lambda token: (200, {"aud": "synthetic-owner-client", "email": email,
+        "email_verified": True, "expires_in": 100, "sub": "verified-owner-subject"}))
+    try:
+        assert victim.post("/v1/devices/self/google-link", {"access_token": "synthetic"}).status_code == 200
+        assert victim.get("/v1/inbox").status_code == 200
+        rid = _create(key, "removed-owner-agent", "owner removal regression")
+        async def scenario():
+            source = inbox_event_source(victim.row(), keepalive_seconds=.02)
+            try:
+                assert await anext(source) == ": connected\n\n"
+                response = client.delete(f"/v1/tenants/{tenant}/owners/{email}", headers=ADMIN_AUTH)
+                assert response.status_code == 200 and response.json()["owner_emails"] == []
+                assert "stream.closed" in await asyncio.wait_for(anext(source), .5)
+            finally:
+                await source.aclose()
+        asyncio.run(scenario())
+        for path in ("/v1/inbox", "/v1/audit"):
+            assert victim.get(path).status_code == 403
+        assert victim.post(f"/v1/requests/{rid}/answer",
+            {"control": "approve_deny", "value": "approve", "surface": "browser_overlay"}).status_code == 403
+        body = b'{"priority":0}'
+        path = "/v1/devices/self"
+        assert client.patch(path, content=body, headers={**victim.headers("PATCH", path, body),
+            "Content-Type": "application/json"}).status_code == 403
+        with SessionLocal() as db:
+            assert db.get(models.Ask, rid).state == "queued"
     finally:
         googleauth.set_fetcher(None)

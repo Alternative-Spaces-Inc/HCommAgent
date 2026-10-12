@@ -8,8 +8,9 @@ short transaction; the composite primary key makes the second insert fail,
 whichever instance runs it. The in-memory guard stays in front as the cheap
 first check; this is the one that holds across instances and restarts.
 
-Rows older than the skew window are deleted opportunistically (every
-PRUNE_EVERY calls) so the table stays the size of one window of traffic.
+Rows older than the full nonce retention interval (601 seconds) are
+deleted opportunistically every PRUNE_EVERY calls. This covers both ends
+of the permitted signature timestamp skew.
 """
 
 import itertools
@@ -32,7 +33,7 @@ def _naive(dt: datetime) -> datetime:
 
 
 def check_and_record(device_id: str, nonce: str, now: Optional[datetime] = None, session_factory=None,
-                     ttl_seconds: int = devicesig.MAX_SKEW_SECONDS) -> bool:
+                     ttl_seconds: int = devicesig.NONCE_RETENTION_SECONDS) -> bool:
     """True when the pair is new (and now recorded); False on a replay."""
     from . import models
     if session_factory is None:
@@ -54,7 +55,7 @@ def check_and_record(device_id: str, nonce: str, now: Optional[datetime] = None,
         return True
 
 
-def prune(session_factory=None, ttl_seconds: int = devicesig.MAX_SKEW_SECONDS, now: Optional[datetime] = None) -> int:
+def prune(session_factory=None, ttl_seconds: int = devicesig.NONCE_RETENTION_SECONDS, now: Optional[datetime] = None) -> int:
     from . import models
     if session_factory is None:
         from .db import SessionLocal
