@@ -15,11 +15,14 @@
 #   3. push it to Artifact Registry
 #   4. run alembic upgrade head as a Cloud Run job against Cloud SQL
 #      (a job, not a startup hook, so migrations never race across instances)
-#   5. deploy the service revision
-#   6. check-config (HCA-P21a): no local only switch on the live service
-#   7. smoke-live (HCA-P9): agent path against the new revision with the
-#      real admin token (Secret Manager): healthz, key, ask, read, cancel.
+#   5. deploy the candidate revision with no traffic (tag "candidate")
+#   6. check-config: the candidate carries every required setting and no
+#      local only switch (fails closed)
+#   7. smoke-candidate (HCA-P9 script on the candidate tag URL): healthz,
+#      key, ask, read, cancel with the real admin token (Secret Manager).
 #      The gate stays on; a test device cannot hold a Google account.
+#   8. promote: 100 percent of traffic to the candidate
+#   9. smoke-live: the same script once more on the production URL
 #
 # Every value that names your project, region, instance or service account
 # arrives as a substitution; nothing here is specific to one account.
@@ -192,20 +195,57 @@ steps:
           --timeout=3600 \
           --allow-unauthenticated \
           --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
+          --no-traffic \
+          --tag=candidate \
           --quiet
 
   - id: check-config
-    # HCA-P21a Day 2: the deployed service must not carry local only switches
-    # (HCA_WEBHOOK_ALLOW_INSECURE would turn the webhook SSRF rules off).
+    # The candidate revision (tag "candidate", 0 percent traffic) must carry
+    # every required setting and no local only switch before it is smoked or
+    # promoted. scripts/check_config.py fails closed on a missing container,
+    # a missing secret or env entry, or HCA_WEBHOOK_ALLOW_INSECURE.
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
     args:
       - -c
       - |
         set -euo pipefail
-        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/check_config.py
+        REV="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/candidate_revision.py --name)"
+        echo "candidate revision: $$REV"
+        gcloud run revisions describe "$$REV" --region=${_REGION} --format=json | python3 scripts/check_config.py --expect-commit ${COMMIT_SHA}
+
+  - id: smoke-candidate
+    # Smoke the candidate on its tag URL while production traffic still goes
+    # to the previous revision. A failure here leaves production untouched.
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    secretEnv: [HCA_ADMIN_TOKEN]
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        URL="$$(gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/candidate_revision.py --url)"
+        echo "candidate url: $$URL"
+        python3 scripts/smoke_golden_path.py --base "$$URL"
+
+  - id: promote
+    # All checks passed on the candidate: move 100 percent of traffic to it.
+    # Rollback: docs/runbooks/HCA_DEPLOY_ROLLBACK.md (update-traffic back to
+    # the previous revision name printed below).
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        echo "serving before promotion:"
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.traffic[].revisionName,status.traffic[].percent)'
+        gcloud run services update-traffic ${_SERVICE} --region=${_REGION} --to-latest --quiet
+        echo "serving after promotion:"
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format='value(status.traffic[].revisionName,status.traffic[].percent)'
 
   - id: smoke-live
+    # Final proof on the production URL after promotion.
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: bash
     secretEnv: [HCA_ADMIN_TOKEN]

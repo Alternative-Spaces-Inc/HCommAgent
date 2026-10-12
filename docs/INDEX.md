@@ -37,6 +37,7 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - [docs/decisions/DECISIONS_20261012.md](decisions/DECISIONS_20261012.md): decision 9, P21b owner selections (scopes, rate limits, rotation)
 - [docs/plans/HCA_CLOUD_RUN_PLAN_v1.md](../docs/plans/HCA_CLOUD_RUN_PLAN_v1.md): Cloud Run hosting plan, reconciled with the charter and decisions
 - [docs/runbooks/HCA_FIRST_DEPLOY.md](../docs/runbooks/HCA_FIRST_DEPLOY.md): First Cloud Run deploy, one Terminal block per step, with `cloudbuild.yaml` at the repo root
+- [docs/runbooks/HCA_DEPLOY_ROLLBACK.md](../docs/runbooks/HCA_DEPLOY_ROLLBACK.md): How a build promotes a candidate revision (no traffic, config check, smoke, promote) and how to move traffic back to a known good revision
 - [docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md](../docs/research/UNIVERSAL_INTERFACE_PATTERNS_v1.md): Prior art on universal human-in-the-loop interfaces
 - [platform/about-you/HCA_ABOUT_YOU.md](../platform/about-you/HCA_ABOUT_YOU.md): About you paste text (cap 3,144 characters)
 - [platform/soul-renders/hca.md](../platform/soul-renders/hca.md): Soul render for the Base44 Personalization, Identity field
