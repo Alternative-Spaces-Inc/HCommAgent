@@ -208,6 +208,9 @@ class ScheduledJob(Base):
     result = Column(JSON, nullable=True)
     last_error = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False)
+    # HCA-P21a Day 2: the row a non ask job points at (kind webhook: the
+    # webhook_deliveries id). Null for escalate and expire.
+    ref_id = Column(String, nullable=True, index=True)
 
 
 class Nonce(Base):
@@ -241,6 +244,11 @@ class WebhookDestination(Base):
     previous_secret_hash = Column(String, nullable=True)
     previous_valid_until = Column(DateTime, nullable=True)
     pinned_addresses = Column(JSON, nullable=True)
+    # HCA-P21a Day 2 (decision 8): the secrets encrypted under a key derived
+    # from the api key pepper (app/webhook_crypto.py) so deliveries can be
+    # signed. Null on a destination registered on Day 1 (rotate to fix).
+    secret_enc = Column(String, nullable=True)
+    previous_secret_enc = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=False)
     rotated_at = Column(DateTime, nullable=True)
     revoked_at = Column(DateTime, nullable=True)
@@ -260,6 +268,30 @@ class WebhookDestinationEvent(Base):
     at = Column(DateTime, nullable=False)
 
 
+class WebhookDelivery(Base):
+    """HCA-P21a Day 2: the durable outbox. One row per outcome owed to a
+    registered destination (answer, cancel, expire), written in the same
+    transaction as the state change, worked by scheduled_jobs rows of kind
+    webhook (app/webhooks.py). state: queued, delivered, dead. The id is
+    the X-HCA-Delivery-Id a receiver deduplicates on; it is stable across
+    retries."""
+    __tablename__ = "webhook_deliveries"
+
+    id = Column(String, primary_key=True)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, index=True)
+    ask_id = Column(String, ForeignKey("asks.id"), nullable=False, index=True)
+    destination_id = Column(String, ForeignKey("webhook_destinations.id"), nullable=False, index=True)
+    event = Column(String, nullable=False)
+    payload = Column(JSON, nullable=False)
+    state = Column(String, nullable=False, default="queued", index=True)
+    attempts = Column(Integer, nullable=False, default=0, server_default="0")
+    next_run_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, nullable=False)
+    delivered_at = Column(DateTime, nullable=True)
+    dead_at = Column(DateTime, nullable=True)
+    last_error = Column(String, nullable=True)
+
+
 class WebhookAttempt(Base):
     """One HTTP attempt to deliver an outcome to the caller's deliver_to
     webhook (app/webhooks.py). attempt 0 with ok False records a skip
@@ -275,6 +307,9 @@ class WebhookAttempt(Base):
     ok = Column(Boolean, nullable=False, default=False)
     error = Column(String, nullable=True)
     attempted_at = Column(DateTime, nullable=False)
+    # HCA-P21a Day 2: the outbox row this attempt served (null for skips and
+    # rows from before the outbox).
+    delivery_id = Column(String, nullable=True, index=True)
 
 
 class Device(Base):

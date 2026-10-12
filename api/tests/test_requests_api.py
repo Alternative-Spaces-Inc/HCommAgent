@@ -88,18 +88,21 @@ def test_answer_race_loser_gets_409_not_500(monkeypatch):
     from sqlalchemy.orm import Session
     resp = client.post("/v1/requests", json=_sample_request(), headers=agent_auth("test-agent"))
     request_id = resp.json()["request_id"]
-    real_commit = Session.commit
+    real_flush = Session.flush
     calls = {"n": 0}
 
-    def racing_commit(self):
+    def racing_flush(self, *a, **k):
+        # The INSERT runs at flush (HCA-P21a Day 2 flushes before enqueueing
+        # the webhook delivery in the same transaction), so the loser's
+        # unique violation surfaces here.
         from app import models
         pending_audit = any(isinstance(o, models.AuditRow) for o in self.new)
         if pending_audit and calls["n"] == 0:
             calls["n"] += 1
             raise IntegrityError("INSERT INTO audit_rows", {}, Exception("duplicate key value violates unique constraint audit_rows_ask_id_key"))
-        return real_commit(self)
+        return real_flush(self, *a, **k)
 
-    monkeypatch.setattr(Session, "commit", racing_commit)
+    monkeypatch.setattr(Session, "flush", racing_flush)
     resp = human_post(client, f"/v1/requests/{request_id}/answer",
                       json={"control": "radio", "value": "blue", "surface": "browser_overlay"})
     assert resp.status_code == 409

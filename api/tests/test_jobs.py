@@ -154,10 +154,10 @@ def test_concurrent_workers_run_each_due_job_exactly_once(monkeypatch):
     lock = threading.Lock()
     real = jobs._run_one
 
-    def counting(job_id, kind, ask_id, session_factory, now):
+    def counting(job_id, kind, ask_id, session_factory, now, *rest):
         with lock:
             executed[job_id] += 1
-        return real(job_id, kind, ask_id, session_factory, now)
+        return real(job_id, kind, ask_id, session_factory, now, *rest)
 
     monkeypatch.setattr(jobs, "_run_one", counting)
     errors = []

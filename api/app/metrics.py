@@ -88,8 +88,16 @@ def collect(db) -> Dict[str, Any]:
         models.ScheduledJob.done_at.is_not(None), models.ScheduledJob.last_error.is_not(None),
         models.ScheduledJob.result.is_(None))).scalar()
 
+    wh_counts = dict(db.execute(select(models.WebhookDelivery.state, func.count(models.WebhookDelivery.id))
+                                .group_by(models.WebhookDelivery.state)).all())
+    oldest_queued = db.execute(select(func.min(models.WebhookDelivery.created_at))
+                               .where(models.WebhookDelivery.state == "queued")).scalar()
+
     return {
         "at": now.replace(tzinfo=timezone.utc).isoformat(),
+        "webhooks": {"queued": int(wh_counts.get("queued", 0)), "delivered": int(wh_counts.get("delivered", 0)),
+                     "dead": int(wh_counts.get("dead", 0)),
+                     "oldest_queued_age_seconds": (now - oldest_queued).total_seconds() if oldest_queued is not None else 0.0},
         "events": {"newest_id": newest_id, "rows": int(event_rows or 0),
                    "dispatchers": dispatchers, "dispatch_lag_events": max((d["lag_events"] for d in dispatchers), default=0),
                    "wakes": stats["wakes"], "polls": stats["polls"], "dispatched": stats["dispatched"]},
