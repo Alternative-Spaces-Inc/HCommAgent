@@ -28,6 +28,38 @@ See [Architecture](ARCHITECTURE.md), [Threat model](THREAT_MODEL.md), [Chrome](.
 
 The published PR9 source at `9213d9a6b0439c1997606daaacbf08d2013525ce` passed 315 Postgres tests without skips and 93.40 percent coverage, plus all nine required quality checks, 61 Node tests and 68 Swift tests. This is dated evidence from [run 38294143501](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38294143501), not a permanent count or the final combined release. Later source/lock/pipeline changes must link their own passing runs. Earlier Chromium and real HTTP checks and the owner confirmation remain identified in the remediation records.
 
+## Final-candidate checks, October 12, 2026
+
+[PR15](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15) source
+`9eeadbea6ebcc75c6338bcf9db77a3afd9a42d4f` passed all **13 quality checks** in
+[run 38306535527](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38306535527):
+
+- Postgres: 428 passed, one SQLite-specific skip, 93.41 percent coverage.
+- SQLite/real HTTP: 425 passed, four Postgres-only skips, 92.13 percent coverage.
+- Node: 61 tests plus actual Chromium flows. Swift: 68 tests, strict release
+  compilation and actual developer bundling with the default Bash compatibility fix.
+- Alpine container: non-root UID, read-only filesystem, isolated startup/HTTP and
+  graceful SIGTERM checks passed; shutdown measured 0.427 seconds in that isolated
+  CI run. This is not a production latency or service-level measurement.
+- The selected Trivy HIGH/CRITICAL scan reported zero findings at that threshold;
+  lower-severity information remains in the retained SBOM. This does not mean the
+  image has no findings of any severity. Scan, provenance and runtime evidence have
+  their documented export/digest boundaries.
+
+CodeQL Swift analysis is still in progress at this update; see [PR15 analyses](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15/checks).
+Do not interpret passing quality checks as completed security analysis or zero
+open alerts. Subsequent documentation/image/tool changes need their own exact-head
+validation before a final tag or artifact publication.
+
+Main at `a392399` now requires the 13 quality checks from GitHub Actions app 15368,
+with strict up-to-date checks. Administrator enforcement, force-push/deletion
+restrictions, conversation resolution and the documented zero-approval
+solo-maintainer exception are preserved. Active CodeQL ruleset `24952962` has no
+bypass actors and requires CodeQL with security alerts at high or higher and
+non-security alerts at error. It also blocks incomplete required analysis within
+GitHub's documented scope. [The appended enforcement snapshot](reviews/2026-10-12_enforcement_verification.md#final-policy-update-october-12-2026)
+records settings and limitations; this does not replace independent review.
+
 ## Source/release preparation
 
 [Local setup and demo](../README.md#run-the-demonstration), [case study](CASE_STUDY.md), [release instructions](RELEASES.md), privacy/security guidance and current architecture support a clean-clone review. Release artifacts require the exact source revision, compatible API/client versions and checksums. Candidate version metadata is not evidence that a tag, release asset or Web Store update has been published.
@@ -42,4 +74,4 @@ Production still requires verified current configuration, migration/runtime priv
 
 The synthetic demo uses a temporary local database and a simulated signer. It does not exercise production Google authorization. The owner-approved client validation is recorded above and need not be repeated merely because documentation changed. Public notarized Mac distribution, automatic updates, enterprise connectors and formal compliance programs are outside the declared developer scope.
 
-Read [Operations](OPERATIONS.md) and [deployment/rollback](runbooks/HCA_DEPLOY_ROLLBACK.md) before merging or promoting: main can trigger cloud work.
+Read [Operations](OPERATIONS.md) and [deployment/rollback](runbooks/HCA_DEPLOY_ROLLBACK.md) before merging or promoting. A main merge can start a build, but `_APPROVED_COMMIT` defaults empty and the first guard refuses cloud mutation unless it matches the exact tested full source commit. No production rollout or key rotation is established by these checks.
