@@ -13,7 +13,7 @@ Use Python 3.12 from the repository root:
 ```sh
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --require-hashes -r api/requirements-dev.lock
+python -m pip install --require-hashes -r api/requirements-dev.lock.txt
 python scripts/demo_workflow.py
 ```
 

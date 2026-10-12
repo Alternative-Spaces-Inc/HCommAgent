@@ -119,7 +119,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock.txt
         export DATABASE_URL=sqlite:////tmp/hca_cloudbuild.db
         alembic upgrade head
         pytest -q
@@ -142,7 +142,7 @@ steps:
       - |
         set -euo pipefail
         cd api
-        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock.txt
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
         echo $$! > /tmp/uvicorn.pid
