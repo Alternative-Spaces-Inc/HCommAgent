@@ -15,6 +15,15 @@ MAX_REPORTED = 50
 SNIFF_BYTES = 8192
 
 
+# Paths whose content is deliberately published test material (shared test
+# vectors with a throwaway key). Nothing here may hold a live credential.
+ALLOWED_PATH_PREFIXES = (
+    "api/tests/vectors/",
+    ".github/gates/client_data_denylist.txt",
+    ".github/gates/check_client_data.py",
+)
+
+
 def load_denylist():
     denylist_file = Path(__file__).parent / "client_data_denylist.txt"
     if not denylist_file.is_file():
@@ -55,13 +64,22 @@ def main():
         print("OK: client data denylist is empty.")
         sys.exit(0)
 
-    patterns = [(term, re.compile(re.escape(term), re.IGNORECASE)) for term in terms]
+    patterns = []
+    for term in terms:
+        if term.startswith("re:"):
+            # Regular expression line (see client_data_denylist.txt); case sensitive
+            # because secret shapes depend on their exact prefix.
+            patterns.append((term, re.compile(term[3:])))
+        else:
+            patterns.append((term, re.compile(re.escape(term), re.IGNORECASE)))
     errors = []
     warnings = []
 
     for rel_path in get_tracked_files():
         path = Path(rel_path)
         if not path.is_file():
+            continue
+        if any(rel_path.startswith(prefix) for prefix in ALLOWED_PATH_PREFIXES):
             continue
         try:
             if is_binary(path):

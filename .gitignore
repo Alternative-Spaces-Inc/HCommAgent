@@ -1,6 +1,36 @@
-api/.venv/
-api/__pycache__/
-api/**/__pycache__/
-api/*.db
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+**/.venv/
 .coverage
+.pytest_cache/
+*.egg-info/
+
+# Local databases and logs
+*.db
+*.sqlite3
 api/two_process_*.log
+
+# Local credentials and environment files (never commit)
+.env
+.env.*
+!.env.example
+*.pem
+*.p12
+*.key
+service-account*.json
+
+# Node
+node_modules/
+extension/*.zip
+
+# Swift
+macos/.build/
+macos/*.xcodeproj
+macos/swift-test.log
+
+# Editors and OS
+.DS_Store
+.idea/
+.vscode/

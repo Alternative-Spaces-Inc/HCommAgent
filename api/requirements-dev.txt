@@ -1,0 +1,6 @@
+# Development and CI dependencies: everything in requirements.txt plus the
+# test tooling. Install with: pip install -r requirements-dev.txt
+-r requirements.txt
+pytest==9.1.1
+pytest-timeout==2.4.0
+pytest-cov==7.0.0

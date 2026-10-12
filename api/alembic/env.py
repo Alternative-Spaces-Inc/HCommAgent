@@ -1,4 +1,5 @@
 import os
+import re
 import sys
 from logging.config import fileConfig
 
@@ -29,8 +30,22 @@ def run_migrations_offline():
         context.run_migrations()
 
 
-LOCK_TIMEOUT = os.environ.get("HCA_MIGRATE_LOCK_TIMEOUT", "60s")
-IDLE_TXN_GRACE = os.environ.get("HCA_MIGRATE_IDLE_TXN_GRACE", "30 seconds")
+def _setting(name: str, default: str, pattern: str) -> str:
+    """Read a migration tuning value from the environment and refuse anything
+    that is not a plain duration literal, so an environment string can never
+    reach SQL text unvalidated."""
+    value = os.environ.get(name, default)
+    if not re.fullmatch(pattern, value):
+        raise SystemExit(f"migrate: {name} must match {pattern!r}, refusing to run")
+    return value
+
+
+LOCK_TIMEOUT = _setting("HCA_MIGRATE_LOCK_TIMEOUT", "60s", r"[0-9]{1,6}(ms|s|min)")
+IDLE_TXN_GRACE = _setting("HCA_MIGRATE_IDLE_TXN_GRACE", "30 seconds", r"[0-9]{1,6} (seconds|minutes)")
+# Only backends opened by the API itself (app/db.py sets application_name) may
+# be terminated; an operator's psql session or another tool is never touched.
+# The empty name stays allowed until every running revision sets the name.
+TERMINATE_APPS = ("hca-api", "")
 
 
 def _is_postgres(connection) -> bool:
@@ -49,30 +64,33 @@ def _terminate_idle_in_transaction(connection) -> None:
     if os.environ.get("HCA_MIGRATE_TERMINATE_IDLE", "1") != "1":
         print("migrate: idle-in-transaction termination disabled")
         return
-    rows = connection.execute(text(f"""
-        SELECT pid, application_name, state, now() - state_change AS idle_for, left(query, 120) AS query
+    rows = connection.execute(text("""
+        SELECT pid, application_name, state, now() - state_change AS idle_for
         FROM pg_stat_activity
         WHERE datname = current_database() AND pid <> pg_backend_pid()
-          AND state = 'idle in transaction' AND state_change < now() - interval '{IDLE_TXN_GRACE}'
-    """)).fetchall()
+          AND state = 'idle in transaction'
+          AND state_change < now() - CAST(:grace AS interval)
+          AND coalesce(application_name, '') = ANY(:apps)
+    """), {"grace": IDLE_TXN_GRACE, "apps": list(TERMINATE_APPS)}).fetchall()
     if not rows:
-        print("migrate: no idle-in-transaction backends to clear")
+        print("migrate: no idle-in-transaction API backends to clear")
         return
     for r in rows:
-        print(f"migrate: terminating idle-in-transaction backend pid={r.pid} app={r.application_name!r} idle_for={r.idle_for} query={r.query!r}")
+        # Query text is not logged: it can carry row values.
+        print(f"migrate: terminating idle-in-transaction backend pid={r.pid} app={r.application_name!r} idle_for={r.idle_for}")
         connection.execute(text("SELECT pg_terminate_backend(:pid)"), {"pid": r.pid})
 
 
 def _print_blockers(connection) -> None:
     rows = connection.execute(text("""
-        SELECT pid, state, application_name, now() - xact_start AS txn_age, left(query, 120) AS query
+        SELECT pid, state, application_name, now() - xact_start AS txn_age
         FROM pg_stat_activity
         WHERE datname = current_database() AND pid <> pg_backend_pid() AND xact_start IS NOT NULL
         ORDER BY xact_start
     """)).fetchall()
     print(f"migrate: lock timeout after {LOCK_TIMEOUT}; {len(rows)} other backends in a transaction:")
     for r in rows:
-        print(f"  pid={r.pid} state={r.state!r} app={r.application_name!r} txn_age={r.txn_age} query={r.query!r}")
+        print(f"  pid={r.pid} state={r.state!r} app={r.application_name!r} txn_age={r.txn_age}")
 
 
 def run_migrations_online():
