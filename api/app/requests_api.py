@@ -3,9 +3,9 @@ from datetime import datetime, timedelta, timezone
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, update, func
 from sqlalchemy.exc import IntegrityError
 
 from . import models
@@ -28,6 +28,7 @@ TERMINAL_STATES = {"answered", "expired", "withdrawn", "cancelled"}
 # the past or further out than HCA_MAX_LIFETIME_SECONDS (default 30 days).
 DEFAULT_LIFETIME_SECONDS = int(os.environ.get("HCA_DEFAULT_LIFETIME_SECONDS", str(7 * 86400)))
 MAX_LIFETIME_SECONDS = int(os.environ.get("HCA_MAX_LIFETIME_SECONDS", str(30 * 86400)))
+MAX_ACTIVE_REQUESTS = max(1, int(os.environ.get("HCA_MAX_ACTIVE_REQUESTS", "1000")))
 
 
 def _utc(dt: Optional[datetime]) -> Optional[datetime]:
@@ -70,6 +71,16 @@ def _own_ask(db: Session, request_id: str, key: models.ApiKey, lock: bool = Fals
     return ask
 
 
+
+
+def _lock_tenant_for_quota(db: Session, tenant_id: str) -> None:
+    # NO KEY UPDATE serializes quota checks without blocking an event's
+    # tenant foreign-key KEY SHARE lock while it holds the event cursor lock.
+    if db.get_bind().dialect.name == "sqlite":
+        db.execute(update(models.Tenant).where(models.Tenant.id == tenant_id).values(name=models.Tenant.name))
+    else:
+        db.execute(select(models.Tenant.id).where(models.Tenant.id == tenant_id)
+                   .with_for_update(key_share=True)).scalar_one()
 
 
 def _ask_to_collection_request(ask: models.Ask) -> dict:
@@ -119,7 +130,9 @@ def _audit_to_answer_record(row: models.AuditRow) -> dict:
 def create_request(body: CollectionRequest, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     if body.caller != key.caller:
         raise HTTPException(status_code=403, detail="caller does not match the api key")
-    payload = body.model_dump(mode="json")
+    # Keep fingerprints of legacy naive datetime inputs stable while response
+    # models publish the database's UTC timestamps with an explicit zone.
+    payload = body.model_dump(mode="json", context={"preserve_datetime_input": True})
     idem_key = idempotency.key_from(request)
     replayed = idempotency.reserve(db, key.tenant_id, key.caller, "create", idem_key, payload, "/v1/requests")
     if replayed is not None:
@@ -139,6 +152,11 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
         deliver_to["destination_id"] = dest.id
     now = datetime.now(timezone.utc)
     expires_at = _expires_at(now, body.deadline_at)
+    _lock_tenant_for_quota(db, key.tenant_id)
+    active_count = db.execute(select(func.count(models.Ask.id)).where(
+        models.Ask.tenant_id == key.tenant_id, models.Ask.state.notin_(TERMINAL_STATES))).scalar()
+    if active_count >= MAX_ACTIVE_REQUESTS:
+        raise HTTPException(status_code=429, detail="tenant active request limit reached", headers={"Retry-After": "60"})
     ask = models.Ask(
         tenant_id=key.tenant_id,
         caller=body.caller,
@@ -348,8 +366,11 @@ def cancel_request(request_id: str, body: CancelRequestBody, request: Request, d
 audit_router = APIRouter(prefix="/v1/audit", tags=["audit"])
 
 
-@audit_router.get("", response_model=list[AnswerRecord])
+@audit_router.get("", response_model=list[AnswerRecord], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
 def query_audit(
+    response: Response,
+    limit: int = Query(default=200, ge=1, le=500),
+    after: str = Query(default="", max_length=100),
     agent: Optional[str] = Query(default=None, description="Filter by agent ID"),
     from_: Optional[datetime] = Query(default=None, alias="from", description="Filter by start timestamp"),
     to: Optional[datetime] = Query(default=None, description="Filter by end timestamp"),
@@ -361,7 +382,8 @@ def query_audit(
     # HCA-P19: the audit read is scoped to the authenticated device's tenant.
     stmt = (select(models.AuditRow, models.Ask)
             .join(models.Ask, models.AuditRow.ask_id == models.Ask.id)
-            .where(models.AuditRow.tenant_id == device.tenant_id))
+            .where(models.AuditRow.tenant_id == device.tenant_id, models.AuditRow.id > after)
+            .order_by(models.AuditRow.id).limit(limit + 1))
 
     if agent:
         stmt = stmt.where(models.Ask.caller == agent)
@@ -373,6 +395,9 @@ def query_audit(
         stmt = stmt.where(models.AuditRow.answered_at <= to)
 
     rows = db.execute(stmt).all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-HCA-Next-Cursor"] = rows[-1][0].id
 
     records = []
     for row, _ask in rows:

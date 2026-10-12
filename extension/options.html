@@ -1,5 +1,5 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
   <title>Human Collections Agent: Options</title>
@@ -24,7 +24,7 @@
   <button id="save">Save</button>
   <span id="saved" class="saved" hidden>Saved</span>
   <p class="note">
-    The Cloud Run service URL from the deploy runbook, no trailing slash.
+    The trusted HTTPS API origin, such as https://your-api-host.example, without a path, query or fragment.
     Save asks Chrome once for access to that origin (one Allow dialog); the
     grant is kept for this extension ID, so no manifest edit and no Site
     access toggle is needed.
@@ -34,7 +34,7 @@
   <h2>This device</h2>
   <p class="note">
     Every inbox read and every answer from this browser profile is signed
-    with a P-256 key generated here and kept in extension storage. The
+    with a non-extractable P-256 key generated here and kept in IndexedDB. The
     server accepts it only after the owner registers the public key below
     (POST /v1/devices with the admin token). Clearing extension storage
     makes a new key, which must be registered again.
@@ -46,6 +46,11 @@
   <button id="copy-pem">Copy public key</button>
   <span id="copied" class="saved" hidden>Copied</span>
 
+  <p><button id="rotate-key">Rotate device key</button></p>
+  <p class="note">Rotation deletes the local private key and saved responses. Ask the administrator to revoke the old device registration on the server, then register this new public key and sign in again.</p>
+  <h2>Notification privacy</h2>
+  <label><input id="notification-previews" type="checkbox" style="width:auto" /> Show decision titles and descriptions in system notifications</label>
+  <p class="note">Notifications hide decision content by default. Enabling previews may expose it on your lock screen.</p>
   <h2>Google account</h2>
   <p class="note">
     Sign in once to bind this device to your Google account. Answers from

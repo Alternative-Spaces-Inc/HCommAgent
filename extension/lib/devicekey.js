@@ -55,31 +55,75 @@ export function randomNonce(cryptoObj = globalThis.crypto) {
   return b64url(bytes);
 }
 
-/**
- * Load the device key from storage or generate and store a new one.
- * storage is an object with async get(key) -> value and set(key, value).
- * Returns { privateKey, publicKey, deviceId, publicKeyPem }.
- */
-export async function loadOrCreateDeviceKey(storage, subtle = globalThis.crypto.subtle) {
-  let stored = await storage.get(STORAGE_KEY);
-  if (!stored || !stored.privateJwk || !stored.publicJwk) {
-    const pair = await subtle.generateKey(P256, true, ["sign", "verify"]);
-    stored = {
-      privateJwk: await subtle.exportKey("jwk", pair.privateKey),
-      publicJwk: await subtle.exportKey("jwk", pair.publicKey),
-      createdAt: new Date().toISOString(),
-    };
-    await storage.set(STORAGE_KEY, stored);
+// One in-flight initialization per adapter. Persistent adapters additionally
+// implement atomic insert, which protects independent extension contexts.
+const initializing = new WeakMap();
+export function loadOrCreateDeviceKey(storage, subtle = globalThis.crypto.subtle) {
+  if (initializing.has(storage)) return initializing.get(storage);
+  const pending = (async () => {
+    let stored = await storage.get(STORAGE_KEY);
+    if (!stored?.privateKey || !stored?.publicKey) {
+      const legacy = stored?.privateJwk ? stored : await storage.legacy?.();
+      let pair;
+      if (legacy?.privateJwk && legacy?.publicJwk) {
+        pair = {
+          privateKey: await subtle.importKey("jwk", legacy.privateJwk, P256, false, ["sign"]),
+          publicKey: await subtle.importKey("jwk", legacy.publicJwk, P256, true, ["verify"]),
+        };
+      } else {
+        pair = await subtle.generateKey(P256, false, ["sign", "verify"]);
+      }
+      const candidate = { ...pair, createdAt: legacy?.createdAt || new Date().toISOString() };
+      if (storage.insertIfAbsent) stored = await storage.insertIfAbsent(STORAGE_KEY, candidate);
+      else { await storage.set(STORAGE_KEY, candidate); stored = candidate; }
+    }
+    if (stored.privateKey.extractable) throw new Error("Stored device private key must be non-extractable");
+    const spki = await subtle.exportKey("spki", stored.publicKey);
+    // Delete the old plaintext only after the durable key is readable.
+    await storage.clearLegacy?.();
+    return { ...stored, deviceId: await deviceIdFromSpki(spki, subtle), publicKeyPem: spkiToPem(spki) };
+  })();
+  initializing.set(storage, pending);
+  pending.catch(() => initializing.delete(storage));
+  return pending;
+}
+
+// CryptoKeys are structured-cloned by IndexedDB; chrome.storage cannot
+// preserve them. A single readwrite transaction selects the winning key.
+export function indexedDeviceStorage(indexedDBObj = globalThis.indexedDB, chromeObj = globalThis.chrome) {
+  let opening;
+  function db() {
+    if (!opening) opening = new Promise((resolve, reject) => {
+      const req = indexedDBObj.open("hca-device-keys", 1);
+      req.onupgradeneeded = () => req.result.createObjectStore("keys");
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    });
+    return opening;
   }
-  const privateKey = await subtle.importKey("jwk", stored.privateJwk, P256, false, ["sign"]);
-  const publicKey = await subtle.importKey("jwk", stored.publicJwk, P256, true, ["verify"]);
-  const spki = await subtle.exportKey("spki", publicKey);
+  async function transaction(mode, operation) {
+    const handle = await db();
+    return new Promise((resolve, reject) => {
+      const tx = handle.transaction("keys", mode);
+      let value;
+      operation(tx.objectStore("keys"), (v) => { value = v; });
+      tx.oncomplete = () => resolve(value);
+      tx.onerror = tx.onabort = () => reject(tx.error || new Error("Device key storage transaction failed"));
+    });
+  }
   return {
-    privateKey,
-    publicKey,
-    deviceId: await deviceIdFromSpki(spki, subtle),
-    publicKeyPem: spkiToPem(spki),
-    createdAt: stored.createdAt,
+    get: (key) => transaction("readonly", (store, done) => { const req = store.get(key); req.onsuccess = () => done(req.result); }),
+    insertIfAbsent: (key, candidate) => transaction("readwrite", (store, done) => {
+      const req = store.get(key);
+      req.onsuccess = () => {
+        if (req.result) { done(req.result); return; }
+        store.put(candidate, key);
+        done(candidate);
+      };
+    }),
+    async legacy() { return (await chromeObj.storage.local.get(STORAGE_KEY))[STORAGE_KEY]; },
+    async clearLegacy() { await chromeObj.storage.local.remove(STORAGE_KEY); },
+    remove: () => transaction("readwrite", (store) => store.delete(STORAGE_KEY)),
   };
 }
 
@@ -104,32 +148,40 @@ export async function signRequest(device, method, url, body = "", opts = {}) {
   };
 }
 
-/** chrome.storage.local adapter for loadOrCreateDeviceKey. */
-export function chromeLocalStorage(chromeObj = globalThis.chrome) {
-  return {
-    async get(key) {
-      const r = await chromeObj.storage.local.get(key);
-      return r[key];
-    },
-    async set(key, value) {
-      await chromeObj.storage.local.set({ [key]: value });
-    },
+let deviceStorage;
+let cachedPromise;
+/** The same durable non-extractable key is shared by every extension context. */
+export function currentDevice() {
+  if (!cachedPromise) {
+    deviceStorage ||= indexedDeviceStorage();
+    cachedPromise = loadOrCreateDeviceKey(deviceStorage);
+    cachedPromise.catch(() => { cachedPromise = null; });
+  }
+  return cachedPromise;
+}
+
+/** Rotation intentionally requires registering the new public key again. */
+export async function rotateDeviceKey() {
+  deviceStorage ||= indexedDeviceStorage();
+  await deviceStorage.remove();
+  await deviceStorage.clearLegacy();
+  initializing.delete(deviceStorage);
+  cachedPromise = null;
+  return currentDevice();
+}
+
+/** Refuse redirects so signatures and credentials stay at the chosen host. */
+export function createSignedFetch(getDevice, fetchFn) {
+  return async (url, init = {}) => {
+    const target = new URL(url);
+    if (target.protocol !== "https:" || target.username || target.password || target.hash) throw new Error("Signed request requires an HTTPS URL without credentials or fragment");
+    const device = await getDevice();
+    const method = (init.method || "GET").toUpperCase();
+    const body = typeof init.body === "string" ? init.body : "";
+    const sigHeaders = await signRequest(device, method, url, body);
+    const headers = new Headers(init.headers || {});
+    for (const [key, value] of Object.entries(sigHeaders)) headers.set(key, value);
+    return fetchFn(url, { ...init, method, headers, redirect: "error", credentials: "omit", cache: "no-store" });
   };
 }
-
-let _cached = null;
-/** The extension's own device, loaded once per service worker or page life. */
-export async function currentDevice() {
-  if (!_cached) _cached = await loadOrCreateDeviceKey(chromeLocalStorage());
-  return _cached;
-}
-
-/** fetch with the device signature headers added. Body must be a string. */
-export async function signedFetch(url, init = {}) {
-  const device = await currentDevice();
-  const method = (init.method || "GET").toUpperCase();
-  const body = typeof init.body === "string" ? init.body : "";
-  const sigHeaders = await signRequest(device, method, url, body);
-  const headers = Object.assign({}, init.headers || {}, sigHeaders);
-  return fetch(url, Object.assign({}, init, { method, headers }));
-}
+export const signedFetch = createSignedFetch(currentDevice, (...args) => fetch(...args));

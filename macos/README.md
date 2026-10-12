@@ -1,90 +1,149 @@
-# HCA Notifier (macOS)
+# HCA Notifier for macOS
 
-Rung 3 of the surface ladder: native macOS notifications with action
-buttons for pending asks, on the same API as the Chrome extension. Plan:
-docs/plans/HCA_P13_MACOS_NOTIFICATION_v1.md.
+HCA Notifier is a **developer-only** macOS 14 or later menu-bar client for
+the HCA API. Build it on your own Mac with Xcode 15 or later and Swift 5.9
+or later. The package enables complete concurrency checking and treats
+compiler warnings as errors. It is not a notarized public-download product.
 
-Build on a Mac with Xcode (license accepted):
+## Build and install
 
-    bash macos/scripts/bundle.sh          # writes ~/hca-notifier/HCA Notifier.app
-    open ~/hca-notifier/HCA\ Notifier.app
+From the repository root:
 
-Tests (pure logic, no bundle needed):
+```sh
+bash macos/scripts/bundle.sh
+open "$HOME/hca-notifier/HCA Notifier.app"
+```
 
-    cd macos && swift test
+Notifications require the app bundle; running the bare executable does not work.
+Release builds omit test-notification menu commands. Debug builds retain them.
 
-Notifications will not post from the bare executable; the bundle is required.
+Use the existing local build and signing instructions in `scripts/bundle.sh`.
+This client safety change does not establish release packaging, Developer ID
+signing, hardened runtime, notarization, or public distribution readiness.
 
-## Signing (HCA-P16)
+## Configure and register
 
-bundle.sh signs with the local identity "HCA Notifier Local Signing" when it
-exists, else ad-hoc. Create it once:
+1. Start the API using the repository's local quickstart or use an operator's
+   authorized server. Choose **Configure API origin…** in the Mac menu.
+   Enter an HTTPS origin such as `https://api.example.com`, with no path,
+   credentials, query, or fragment. Review the explicit trust confirmation.
+   API and Google token requests refuse every redirect.
+2. Choose **Copy device public key (PEM)** and **Copy device id**. Give only
+   the public key to your API operator. The operator registers it with
+   `POST /v1/devices`, using their admin bearer credential and a body such as
+   `{"label":"My Mac","surface":"macos_notification","public_key_pem":"<PEM>","tenant_id":"default"}`.
+   The app never needs the admin credential. The public key is also saved at
+   `~/Library/Application Support/HCA Notifier/device_public_key.pem`.
+3. For a server requiring Google linking, configure the **Desktop OAuth
+   client** whose public client ID the operator includes in the server's
+   Google client allowlist:
 
-    bash macos/scripts/make_signing_identity.sh
+   ```sh
+   defaults write com.alternativespaces.hca.notifier googleClientId 'YOUR_DESKTOP_CLIENT_ID'
+   ```
 
-Two macOS dialogs appear, one on this script and one on the next bundle.sh:
+   If the operator's Desktop client requires its installed-app client
+   secret, set `googleClientSecret` in the same defaults domain. This value
+   is not a confidential server secret; do not substitute an admin token or
+   any server credential. Choose **Link Google account** and sign in using
+   a current authorized tenant owner's account. Callback state is checked
+   before success or error, duplicate keys are rejected, fragmented reads
+   are bounded, each connection has a five-second deadline, and the complete
+   browser flow expires after five minutes. Tokens are exchanged in an
+   ephemeral session and are not persisted by the client.
+4. Choose **Refresh inbox now**. The device row reports registration and
+   linking status. Select this Mac's surface priority if needed.
 
-1. "security wants to make changes": admin password, then Modify Settings
-   (trusts the self-signed certificate for code signing).
-2. "codesign wants to sign using key HCA Notifier Local Signing in your
-   keychain": click Always Allow (lets codesign use the key silently).
+Local HTTP is permitted only after explicitly enabling development mode:
 
-A certificate identity gives the app one designated requirement across
-rebuilds, so the Keychain's device-key item asks once more after the first
-re-signed launch (Always Allow) and never again. Check the identity with
-`security find-identity -v -p codesigning`; force one with HCA_SIGN_IDENTITY.
-Developer ID and notarization are not used: the app runs only on the Mac
-that builds it.
+```sh
+defaults write com.alternativespaces.hca.notifier allowLocalHTTPDevelopment -bool true
+```
 
-## Launch at login and liveness (HCA-P18)
+Only `localhost`, `127.0.0.1`, and `[::1]` are accepted with HTTP. Choose the
+local origin in the menu, and disable the setting when finished. External
+`defaults` changes to `apiBaseURL` take effect on the next launch and require
+trust confirmation when the origin changes. The running client freezes its
+trusted origin; switching through the menu cancels old requests and clears
+old asks, notifications, retry keys, and the event cursor.
 
-Nothing registers by itself. Menu row "Launch at login" (above "Copy device
-public key") writes `~/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist`
-(rendered by `LaunchAgentPlist.contents(program:)`, asserted by
-LivenessTests) with `Program` set to this bundle's executable path, then
-runs `launchctl bootstrap gui/<uid> <plist>`. Ticked means the app starts
-at login (RunAtLoad) and is relaunched after a crash or kill (KeepAlive,
-SuccessfulExit false); "Quit HCA Notifier" (exit 0) stays quit. macOS lists
-it under System Settings, General, Login Items and Extensions, "Allow in
-the Background"; if the row reads "allow in System Settings", clicking it
-opens that pane. Unticking runs `launchctl bootout` and removes the plist,
-which stops the launchd job: the app quits and is reopened from the bundle
-by hand.
+## Decisions and privacy
 
-Why a user LaunchAgent and not the bundled SMAppService agent (Day 2 finding,
-2026-10-09): the Day 1 agent registered, spawned once, and then failed every
-start with `last exit code = 78: EX_CONFIG`, job state "spawn failed" (44
-attempts overnight). `launchctl print` showed the registration's
-lightweight code requirement as `cdhash $in [ ]`, an empty list no binary
-satisfies. The P16 identity is self-signed (`TeamIdentifier=not set`), and
-Apple's service builds a usable requirement only from a Team ID. A Team ID
-(Apple Development certificate via an Apple ID in Xcode) would allow the
-bundled agent again; until then Path B. The app unregisters a leftover
-bundled registration the first time the row is ticked.
+| Control | Mac support |
+| --- | --- |
+| `approve_deny` | Menu choice with complete context and explicit confirmation |
+| `radio` | Menu choices with full labels available in review and tooltips |
+| `checkbox`, `dropdown`, `chat`, `confirm_rows` | Notification and context view; answer using the Chrome extension |
 
-One instance only (Day 2 finding: registering from a hand-opened instance
-made launchd start a second one, two icons). The plist sets
-HCA_LAUNCHD_AGENT=1 for the launchd instance; on start, a launchd instance
-terminates any hand-opened one and a hand-opened instance exits when another
-is running. After a successful registration the hand-opened instance hands
-over to launchd within 2 s.
+Notifications hide decision details by default. **Hide decision details in
+notifications** controls this setting; disabling it may expose titles,
+caller names, suggested choices, and option labels in Notification Center or
+on a locked screen, depending on your system settings. Red-gate asks always
+require review of resource, change, impact, exact command, rollback, and all
+option explanations before a Mac answer. Suggestions are descriptive; no
+answer is sent merely by opening the menu or receiving a notification.
 
-After a rebuild (`bundle.sh` replaces the app in place, same path) the
-loaded job restarts on the new binary with
+With details enabled, ordinary approve/deny and radio asks with at most four
+options can show native action buttons. Tapping a button refreshes the
+current authorized inbox, validates the stored origin and displayed option
+mapping, and opens full-context confirmation. Stale, changed, expired, or
+revoked asks cannot be answered from old notification metadata. Categories
+are pruned as asks leave the inbox and are capped at 64 dynamic categories;
+additional notifications use the alert category and remain answerable in
+the menu. Notification mappings recover after restart from the server. Button
+labels and submitted values use the same mapping when approve/deny options
+arrive in a different order.
 
-    launchctl kickstart -k gui/$(id -u)/com.alternativespaces.hca.notifier
+The app keeps pending asks in memory. UserDefaults stores the trusted origin,
+preferences, and last event cursor; the login Keychain stores the P-256
+private key with this-device-only accessibility. System notifications retain
+their displayed content, request ID, origin, and option IDs until removed.
+A server 401/403 or explicit stream revocation clears local pending asks and
+notifications. Stream reset signals trigger inbox reconciliation. The app
+polls every 60 seconds as a recovery path; it follows every bounded inbox
+page and rejects repeated cursors. A failed read prevents a notification
+answer. Failed submissions retain the ask visibly, and retries within the
+same running session reuse the idempotency key for the same decision.
 
-or by opening the bundle by hand once: a hand-opened instance that finds the
-agent configured but not running kickstarts it (or loads a present plist
-after a logout) and hands over within 2 s.
+## Upgrade and uninstall
 
-Menu row "Last inbox read: 12 s ago, stream connected" is the liveness
-line (updated when the menu opens, after each poll and every 30 s). After
-180 s without a successful inbox read it reads "stale", the status line
-reads "Status: stale, reconnecting", the stream and poll tasks are
-restarted and the transition is in the unified log (subsystem
-com.alternativespaces.hca.notifier, category liveness):
+Quit the app before rebuilding it in the same path. A rebuild preserves the
+Keychain device identity and trusted configuration. Keep the same local
+signing identity when possible; a changed ad-hoc signature may require a
+Keychain prompt. If launch-at-login is enabled, reopen the new bundle once
+and the app loads or restarts its existing user LaunchAgent. Re-registering
+the same public key is idempotent; a revoked key requires rotation.
 
-    log show --last 10m --predicate 'subsystem == "com.alternativespaces.hca.notifier" AND category == "liveness"'
+**Launch at login** is off until selected. It installs the user LaunchAgent
+`~/Library/LaunchAgents/com.alternativespaces.hca.notifier.plist` for this
+bundle's executable. Disable it in the menu before uninstalling; this can
+stop the launchd instance immediately. macOS background-item permission is
+managed in System Settings → General → Login Items and Extensions.
 
-Inspect the agent: `launchctl print gui/$(id -u)/com.alternativespaces.hca.notifier`.
+To uninstall, disable launch-at-login, quit, remove the app/output directory,
+and revoke the device through your API operator. For complete local cleanup,
+remove the `com.alternativespaces.hca.notifier` defaults domain, the
+`HCA Notifier` Application Support directory, and the generic password item
+whose service is `com.alternativespaces.hca.notifier` and account is
+`device-key` using Keychain Access. Clear remaining HCA notifications in
+Notification Center. Removing the Keychain key changes the device ID on the
+next launch and requires registration and Google linking again.
+
+## Validation
+
+```sh
+cd macos
+swift test
+swift build -c release --product HCANotifier
+```
+
+Tests cover signing vectors, origin/redirect rules, duplicate OAuth fields,
+notification recovery, material context, stream reset/revocation, signed
+pagination, retry keys, overlapping refreshes, cancellation, and real
+loopback TCP fragmentation, authenticated errors, timeouts, and cancellation.
+They need a Mac with loopback socket access, but no Google credentials,
+production account, notification permission, or signing identity. Native
+notification presentation, accessibility with assistive tools, real Google
+OAuth, launch-at-login behavior, and local Keychain dialogs still require
+manual checks on the target Mac; passing logic tests does not establish
+notarized release readiness.

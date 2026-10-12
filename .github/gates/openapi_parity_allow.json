@@ -1,4 +1,4 @@
 {
-  "_note": "Documented differences between api/openapi.yaml and the generated schema. Each line is a known exception; the gate fails when a line stops matching so a closed exception must be removed here. Empty since review item 25: /v1/controls is served and the internal sweep route is documented.",
+  "_note": "Full contract parity permits no exceptions. The gate rejects any nonempty allowed_differences list. The control route is served and the internal sweep contract is included.",
   "allowed_differences": []
 }

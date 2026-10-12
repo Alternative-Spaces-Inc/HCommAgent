@@ -11,6 +11,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.db import Base
 from app import models  # noqa: F401  (registers models on Base.metadata)
+from app import limits  # noqa: F401  (registers rate counters)
 
 config = context.config
 if config.config_file_name is not None:

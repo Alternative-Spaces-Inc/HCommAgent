@@ -25,12 +25,13 @@ browser profiles). Each decision snapshots the verified Google subject/email and
 client descriptions are stored separately as untrusted metadata.
 """
 
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from . import models
@@ -39,28 +40,31 @@ from . import googleauth
 from . import tenancy
 from .db import get_db
 from .devicesig import device_id_for_public_key_pem
+from .schemas import Surface
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/devices", tags=["devices"])
+MAX_ACTIVE_DEVICES = max(1, int(os.environ.get("HCA_MAX_ACTIVE_DEVICES", "100")))
 
 
 class DeviceRegistration(BaseModel):
-    label: str
-    public_key_pem: str
-    surface: str = "browser_overlay"
+    label: str = Field(min_length=1, max_length=200)
+    public_key_pem: str = Field(min_length=100, max_length=2000)
+    surface: Surface = "browser_overlay"
     # HCA-P19: the tenant the device answers for; omitted means the default
     # tenant so pre-P19 registrations keep working.
-    tenant_id: str = models.DEFAULT_TENANT_ID
+    tenant_id: str = Field(default=models.DEFAULT_TENANT_ID, min_length=1, max_length=100)
 
 
 class GoogleLink(BaseModel):
-    access_token: str
+    access_token: str = Field(min_length=1, max_length=8192)
 
 
 class DevicePatch(BaseModel):
     priority: int
 
 
-class DeviceView(BaseModel):
+class DeviceView(UTCJSONModel):
     device_id: str
     tenant_id: str
     label: str
@@ -88,6 +92,8 @@ def register_device(body: DeviceRegistration, db: Session = Depends(get_db), _ad
     tenant = db.get(models.Tenant, body.tenant_id)
     if tenant is None or tenant.disabled_at is not None:
         raise HTTPException(status_code=422, detail="unknown or disabled tenant")
+    from .requests_api import _lock_tenant_for_quota
+    _lock_tenant_for_quota(db, tenant.id)
     existing = db.get(models.Device, device_id)
     if existing is not None:
         if existing.revoked_at is not None:
@@ -99,6 +105,10 @@ def register_device(body: DeviceRegistration, db: Session = Depends(get_db), _ad
         existing.label = body.label
         db.commit()
         return _view(existing)
+    active = db.execute(select(func.count(models.Device.id)).where(models.Device.tenant_id == tenant.id,
+        models.Device.revoked_at.is_(None))).scalar_one()
+    if active >= MAX_ACTIVE_DEVICES:
+        raise HTTPException(status_code=429, detail="tenant active device limit reached", headers={"Retry-After": "60"})
     device = models.Device(id=device_id, tenant_id=body.tenant_id, label=body.label, surface=body.surface,
                            public_key_pem=body.public_key_pem.strip() + "\n",
                            created_at=datetime.now(timezone.utc))
@@ -107,9 +117,15 @@ def register_device(body: DeviceRegistration, db: Session = Depends(get_db), _ad
     return _view(device)
 
 
-@router.get("", response_model=list[DeviceView])
-def list_devices(db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
-    rows = db.execute(select(models.Device).order_by(models.Device.created_at)).scalars().all()
+@router.get("", response_model=list[DeviceView], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
+def list_devices(response: Response, limit: int = Query(default=200, ge=1, le=500),
+                 after: str = Query(default="", max_length=100),
+                 db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    rows = db.execute(select(models.Device).where(models.Device.id > after)
+                      .order_by(models.Device.id).limit(limit + 1)).scalars().all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-HCA-Next-Cursor"] = rows[-1].id
     return [_view(d) for d in rows]
 
 

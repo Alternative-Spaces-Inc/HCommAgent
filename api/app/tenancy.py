@@ -17,22 +17,25 @@ including the HCA_OWNER_EMAILS fallback for Google linking, which applies
 to the default tenant only while it has no owner rows.
 """
 
+import os
 import re
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from pydantic import BaseModel, Field
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from . import models
 from .auth import require_admin_bearer
 from .db import get_db
+from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/tenants", tags=["tenants"])
 
 SLUG = re.compile(r"^[a-z0-9][a-z0-9-]{1,62}$")
+MAX_ACTIVE_OWNERS = max(1, int(os.environ.get("HCA_MAX_ACTIVE_OWNERS", "50")))
 
 
 def email_is_well_formed(value: str) -> bool:
@@ -60,7 +63,7 @@ class OwnerAdd(BaseModel):
     email: str = Field(min_length=3, max_length=320)
 
 
-class TenantView(BaseModel):
+class TenantView(UTCJSONModel):
     tenant_id: str
     slug: str
     name: str
@@ -73,11 +76,12 @@ def owner_emails_for(db: Session, tenant_id: str) -> Optional[set]:
     """The tenant's live owner emails; None for the default tenant with no
     rows (so the HCA_OWNER_EMAILS fallback in app/googleauth.py applies).
     Any other tenant with no rows gets an empty set: nobody may link."""
-    rows = db.execute(select(models.TenantOwner).where(
-        models.TenantOwner.tenant_id == tenant_id)).scalars().all()
-    emails = {r.email.lower() for r in rows if r.removed_at is None}
+    emails = set(db.execute(select(models.TenantOwner.email).where(
+        models.TenantOwner.tenant_id == tenant_id, models.TenantOwner.removed_at.is_(None))).scalars())
+    emails = {email.lower() for email in emails}
     # An explicitly emptied allowlist must never resurrect deployment owners.
-    if not rows and tenant_id == models.DEFAULT_TENANT_ID:
+    configured = db.execute(select(models.TenantOwner.id).where(models.TenantOwner.tenant_id == tenant_id).limit(1)).first()
+    if not configured and tenant_id == models.DEFAULT_TENANT_ID:
         return None
     return emails
 
@@ -106,9 +110,15 @@ def create_tenant(body: TenantCreate, db: Session = Depends(get_db), _admin=Depe
     return _view(db, t)
 
 
-@router.get("", response_model=list[TenantView])
-def list_tenants(db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
-    rows = db.execute(select(models.Tenant).order_by(models.Tenant.created_at)).scalars().all()
+@router.get("", response_model=list[TenantView], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
+def list_tenants(response: Response, limit: int = Query(default=200, ge=1, le=500),
+                 after: str = Query(default="", max_length=100),
+                 db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    rows = db.execute(select(models.Tenant).where(models.Tenant.id > after)
+                      .order_by(models.Tenant.id).limit(limit + 1)).scalars().all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-HCA-Next-Cursor"] = rows[-1].id
     return [_view(db, t) for t in rows]
 
 
@@ -139,9 +149,15 @@ def add_owner(tenant_id: str, body: OwnerAdd, db: Session = Depends(get_db), _ad
     email = body.email.strip().lower()
     if not email_is_well_formed(email):
         raise HTTPException(status_code=422, detail="email is not well formed")
+    from .requests_api import _lock_tenant_for_quota
+    _lock_tenant_for_quota(db, t.id)
     live = db.execute(select(models.TenantOwner).where(
         models.TenantOwner.tenant_id == t.id, models.TenantOwner.email == email, models.TenantOwner.removed_at.is_(None))).scalar_one_or_none()
     if live is None:
+        active = db.execute(select(func.count(models.TenantOwner.id)).where(
+            models.TenantOwner.tenant_id == t.id, models.TenantOwner.removed_at.is_(None))).scalar_one()
+        if active >= MAX_ACTIVE_OWNERS:
+            raise HTTPException(status_code=429, detail="tenant active owner limit reached", headers={"Retry-After": "60"})
         db.add(models.TenantOwner(tenant_id=t.id, email=email, created_at=datetime.now(timezone.utc)))
         db.commit()
     return _view(db, t)

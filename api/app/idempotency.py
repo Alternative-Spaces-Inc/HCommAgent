@@ -31,6 +31,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from . import models
+from .json_dates import utc_datetime
 
 HEADER = "Idempotency-Key"
 MAX_KEY = 200
@@ -108,10 +109,8 @@ def reserve(db: Session, tenant_id: str, scope: str, route: str, key: Optional[s
 
 
 def _datetime_as_pydantic_json(value: datetime) -> str:
-    """The string Pydantic v2 writes for a datetime in JSON mode (what FastAPI
-    sends for a response_model field): UTC-aware values end in Z, other
-    offsets keep their offset, naive values have none."""
-    text = value.isoformat()
+    """Match UTCJSONModel on the first response and every stored replay."""
+    text = utc_datetime(value).isoformat()
     return text[:-6] + "Z" if text.endswith("+00:00") else text
 
 
@@ -142,8 +141,10 @@ def discard(db, tenant_id, scope, route, key):
         db.flush()
 
 
-def sweep(db: Session, now: Optional[datetime] = None) -> int:
+def sweep(db: Session, now: Optional[datetime] = None, batch: int = 500) -> int:
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=TTL_SECONDS)
-    result = db.execute(delete(models.IdempotencyKey).where(models.IdempotencyKey.created_at < cutoff))
+    ids = list(db.execute(select(models.IdempotencyKey.id).where(models.IdempotencyKey.created_at < cutoff)
+                         .order_by(models.IdempotencyKey.id).limit(max(1, min(batch, 500)))).scalars())
+    result = db.execute(delete(models.IdempotencyKey).where(models.IdempotencyKey.id.in_(ids)))
     db.commit()
     return result.rowcount or 0

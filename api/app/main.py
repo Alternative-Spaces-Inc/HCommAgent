@@ -1,4 +1,7 @@
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from .db import db_ping
 from .requests_api import router as requests_router, audit_router
@@ -11,8 +14,45 @@ from .devices_api import router as devices_router
 from .privacy import router as privacy_router
 from .webhooks_api import router as webhooks_router
 from .tenancy import router as tenants_router
+from .data_api import router as data_router
+from . import limits  # noqa: F401 -- register persistent counters before metadata creation
+from .middleware import RequestBounds
 
-app = FastAPI(title="Human Collections Agent (HCA) API")
+
+@asynccontextmanager
+async def lifespan(app):
+    from .config import validate_environment
+    from .db import SessionLocal
+    from . import models, events, jobs
+    validate_environment()
+    with SessionLocal() as db:
+        models.ensure_default_tenant(db)
+    try:
+        events.start_listener()
+        jobs.start_worker()
+        yield
+    finally:
+        jobs.stop_worker()
+        events.stop_listener()
+
+
+app = FastAPI(title="Human Collections Agent (HCA) API", version="0.3.0", lifespan=lifespan,
+    responses={
+        413: {"description": "Request body exceeds 1 MiB"},
+        429: {"description": "Shared rate limit or tenant quota reached", "headers": {
+            "Retry-After": {"description": "Seconds until retry", "schema": {"type": "string"}}}},
+    })
+app.add_middleware(RequestBounds)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_error(request, exc):
+    # Validation errors must not echo credentials or non-JSON input values.
+    return JSONResponse(status_code=422, content={"detail": [
+        {"loc": list(error["loc"]), "msg": error["msg"], "type": error["type"]}
+        for error in exc.errors()]})
+
+
 app.include_router(requests_router)
 app.include_router(audit_router)
 app.include_router(inbox_router)
@@ -22,46 +62,9 @@ app.include_router(controls_router)
 app.include_router(metrics_router)
 app.include_router(devices_router)
 app.include_router(tenants_router)
+app.include_router(data_router)
 app.include_router(privacy_router)
 app.include_router(webhooks_router)
-
-
-@app.on_event("startup")
-async def _ensure_default_tenant():
-    from .config import validate_environment
-    validate_environment()
-    from .db import SessionLocal
-    from . import models
-    with SessionLocal() as db:
-        models.ensure_default_tenant(db)
-
-
-@app.on_event("startup")
-async def _start_event_listener():
-    # HCA-P20 Day 2: on Postgres, LISTEN for rows other instances publish;
-    # on SQLite this is a no-op and the 2 s poll plus in-process wake deliver.
-    from . import events
-    events.start_listener()
-
-
-@app.on_event("shutdown")
-async def _stop_event_listener():
-    from . import events
-    events.stop_listener()
-
-
-@app.on_event("startup")
-async def _start_jobs_worker():
-    # HCA-P20 Day 3: escalation and expiry run as leased scheduled_jobs rows
-    # claimed by this thread (app/jobs.py); the P14 loop timers are gone.
-    from . import jobs
-    jobs.start_worker()
-
-
-@app.on_event("shutdown")
-async def _stop_jobs_worker():
-    from . import jobs
-    jobs.stop_worker()
 
 
 @app.get("/healthz")
@@ -93,3 +96,14 @@ def healthz():
                        "notifications": ls["notifications"], "errors": ls["errors"]},
             "jobs": {"worker": "running" if js["running"] else "stopped", "polls": js["polls"], "claimed": js["claimed"],
                      "done": js["done"], "failed": js["failed"]}}
+
+
+_default_openapi = app.openapi
+
+
+def correlated_openapi():
+    from .openapi import enrich_schema
+    return enrich_schema(_default_openapi())
+
+
+app.openapi = correlated_openapi

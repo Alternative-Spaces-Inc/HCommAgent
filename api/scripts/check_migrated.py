@@ -20,6 +20,7 @@ from sqlalchemy import create_engine, inspect, text
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from app.db import Base  # noqa: E402
 from app import models  # noqa: E402, F401
+from app import limits  # noqa: F401 -- include shared rate counters
 
 
 def main() -> int:

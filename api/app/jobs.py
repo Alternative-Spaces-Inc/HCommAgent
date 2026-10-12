@@ -44,7 +44,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select, update
+from sqlalchemy import select, update, exists
 
 from . import models
 
@@ -115,6 +115,9 @@ def reconcile(db, now: Optional[datetime] = None) -> int:
     hand). Returns how many jobs were added. Commits."""
     from .requests_api import TERMINAL_STATES
     now = _naive(now or datetime.now(timezone.utc))
+    due_job = exists(select(models.ScheduledJob.id).where(
+        models.ScheduledJob.ask_id == models.Ask.id, models.ScheduledJob.kind == KIND_EXPIRE,
+        models.ScheduledJob.done_at.is_(None), models.ScheduledJob.run_at <= now))
     overdue = db.execute(select(models.Ask.id, models.Ask.tenant_id).where(
         models.Ask.state.notin_(TERMINAL_STATES),
         models.Ask.expires_at.is_not(None),
@@ -123,7 +126,8 @@ def reconcile(db, now: Optional[datetime] = None) -> int:
         # original expiry job records "held"; reconciliation must not grow
         # an endless chain of additional completed jobs.
         models.Ask.expiry_policy != "hold",
-    )).all()
+        ~due_job,
+    ).order_by(models.Ask.expires_at, models.Ask.id).limit(500)).all()
     if not overdue:
         return 0
     ids = [a for a, _ in overdue]
@@ -389,6 +393,8 @@ def _work_forever(stop: threading.Event, owner: str) -> None:
             if polls % RECONCILE_EVERY == 0:
                 with _session_factory()() as db:
                     reconcile(db)
+                    from .retention import cleanup
+                    cleanup(db)
             run_due(owner)
         except Exception as exc:
             worker_state["last_error"] = str(exc)[:200]

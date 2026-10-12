@@ -4,7 +4,7 @@ HCA delivers terminal request outcomes to an agent's registered webhook destinat
 
 ## Register a destination
 
-Use the caller's API key to `POST /v1/webhooks` with `{"url":"https://hooks.example.com/hca"}`. The response contains a destination ID and a signing secret shown once. Store the secret securely on the receiver. Use the registered URL in `deliver_to` for a request; unregistered, revoked or different-caller/tenant destinations are refused. Each caller can hold at most ten active destinations.
+Use the caller's API key to `POST /v1/webhooks` with `{"url":"https://hooks.example.com/hca"}`. The response contains a destination ID and a signing secret shown once. Store the secret securely on the receiver. Use the registered URL in `deliver_to` for a request; unregistered, revoked or different-caller/tenant destinations are refused. Each caller can hold at most twenty active destinations.
 
 Production requires HTTPS, no credentials in the URL, an allowed port, and a publicly routable destination. IP literals, cloud metadata names, loopback/private/link-local/reserved addresses and unsafe IPv6 forms are rejected. Every DNS result must pass the checks at registration and send. The sender connects to a checked address while retaining the registered Host/TLS identity. Redirects are refused. A development-only switch permits a loopback mock receiver and is prohibited in production.
 

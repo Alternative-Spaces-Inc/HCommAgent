@@ -22,7 +22,6 @@ from sqlalchemy.orm import Session
 
 from .db import get_db
 from . import jobs
-from . import idempotency
 
 router = APIRouter(prefix="/v1/internal", tags=["internal"])
 
@@ -51,6 +50,8 @@ def trigger_expiry_sweep(db: Session = Depends(get_db), _auth=Depends(_require_s
     results = [{"request_id": r["request_id"], "expiry_policy": r.get("expiry_policy"), "action": r.get("action")}
                for r in ran if r.get("kind") == jobs.KIND_EXPIRE and r.get("action") not in (None, "nothing_to_do")]
     # HCA-P19 Day 2: the same scheduled call retires idempotency rows past their TTL.
-    idempotency_swept = idempotency.sweep(db)
+    from .retention import cleanup
+    retention = cleanup(db)
+    idempotency_swept = retention["idempotency_keys"]
     return {"swept": len(results), "results": results, "idempotency_swept": idempotency_swept,
-            "jobs_run": len(ran), "reconciled": reconciled}
+            "jobs_run": len(ran), "reconciled": reconciled, "retention": retention}

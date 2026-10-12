@@ -24,7 +24,7 @@ public struct InboxStore: Equatable {
         for id in pending.keys where !ids.contains(id) {
             pending.removeValue(forKey: id); shown.remove(id); delta.removed.append(id)
         }
-        for item in items where pending[item.request_id] == nil {
+        for item in items {
             pending[item.request_id] = item
             if !shown.contains(item.request_id) { delta.added.append(item); shown.insert(item.request_id) }
         }
