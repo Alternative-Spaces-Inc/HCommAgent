@@ -28,14 +28,14 @@ from sqlalchemy import select
 
 from . import models
 from .requests_api import TERMINAL_STATES, _audit_to_answer_record
-from .events import publish
+from . import events
 from . import webhooks
 
 AUTO_DENY_VALUE = {"decision": "deny", "reason": "auto_deny: deadline passed with no answer"}
 SWEPT_BY = "system:expiry_sweep"
 
 
-def expire_ask(db: Session, ask_id: str, now: datetime = None) -> Optional[dict]:
+def expire_ask(db: Session, ask_id: str, now: datetime = None, *, commit: bool = True) -> Optional[dict]:
     """Apply the ask's expiry policy to one ask, under a row lock, if it is
     still non-terminal and overdue. Returns the result dict ({"request_id",
     "expiry_policy", "action"}) or None when there was nothing to do (already
@@ -46,11 +46,13 @@ def expire_ask(db: Session, ask_id: str, now: datetime = None) -> Optional[dict]
     # HCA-P19 Day 2: read under a row lock so an answer or cancel that landed
     # since the caller looked wins and the expiry skips.
     ask = db.execute(select(models.Ask).where(models.Ask.id == ask_id).with_for_update()).scalar_one_or_none()
-    if ask is None or ask.state in TERMINAL_STATES or ask.expires_at is None or ask.expires_at >= now_naive:
-        db.rollback()
+    if ask is None or ask.state in TERMINAL_STATES or ask.expires_at is None or (ask.expires_at.replace(tzinfo=None) if ask.expires_at.tzinfo else ask.expires_at) > now_naive:
+        if commit:
+            db.rollback()
         return None
     if ask.expiry_policy == "hold":
-        db.rollback()
+        if commit:
+            db.rollback()
         return {"request_id": ask.id, "expiry_policy": "hold", "action": "held"}
 
     if ask.expiry_policy == "auto_deny":
@@ -75,15 +77,19 @@ def expire_ask(db: Session, ask_id: str, now: datetime = None) -> Optional[dict]
         db.flush()
         record = _audit_to_answer_record(row)
         webhooks.enqueue(db, ask, "request.expired", ask.state, record, now)
-        db.commit()
-        publish("request.expired", record, tenant_id=ask.tenant_id)
+        events.enqueue(db, "request.expired", record, tenant_id=ask.tenant_id)
+        if commit:
+            db.commit()
+            events.wake_all()
         return {"request_id": ask.id, "expiry_policy": "auto_deny", "action": "auto_denied"}
 
     # expiry_policy == "expire": plain timeout, no answer recorded.
     ask.state = "expired"
     webhooks.enqueue(db, ask, "request.expired", ask.state, None, now)
-    db.commit()
-    publish("request.expired", {"request_id": ask.id, "state": "expired"}, tenant_id=ask.tenant_id)
+    events.enqueue(db, "request.expired", {"request_id": ask.id, "state": "expired"}, tenant_id=ask.tenant_id)
+    if commit:
+        db.commit()
+        events.wake_all()
     return {"request_id": ask.id, "expiry_policy": "expire", "action": "expired"}
 
 
@@ -101,7 +107,7 @@ def run_expiry_sweep(db: Session, now: datetime = None) -> List[dict]:
         select(models.Ask.id).where(
             models.Ask.state.notin_(TERMINAL_STATES),
             models.Ask.expires_at.is_not(None),
-            models.Ask.expires_at < now,
+            models.Ask.expires_at <= now,
         )
     ).scalars().all()
 

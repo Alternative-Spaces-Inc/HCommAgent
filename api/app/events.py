@@ -4,8 +4,10 @@ Day 1 made every envelope an events row before any client saw it and gave
 GET /v1/inbox/stream Last-Event-ID replay. Day 2 makes delivery itself go
 through the table so several API instances share one stream of truth:
 
-  publish()      writes the row (and, on Postgres, pg_notify in the same
-                 transaction), then wakes every dispatcher it can reach.
+  enqueue()      writes the event and Postgres pg_notify in the business
+                 transaction. Callers commit state and event together.
+  publish()      standalone event writer, using the same ordered insertion
+                 and post-commit wake path.
   dispatcher     one asyncio task per event loop that holds subscribers; on
                  a wake, or every POLL_SECONDS without one, it reads rows
                  above its cursor and hands each to the matching local
@@ -193,20 +195,38 @@ def _is_postgres(db) -> bool:
     return bind is not None and bind.dialect.name == "postgresql"
 
 
-def _store(event: str, data: Dict[str, Any], tenant_id: str, device_ids: Optional[List[str]], now: datetime,
-           session_factory) -> int:
+# All event writers take this transaction lock before allocating a sequence
+# id. PostgreSQL sequences alone do not order commits: without this lock a
+# delayed lower-id commit can be lost by both live and replay cursors.
+EVENT_INSERT_LOCK = 0x48434145564E54
+
+
+def enqueue(db, event: str, data: Dict[str, Any], *, tenant_id: str,
+            device_ids: Optional[Iterable[str]] = None, now: Optional[datetime] = None) -> Dict[str, Any]:
+    """Append an event inside the state-changing transaction; caller commits.
+
+    On PostgreSQL the advisory lock serializes id allocation and commits.
+    SQLite's single writer supplies the same ordering. NOTIFY is emitted by
+    PostgreSQL only after commit; local dispatchers also poll for committed
+    rows, so rolled-back state can never reach a subscriber.
+    """
     from . import models
-    with session_factory() as db:
-        row = models.Event(tenant_id=tenant_id, event=event, data=data, device_ids=device_ids,
-                           created_at=_naive_utc(now))
-        db.add(row)
-        db.flush()
-        if _is_postgres(db):
-            # Delivered by Postgres on commit, to every instance listening;
-            # the payload is the row id so a listener can log what woke it.
-            db.execute(text("SELECT pg_notify(:channel, :payload)"), {"channel": NOTIFY_CHANNEL, "payload": str(row.id)})
-        db.commit()
-        return int(row.id)
+    if event not in VALID_EVENTS:
+        raise ValueError(f"unknown inbox stream event: {event}")
+    if not tenant_id:
+        raise ValueError("publish needs the ask's tenant id")
+    allowed = None if device_ids is None else sorted(set(device_ids))
+    data = jsonable_encoder(data)
+    now = now or datetime.now(timezone.utc)
+    if _is_postgres(db):
+        db.execute(text("SELECT pg_advisory_xact_lock(:key)"), {"key": EVENT_INSERT_LOCK})
+    row = models.Event(tenant_id=tenant_id, event=event, data=data, device_ids=allowed,
+                       created_at=_naive_utc(now))
+    db.add(row)
+    db.flush()
+    if _is_postgres(db):
+        db.execute(text("SELECT pg_notify(:channel, :payload)"), {"channel": NOTIFY_CHANNEL, "payload": str(row.id)})
+    return _envelope(int(row.id), event, data, now)
 
 
 def max_event_id(session_factory=None) -> int:
@@ -233,20 +253,12 @@ def publish(event: str, data: Dict[str, Any], *, tenant_id: str, device_ids: Opt
     their banners. The write comes first on purpose: a failed write raises
     before any client has seen the envelope, so what a client sees is always
     something it can replay from. Safe to call from any thread."""
-    if event not in VALID_EVENTS:
-        raise ValueError(f"unknown inbox stream event: {event}")
-    if not tenant_id:
-        raise ValueError("publish needs the ask's tenant id")
     session_factory = session_factory or _session_factory()
-    allowed = None if device_ids is None else sorted(set(device_ids))
-    # The payload is made JSON-safe once, here, so the stored row, the live
-    # envelope and a replayed envelope are byte-identical on the wire
-    # (datetimes as ISO 8601, the shape FastAPI gives the HTTP responses).
-    data = jsonable_encoder(data)
-    now = datetime.now(timezone.utc)
-    event_id = _store(event, data, tenant_id, allowed, now, session_factory)
+    with session_factory() as db:
+        envelope = enqueue(db, event, data, tenant_id=tenant_id, device_ids=device_ids)
+        db.commit()
     wake_all()
-    return _envelope(event_id, event, data, now)
+    return envelope
 
 
 def replay(db, *, tenant_id: str, device_id: str, after_id: int, now: Optional[datetime] = None,
@@ -297,9 +309,10 @@ def parse_last_event_id(value: Optional[str]) -> Optional[int]:
     if value is None:
         return None
     value = value.strip()
-    if not value.isdigit():
+    if len(value) > 19 or not value.isascii() or not value.isdigit():
         return None
-    return int(value)
+    parsed = int(value)
+    return parsed if parsed <= 2**63 - 1 else None
 
 
 def format_sse(envelope: Dict[str, Any]) -> str:

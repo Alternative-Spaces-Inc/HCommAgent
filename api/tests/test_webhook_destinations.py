@@ -11,13 +11,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models, ssrf, webhook_destinations as registry
 from app.apikeys import _hash_secret
 from authhelper import agent_auth
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 PUBLIC = "93.184.216.34"

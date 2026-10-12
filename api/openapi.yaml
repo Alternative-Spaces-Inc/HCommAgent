@@ -551,13 +551,15 @@ paths:
         it resolved to are pinned on the row and re-checked at every send. The
         same url cannot be registered twice while active; rotate or revoke.
         Each registration writes a registry audit row. Deliveries to the
-        destination (Day 2) carry X-HCA-Delivery-Id (stable across retries,
-        deduplicate on it), X-HCA-Timestamp (unix seconds), X-HCA-Event,
+        destination carry X-HCA-Delivery-Id (stable across retries,
+        must equal delivery_id in the signed body before deduplication), X-HCA-Timestamp (unix seconds), X-HCA-Event,
         X-HCA-Request-Id and X-HCA-Signature "t=<ts>,v1=<hex>" where v1 is
         HMAC-SHA256 under the secret over "<ts>.<raw body>"; during a
         rotation overlap a second v1 under the previous secret follows.
         Failed deliveries retry at 1 s, 5 s, 30 s, 2 min, 10 min, 30 min
-        and 1 h (jittered) and are marked dead after the 7th failure.
+        and 1 h (jittered) and are marked dead after the 8th failure.
+        One overall 10 second deadline includes DNS. Only HTTP status is
+        consumed; response bodies are not read or decompressed.
       security:
         - AgentKey: []
       requestBody:
@@ -938,7 +940,11 @@ components:
         answer: { $ref: '#/components/schemas/AnswerRecord' }
     AnswerSubmission:
       type: object
-      description: Body of POST /v1/requests/{request_id}/answer, sent by the HCA surface
+      description: >
+        Body of POST /v1/requests/{request_id}/answer. Claimed identity, role
+        and surface are untrusted client metadata. The returned audit uses
+        authenticated identity and registered surface. path_taken,
+        duration_ms and voice_used are descriptive client telemetry.
       required: [control, value, surface]
       properties:
         control: { type: string }
@@ -953,6 +959,11 @@ components:
         passthrough: { type: object }
     AnswerRecord:
       type: object
+      description: >
+        Server-derived identity, authorized role and registered surface;
+        passthrough.verified_identity snapshots subject, email and device ID.
+        passthrough.client_metadata preserves untrusted identity claims.
+        path_taken, duration_ms and voice_used remain client telemetry.
       required: [request_id, control, surface]
       properties:
         request_id: { type: string }
