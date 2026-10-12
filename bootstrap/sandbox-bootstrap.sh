@@ -41,7 +41,7 @@ if [ -z "$REPO_DIR" ]; then
       echo "RESULT: something was missing (see MISSING lines above)"
       exit 1
     fi
-    timeout "$CLONE_TIMEOUT_SECONDS" git clone -q "https://x-access-token:${TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git" "$REPO_DIR" 2>/dev/null || {
+    timeout "$CLONE_TIMEOUT_SECONDS" git clone -q "https://x-access-token:${TOKEN}@github.com/Alternative-Spaces-Inc/HCommAgent.git" "$REPO_DIR" 2>/dev/null || {
       echo "MISSING: repo checkout (clone failed or exceeded ${CLONE_TIMEOUT_SECONDS}s)"
       echo "RESULT: something was missing (see MISSING lines above)"
       exit 1

@@ -13,7 +13,7 @@ procedure is not a file in your sandbox, it is this paragraph, so do not search 
 bash, from your conversation workspace, run the following one command as written; it updates
 the HCA repo checkout, restores, then checks. Quote its final RESULT lines and every line that says
 MISSING, DRIFT or RED back verbatim. Each such line is a real gap, never an expected flag:
-[ -d hca-repo ] || git clone -q https://x-access-token:${GITHUB_CLASSIC_TOKEN}@github.com/Alternative-Spaces-Inc/human-collections-agent.git hca-repo; git -C hca-repo pull -q --ff-only; bash hca-repo/bootstrap/sandbox-bootstrap.sh; SANDBOX_BOOTSTRAP_DRY=1 bash hca-repo/bootstrap/seat_sandbox_bootstrap.sh
+[ -d hca-repo ] || git clone -q https://x-access-token:${GITHUB_CLASSIC_TOKEN}@github.com/Alternative-Spaces-Inc/HCommAgent.git hca-repo; git -C hca-repo pull -q --ff-only; bash hca-repo/bootstrap/sandbox-bootstrap.sh; SANDBOX_BOOTSTRAP_DRY=1 bash hca-repo/bootstrap/seat_sandbox_bootstrap.sh
 Never print a secret value, never touch the seat lock, origin/main or any PR. The long form is
 agents/hca/HCA_BOOTSTRAP.md in the HCA repo.
 HUMAN IN THE LOOP (Al, 2026-09-27 and 2026-09-29, Rule 0 for every seat): every ask of the

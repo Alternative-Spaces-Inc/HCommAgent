@@ -45,3 +45,7 @@ Every file in the Human Collections Agent repo, one line each. Agents boot from 
 - docs/ARCHITECTURE.md: components, data model, request state machine, surface routing, diagrams (2026-10-10)
 - docs/reviews/2026-10-10_public_readiness_review.md: ten ranked gaps with evidence, the readiness baseline
 - docs/deploys/2026-10-10_public_readiness_block.md: PR 78 and 80 to 87 plus Dependabot merged, gaps closed and still open
+
+## Repository move (2026-10-11)
+
+The project moved from the private repository human-collections-agent to Alternative-Spaces-Inc/HCommAgent on 2026-10-11 (owner selection, 18:4x PT). Pull request numbers cited in records dated on or before 2026-10-11 (PR 1 to PR 112) refer to the former repository; numbering in HCommAgent restarts at 1. Commit shas are unchanged and resolve in both.

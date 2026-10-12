@@ -1,6 +1,6 @@
 ---
 name: Feature Request
-about: Suggest an idea or enhancement for human-collections-agent
+about: Suggest an idea or enhancement for HCommAgent
 labels: enhancement
 ---
 

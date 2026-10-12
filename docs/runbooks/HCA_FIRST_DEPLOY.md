@@ -94,7 +94,7 @@ Expected: four `granted roles/...` lines plus `granted actAs on sa-hca-api`. If 
 ## Step 7: a fresh clone to build from
 
 ```bash
-cd "$HOME" && rm -rf hca-deploy && git clone --quiet --depth 1 https://github.com/Alternative-Spaces-Inc/human-collections-agent.git hca-deploy && cd hca-deploy && git rev-parse HEAD
+cd "$HOME" && rm -rf hca-deploy && git clone --quiet --depth 1 https://github.com/Alternative-Spaces-Inc/HCommAgent.git hca-deploy && cd hca-deploy && git rev-parse HEAD
 ```
 
 Expected: one 40-character sha (main's head).
@@ -157,20 +157,20 @@ Part 1, the GitHub connection. The command prints one URL; opening it is the onl
 P=<PROJECT_ID> && R=<REGION> && gcloud builds connections create github github-hca --project="$P" --region="$R"
 ```
 
-Expected: a line starting `Please authorize the Cloud Build GitHub app by visiting` followed by a URL, then (after the browser step) `Created connection [github-hca]`. In the browser: sign in to GitHub if asked, pick the organization `Alternative-Spaces-Inc`, choose `Only select repositories`, pick `human-collections-agent`, button `Install`. If gcloud asks to grant `roles/secretmanager.admin` to the Cloud Build service agent, answer `Y`; the connection stores its GitHub token in Secret Manager.
+Expected: a line starting `Please authorize the Cloud Build GitHub app by visiting` followed by a URL, then (after the browser step) `Created connection [github-hca]`. In the browser: sign in to GitHub if asked, pick the organization `Alternative-Spaces-Inc`, choose `Only select repositories`, pick `HCommAgent`, button `Install`. If gcloud asks to grant `roles/secretmanager.admin` to the Cloud Build service agent, answer `Y`; the connection stores its GitHub token in Secret Manager.
 
 Part 2, link the repository:
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && gcloud builds repositories create human-collections-agent --project="$P" --region="$R" --connection=github-hca --remote-uri="https://github.com/Alternative-Spaces-Inc/human-collections-agent.git" && gcloud builds repositories list --project="$P" --region="$R" --connection=github-hca --format='value(name)'
+P=<PROJECT_ID> && R=<REGION> && gcloud builds repositories create HCommAgent --project="$P" --region="$R" --connection=github-hca --remote-uri="https://github.com/Alternative-Spaces-Inc/HCommAgent.git" && gcloud builds repositories list --project="$P" --region="$R" --connection=github-hca --format='value(name)'
 ```
 
-Expected: one name ending in `human-collections-agent`.
+Expected: one name ending in `HCommAgent`.
 
 Part 3, the trigger, with the P7 values pinned. The `guard` step in `cloudbuild.yaml` fails any build that arrives without them:
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && CID=<GOOGLE_CLIENT_ID> && OWNERS=<OWNER_EMAIL> && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && SA="$(gcloud builds describe "$(gcloud builds list --project="$P" --region="$R" --limit=1 --format='value(id)')" --project="$P" --region="$R" --format='value(serviceAccount)')" && gcloud builds triggers create github --project="$P" --region="$R" --name=hca-main-deploy --repository="projects/${P}/locations/${R}/connections/github-hca/repositories/human-collections-agent" --branch-pattern='^main$' --build-config=cloudbuild.yaml --service-account="$SA" --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN},_GOOGLE_CLIENT_ID=${CID},_OWNER_EMAILS=${OWNERS},_REQUIRE_GOOGLE_LINK=1" && echo "trigger created"
+P=<PROJECT_ID> && R=<REGION> && CID=<GOOGLE_CLIENT_ID> && OWNERS=<OWNER_EMAIL> && CONN="$(gcloud sql instances describe hca-pg --project="$P" --format='value(connectionName)')" && SA="$(gcloud builds describe "$(gcloud builds list --project="$P" --region="$R" --limit=1 --format='value(id)')" --project="$P" --region="$R" --format='value(serviceAccount)')" && gcloud builds triggers create github --project="$P" --region="$R" --name=hca-main-deploy --repository="projects/${P}/locations/${R}/connections/github-hca/repositories/HCommAgent" --branch-pattern='^main$' --build-config=cloudbuild.yaml --service-account="$SA" --substitutions="_REGION=${R},_CLOUDSQL_INSTANCE=${CONN},_GOOGLE_CLIENT_ID=${CID},_OWNER_EMAILS=${OWNERS},_REQUIRE_GOOGLE_LINK=1" && echo "trigger created"
 ```
 
 Expected: `trigger created`. The trigger runs as the same service account the manual builds used, so no new IAM grant. From here every squash merge to main runs guard, tests, build, migrate and deploy; the run shows under Cloud Build, History, and `gcloud builds list --project=<PROJECT_ID> --region=<REGION> --limit=3` from Terminal. Step 8's manual block remains the fallback when the trigger is paused; it must pass the same `_GOOGLE_CLIENT_ID` and `_REQUIRE_GOOGLE_LINK=1` or the guard stops it.
@@ -247,5 +247,5 @@ Migrations are forward-only by policy; a revision rollback never runs `alembic d
 Deletes everything this runbook created, in dependency order. Irreversible.
 
 ```bash
-P=<PROJECT_ID> && R=<REGION> && gcloud scheduler jobs delete hca-expiry-sweep --project="$P" --location="$R" --quiet ; gcloud builds triggers delete hca-main-deploy --project="$P" --region="$R" --quiet ; gcloud builds repositories delete human-collections-agent --project="$P" --region="$R" --connection=github-hca --quiet ; gcloud builds connections delete github-hca --project="$P" --region="$R" --quiet ; gcloud run services delete hca-api-service --project="$P" --region="$R" --quiet ; gcloud run jobs delete hca-migrate --project="$P" --region="$R" --quiet ; gcloud sql instances delete hca-pg --project="$P" --quiet ; for S in hca-database-url hca-sweep-trigger-token hca-admin-token; do gcloud secrets delete "$S" --project="$P" --quiet; done ; gcloud artifacts repositories delete hca-services --project="$P" --location="$R" --quiet ; gcloud iam service-accounts delete "sa-hca-api@${P}.iam.gserviceaccount.com" --project="$P" --quiet
+P=<PROJECT_ID> && R=<REGION> && gcloud scheduler jobs delete hca-expiry-sweep --project="$P" --location="$R" --quiet ; gcloud builds triggers delete hca-main-deploy --project="$P" --region="$R" --quiet ; gcloud builds repositories delete HCommAgent --project="$P" --region="$R" --connection=github-hca --quiet ; gcloud builds connections delete github-hca --project="$P" --region="$R" --quiet ; gcloud run services delete hca-api-service --project="$P" --region="$R" --quiet ; gcloud run jobs delete hca-migrate --project="$P" --region="$R" --quiet ; gcloud sql instances delete hca-pg --project="$P" --quiet ; for S in hca-database-url hca-sweep-trigger-token hca-admin-token; do gcloud secrets delete "$S" --project="$P" --quiet; done ; gcloud artifacts repositories delete hca-services --project="$P" --location="$R" --quiet ; gcloud iam service-accounts delete "sa-hca-api@${P}.iam.gserviceaccount.com" --project="$P" --quiet
 ```
