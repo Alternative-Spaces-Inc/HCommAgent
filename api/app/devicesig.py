@@ -3,7 +3,7 @@ Proof of Surface). HCA-P6.
 
 The browser overlay holds an ECDSA P-256 key in extension storage. The
 owner registers its public key once (POST /v1/devices, admin bearer). From
-then on every call to a human route carries three headers:
+then on every call to a human route carries four headers:
 
   X-HCA-Device:    the device id, dev_ + the first 32 hex chars of
                    SHA-256 over the SubjectPublicKeyInfo DER of the key
@@ -22,9 +22,10 @@ for GET, so sha256hex(b"")).
 
 Verification rejects a timestamp more than MAX_SKEW_SECONDS from the
 server clock and a (device, nonce) pair seen inside that window, so a
-captured request cannot be replayed. The replay set is in process; the
-service runs with max instances 1 (see cloudbuild.yaml), which is what
-makes that sufficient for now.
+captured request cannot be replayed. Nonces are retained for twice the skew
+plus one second, covering the entire acceptance interval of a future
+signature timestamp. The in-memory replay set is backed by a shared
+database uniqueness constraint (app/nonces.py) across instances/restarts.
 """
 
 import base64
@@ -39,6 +40,7 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from cryptography.hazmat.primitives.asymmetric.utils import encode_dss_signature
 
 MAX_SKEW_SECONDS = 300
+NONCE_RETENTION_SECONDS = 2 * MAX_SKEW_SECONDS + 1
 PREFIX = "HCA1"
 
 HEADER_DEVICE = "x-hca-device"
@@ -91,7 +93,7 @@ def verify_signature(pem: str, canonical: bytes, signature_b64url: str) -> bool:
 class ReplayGuard:
     """Remembers (device, nonce) pairs for the skew window."""
 
-    def __init__(self, ttl_seconds: int = MAX_SKEW_SECONDS):
+    def __init__(self, ttl_seconds: int = NONCE_RETENTION_SECONDS):
         self._ttl = ttl_seconds
         self._seen: dict[tuple[str, str], float] = {}
         self._lock = threading.Lock()

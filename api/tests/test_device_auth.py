@@ -15,12 +15,10 @@ from cryptography.hazmat.primitives.asymmetric import ec
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine
 from app import devicesig
 from authhelper import agent_auth, ADMIN_AUTH
 from deviceauth import DEVICE_ID, DEVICE_LABEL, PUBLIC_PEM, human_get, human_headers, ensure_registered
 
-Base.metadata.create_all(bind=engine)
 client = TestClient(app)
 
 

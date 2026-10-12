@@ -7,11 +7,10 @@ import asyncio
 import pytest
 from datetime import datetime, timedelta, timezone
 
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from app import models
 from app.events import subscribe, unsubscribe, publish, replay, format_sse, parse_last_event_id, dropped, QUEUE_MAXSIZE
 
-Base.metadata.create_all(bind=engine)
 
 
 def _tenant(tenant_id: str) -> None:

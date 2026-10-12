@@ -13,11 +13,8 @@ from overdue import backdate
 from fastapi.testclient import TestClient
 
 from app.main import app
-from app.db import Base, engine
 from authhelper import agent_auth
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 

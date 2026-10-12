@@ -21,8 +21,8 @@ server verifies the token against the Chrome Extension OAuth client and
 the owner list and records sub, email and the time on the device row.
 Linking again replaces the account; linking a device to an account that
 another active device already holds is allowed (one owner, several
-browser profiles). The audit row's answered_by stays the device label;
-the linked email is read from the device view.
+browser profiles). Each decision snapshots the verified Google subject/email and device ID;
+client descriptions are stored separately as untrusted metadata.
 """
 
 from datetime import datetime, timezone
@@ -34,7 +34,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
-from .auth import require_admin_bearer, require_device, require_linked_device
+from .auth import require_admin_bearer, require_device, require_linked_device, require_current_device
 from . import googleauth
 from . import tenancy
 from .db import get_db
@@ -139,6 +139,7 @@ def patch_self(body: DevicePatch, db: Session = Depends(get_db), device: models.
     when the gate is on, Google-linked device. Only the owner's own devices
     can move themselves; nobody can move another device this way. Declared
     before the admin PATCH /{device_id} so the literal path self wins."""
+    device = require_current_device(db, device)
     return _set_priority(device, body.priority, db)
 
 

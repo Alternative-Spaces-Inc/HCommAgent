@@ -34,9 +34,8 @@ Two guards:
   require_linked_device: require_device plus, when HCA_REQUIRE_GOOGLE_LINK
     is "1", a Google account linked to the device (HCA-P7,
     app/googleauth.py). 403 "device is not linked to a Google account"
-    otherwise. The flag defaults off so an upgrade never locks out a
-    device that has not signed in yet; the runbook turns it on once the
-    owner's device shows google_email. The link route itself takes
+    otherwise. Production startup requires the flag on; development may
+    leave it off while using synthetic local devices. The link route takes
     require_device, so a device can always sign in.
 """
 
@@ -49,6 +48,7 @@ from datetime import datetime, timezone
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.security import APIKeyHeader, HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
@@ -83,10 +83,14 @@ def require_agent_key(
     key = verify_api_key(db, token)
     if key is None:
         raise HTTPException(status_code=403, detail="invalid or revoked api key")
+    tenant = db.get(models.Tenant, key.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise HTTPException(status_code=403, detail="tenant disabled")
     return key
 
 
-def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends(_admin_bearer)) -> None:
+def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends(_admin_bearer),
+                         db: Session = Depends(get_db)) -> None:
     expected = os.environ.get("HCA_ADMIN_TOKEN")
     if not expected:
         raise HTTPException(status_code=403, detail="admin token is not configured")
@@ -107,6 +111,8 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     signature = h.get(devicesig.HEADER_SIGNATURE, "").strip()
     if not (device_id and timestamp and nonce and signature):
         raise _device_401("missing device signature headers")
+    if len(device_id) > 100 or len(timestamp) > 16 or len(nonce) > 128 or len(signature) > 100:
+        raise _device_401("invalid device signature header size")
     if not devicesig.timestamp_is_fresh(timestamp):
         raise _device_401("stale device signature timestamp")
 
@@ -115,6 +121,9 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
         raise HTTPException(status_code=403, detail="unknown device")
     if device.revoked_at is not None:
         raise HTTPException(status_code=403, detail="device revoked")
+    tenant = db.get(models.Tenant, device.tenant_id)
+    if tenant is None or tenant.disabled_at is not None:
+        raise HTTPException(status_code=403, detail="tenant disabled")
 
     body = await request.body()
     path_and_query = request.url.path + (f"?{request.url.query}" if request.url.query else "")
@@ -147,7 +156,44 @@ def google_link_required() -> bool:
     return os.environ.get("HCA_REQUIRE_GOOGLE_LINK", "").strip() == "1"
 
 
-def require_linked_device(device: models.Device = Depends(require_device)) -> models.Device:
+def device_is_authorized(db: Session, device: models.Device) -> bool:
+    """Current membership, including changes made after an earlier sign-in."""
+    if device is None or device.revoked_at is not None:
+        return False
+    tenant = db.execute(select(models.Tenant).where(models.Tenant.id == device.tenant_id)
+                        .execution_options(populate_existing=True)).scalar_one_or_none()
+    if tenant is None or tenant.disabled_at is not None:
+        return False
+    if not google_link_required():
+        return True
+    if not device.google_sub or not device.google_email:
+        return False
+    from .tenancy import owner_emails_for
+    from .googleauth import owner_emails
+    allowed = owner_emails_for(db, device.tenant_id)
+    allowed = owner_emails() if allowed is None else allowed
+    return device.google_email.lower() in allowed
+
+
+def require_linked_device(device: models.Device = Depends(require_device), db: Session = Depends(get_db)) -> models.Device:
     if google_link_required() and not device.google_sub:
         raise HTTPException(status_code=403, detail="device is not linked to a Google account")
+    if not device_is_authorized(db, device):
+        raise HTTPException(status_code=403, detail="device owner is no longer authorized")
+    # Membership queries must not leave a transaction open for an SSE lifetime.
+    db.commit()
     return device
+
+
+def require_current_device(db: Session, device: models.Device) -> models.Device:
+    """Refresh authorization inside a write transaction, after any row wait.
+
+    A dependency's successful check is not a permanent membership snapshot.
+    This is the decision check for this transaction; revocation commits
+    observed here take precedence over the pending write.
+    """
+    current = db.execute(select(models.Device).where(models.Device.id == device.id)
+                         .execution_options(populate_existing=True)).scalar_one_or_none()
+    if not device_is_authorized(db, current):
+        raise HTTPException(status_code=403, detail="device owner is no longer authorized")
+    return current

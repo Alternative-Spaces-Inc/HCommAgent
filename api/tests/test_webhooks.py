@@ -19,15 +19,13 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 
 from app.main import app
-from app.db import Base, engine, SessionLocal
+from app.db import SessionLocal
 from authhelper import agent_auth, DESTINATION_SECRETS, register_destination, TEST_HOOK_URL
 from app import jobs, models, webhooks
 from app.expiry import run_expiry_sweep
 from deviceauth import human_post
 from conftest import PUBLIC_TEST_ADDRESS
 
-Base.metadata.drop_all(bind=engine)
-Base.metadata.create_all(bind=engine)
 
 client = TestClient(app)
 
@@ -89,8 +87,7 @@ def test_answer_enqueues_then_the_runner_posts_a_signed_pinned_request(webhook_r
     results = _run_jobs()
     assert [r["action"] for r in results if r.get("request_id") == request_id] == ["delivered"]
 
-    assert len(webhook_recorder.requests) == 1
-    req = webhook_recorder.requests[0]
+    [req] = [r for r in webhook_recorder.requests if r.headers["x-hca-request-id"] == request_id]
     # Pinned: connected to the checked address, Host and SNI name the registered host.
     assert req.url.host == PUBLIC_TEST_ADDRESS and req.url.path == "/hook"
     assert req.headers["host"] == "example.test"
@@ -107,14 +104,14 @@ def test_answer_enqueues_then_the_runner_posts_a_signed_pinned_request(webhook_r
 
     # The signature verifies with the documented receiver check under the secret returned once.
     assert webhooks.verify_signature(_secret_for(), req.headers["x-hca-signature"], req.content,
-                                     now=int(req.headers["x-hca-timestamp"]))
+                                     delivery_id=req.headers["x-hca-delivery-id"], now=int(req.headers["x-hca-timestamp"]))
     assert not webhooks.verify_signature("whsec_wrong", req.headers["x-hca-signature"], req.content,
-                                         now=int(req.headers["x-hca-timestamp"]))
+                                         delivery_id=req.headers["x-hca-delivery-id"], now=int(req.headers["x-hca-timestamp"]))
     assert not webhooks.verify_signature(_secret_for(), req.headers["x-hca-signature"], req.content + b" ",
-                                         now=int(req.headers["x-hca-timestamp"]))
+                                         delivery_id=req.headers["x-hca-delivery-id"], now=int(req.headers["x-hca-timestamp"]))
     # A stale timestamp is refused.
     assert not webhooks.verify_signature(_secret_for(), req.headers["x-hca-signature"], req.content,
-                                         now=int(req.headers["x-hca-timestamp"]) + 301)
+                                         delivery_id=req.headers["x-hca-delivery-id"], now=int(req.headers["x-hca-timestamp"]) + 301)
 
     rows = _attempts(request_id)
     assert [(r.attempt, r.status_code, r.ok, r.delivery_id) for r in rows] == [(1, 200, True, d.id)]
@@ -198,22 +195,22 @@ def test_failure_reschedules_and_the_retry_survives_a_restart(webhook_recorder):
     assert d2.state == "delivered" and d2.attempts == 2
 
 
-def test_seventh_failure_marks_the_delivery_dead_with_an_audit_row(webhook_recorder):
+def test_eighth_failure_marks_the_delivery_dead_with_an_audit_row(webhook_recorder):
     request_id = _create_and_answer()
     [d] = _deliveries(request_id)
     webhook_recorder.status_code = 500
     actions = []
     for _ in range(9):  # more passes than attempts: the dead row is never retried
         actions += [r["action"] for r in _run_jobs() if r.get("request_id") == request_id]
-    assert actions == ["retry_scheduled"] * 6 + ["dead"]
-    assert len([r for r in webhook_recorder.requests if r.headers["x-hca-request-id"] == request_id]) == 7
+    assert actions == ["retry_scheduled"] * 7 + ["dead"]
+    assert len([r for r in webhook_recorder.requests if r.headers["x-hca-request-id"] == request_id]) == 8
     [d1] = _deliveries(request_id)
-    assert d1.state == "dead" and d1.attempts == 7 and d1.dead_at is not None
+    assert d1.state == "dead" and d1.attempts == 8 and d1.dead_at is not None
     with SessionLocal() as db:
         ev = db.execute(select(models.WebhookDestinationEvent).where(
             models.WebhookDestinationEvent.action == "delivery.dead",
             models.WebhookDestinationEvent.destination_id == d.destination_id)).scalars().all()
-    assert any(e.detail["delivery_id"] == d.id and e.detail["attempts"] == 7 for e in ev)
+    assert any(e.detail["delivery_id"] == d.id and e.detail["attempts"] == 8 for e in ev)
 
 
 def test_connect_error_is_recorded_and_retried(webhook_recorder, monkeypatch):
@@ -273,8 +270,8 @@ def test_rotation_overlap_signs_under_both_secrets(webhook_recorder):
     header = req.headers["x-hca-signature"]
     assert header.count("v1=") == 2
     ts = int(req.headers["x-hca-timestamp"])
-    assert webhooks.verify_signature(old_secret, header, req.content, now=ts)
-    assert webhooks.verify_signature(new_secret, header, req.content, now=ts)
+    assert webhooks.verify_signature(old_secret, header, req.content, delivery_id=req.headers["x-hca-delivery-id"], now=ts)
+    assert webhooks.verify_signature(new_secret, header, req.content, delivery_id=req.headers["x-hca-delivery-id"], now=ts)
 
 
 def test_poll_mode_is_recorded_as_skipped(webhook_recorder):

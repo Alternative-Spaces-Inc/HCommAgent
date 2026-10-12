@@ -1,4 +1,5 @@
 import asyncio
+import time
 
 from typing import Optional
 
@@ -11,7 +12,7 @@ from . import models
 from .db import get_db, SessionLocal
 from .events import SUPERSEDED_ENVELOPE, is_closed, subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
 from .requests_api import _ask_to_collection_request
-from .auth import require_linked_device, google_link_required
+from .auth import require_linked_device, google_link_required, device_is_authorized
 from . import routing
 from datetime import datetime, timezone
 
@@ -33,7 +34,8 @@ def _sort_key(ask: models.Ask):
 
 @router.get("")
 def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
-    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES)).where(models.Ask.tenant_id == device.tenant_id)).scalars().all()
+    asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))
+                      .where(models.Ask.tenant_id == device.tenant_id)).scalars().all()
     # HCA-P14: a device sees an ask only once its rank's window has opened
     # (app/routing.py). The poll path applies the same rule as the stream.
     now = datetime.now(timezone.utc)
@@ -44,7 +46,7 @@ def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(re
     # CollectionRequest fields; the extension needs it to build the
     # POST /v1/requests/{request_id}/answer path (HCA-P6 proof found the
     # list without it, so the popup answered against "undefined").
-    return [_ask_to_collection_request(a) | {"request_id": a.id} for a in ordered]
+    return [_ask_to_collection_request(a) | {"request_id": a.id, "expires_at": a.expires_at} for a in ordered]
 
 
 def _device_still_authorized(device_id: str) -> bool:
@@ -52,7 +54,7 @@ def _device_still_authorized(device_id: str) -> bool:
     next keep-alive tick instead of keeping it until it disconnects."""
     with SessionLocal() as db:
         d = db.get(models.Device, device_id)
-        return d is not None and d.revoked_at is None
+        return device_is_authorized(db, d)
 
 
 def _replay_for(device: models.Device, after_id: int):
@@ -76,16 +78,41 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
     water mark)."""
     q = subscribe(device.id, device.tenant_id)
     try:
+        if not await asyncio.to_thread(authorized_fn, device.id):
+            yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+            return
+        next_auth_check = time.monotonic() + keepalive_seconds
         yield ": connected\n\n"
         high_water = -1
         if last_event_id is not None:
             for envelope in await asyncio.to_thread(_replay_for, device, last_event_id):
+                if time.monotonic() >= next_auth_check:
+                    if not await asyncio.to_thread(authorized_fn, device.id):
+                        yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+                        return
+                    next_auth_check = time.monotonic() + keepalive_seconds
                 high_water = max(high_water, envelope["id"])
                 mark_sent(q, envelope["id"])
                 yield format_sse(envelope)
         while True:
+            if time.monotonic() >= next_auth_check:
+                if not await asyncio.to_thread(authorized_fn, device.id):
+                    yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+                    return
+                next_auth_check = time.monotonic() + keepalive_seconds
             try:
-                envelope = await asyncio.wait_for(q.get(), timeout=keepalive_seconds)
+                # Traffic must not restart the authorization clock. A quiet
+                # period after an event just before the deadline gets only
+                # the remaining interval, rather than another full interval.
+                remaining = max(0.0, next_auth_check - time.monotonic())
+                envelope = await asyncio.wait_for(q.get(), timeout=remaining)
+                # An event can finish waiting at the authorization deadline.
+                # Check before exposing its contents to the stream.
+                if time.monotonic() >= next_auth_check:
+                    if not await asyncio.to_thread(authorized_fn, device.id):
+                        yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
+                        return
+                    next_auth_check = time.monotonic() + keepalive_seconds
                 if envelope.get("event") == "stream.closed":
                     # HCA-P20 Day 5: a newer stream of this device took our
                     # slot (STREAM_MAX_PER_DEVICE); tell the client and stop.
@@ -102,6 +129,7 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
                 if not await asyncio.to_thread(authorized_fn, device.id):
                     yield "event: stream.closed\ndata: {\"reason\": \"device revoked\"}\n\n"
                     return
+                next_auth_check = time.monotonic() + keepalive_seconds
                 yield ": keep-alive\n\n"
     finally:
         unsubscribe(q)

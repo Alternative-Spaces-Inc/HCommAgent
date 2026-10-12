@@ -122,9 +122,7 @@ def verify_access_token(access_token: str, allowed_emails: Optional[set] = None)
         raise GoogleAuthError(401, "google token carries no account")
 
     allowed = owner_emails() if allowed_emails is None else {e.lower() for e in allowed_emails}
-    if allowed_emails is not None and email not in allowed:
+    if not allowed or email not in allowed:
         raise GoogleAuthError(403, "google account is not an owner of this tenant")
-    if allowed and email not in allowed:
-        raise GoogleAuthError(403, "google account is not an owner of this deployment")
 
     return GoogleIdentity(sub=sub, email=email)
