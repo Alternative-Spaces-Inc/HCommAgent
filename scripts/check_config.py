@@ -88,7 +88,11 @@ def main() -> int:
     ap.add_argument("path", nargs="?", help="JSON file; stdin when omitted")
     ap.add_argument("--expect-commit", default=None, help="commit sha the revision must be labelled with")
     args = ap.parse_args()
-    raw = open(args.path).read() if args.path else sys.stdin.read()
+    if args.path:
+        with open(args.path) as f:
+            raw = f.read()
+    else:
+        raw = sys.stdin.read()
     try:
         obj = json.loads(raw)
     except json.JSONDecodeError as exc:
