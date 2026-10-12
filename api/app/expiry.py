@@ -29,7 +29,7 @@ from sqlalchemy import select
 from . import models
 from .requests_api import TERMINAL_STATES, _audit_to_answer_record
 from .events import publish
-from .webhooks import deliver_outcome
+from . import webhooks
 
 AUTO_DENY_VALUE = {"decision": "deny", "reason": "auto_deny: deadline passed with no answer"}
 SWEPT_BY = "system:expiry_sweep"
@@ -72,17 +72,18 @@ def expire_ask(db: Session, ask_id: str, now: datetime = None) -> Optional[dict]
         )
         db.add(row)
         ask.state = "expired"
-        db.commit()
+        db.flush()
         record = _audit_to_answer_record(row)
+        webhooks.enqueue(db, ask, "request.expired", ask.state, record, now)
+        db.commit()
         publish("request.expired", record, tenant_id=ask.tenant_id)
-        deliver_outcome(ask.id, "request.expired", ask.state, record, ask.deliver_to)
         return {"request_id": ask.id, "expiry_policy": "auto_deny", "action": "auto_denied"}
 
     # expiry_policy == "expire": plain timeout, no answer recorded.
     ask.state = "expired"
+    webhooks.enqueue(db, ask, "request.expired", ask.state, None, now)
     db.commit()
     publish("request.expired", {"request_id": ask.id, "state": "expired"}, tenant_id=ask.tenant_id)
-    deliver_outcome(ask.id, "request.expired", ask.state, None, ask.deliver_to)
     return {"request_id": ask.id, "expiry_policy": "expire", "action": "expired"}
 
 

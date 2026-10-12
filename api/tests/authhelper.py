@@ -51,5 +51,11 @@ def register_destination(caller: str, url: str) -> str:
         existing = registry.find_active_by_url(db, models.DEFAULT_TENANT_ID, caller, url)
         if existing is not None:
             return existing.id
-        dest, _secret = registry.register(db, tenant_id=models.DEFAULT_TENANT_ID, caller=caller, url=url)
+        dest, secret = registry.register(db, tenant_id=models.DEFAULT_TENANT_ID, caller=caller, url=url)
+        DESTINATION_SECRETS[dest.id] = secret
         return dest.id
+
+
+# HCA-P21a Day 2: destination id to the whsec_ secret register_destination
+# minted, so a test can verify X-HCA-Signature the way a receiver would.
+DESTINATION_SECRETS: dict = {}

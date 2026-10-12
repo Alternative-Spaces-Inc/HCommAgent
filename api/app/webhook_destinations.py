@@ -20,7 +20,7 @@ from typing import List, Optional
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from . import models, ssrf
+from . import models, ssrf, webhook_crypto
 from .apikeys import _hash_secret
 
 SECRET_PREFIX = "whsec_"
@@ -102,6 +102,7 @@ def register(db: Session, *, tenant_id: str, caller: str, url: str, now: Optiona
         secret_prefix=secret[:len(SECRET_PREFIX) + 8], secret_hash=_hash_secret(secret),
         pinned_addresses=checked.addresses, created_at=_naive(now),
     )
+    dest.secret_enc = webhook_crypto.encrypt(secret, destination_id=dest.id)
     db.add(dest)
     db.flush()
     _audit(db, dest, "registered", caller, {"url": url, "addresses": checked.addresses}, now)
@@ -117,8 +118,10 @@ def rotate(db: Session, *, tenant_id: str, caller: str, destination_id: str, now
         raise RegistryError("webhook destination is revoked")
     secret = _new_secret()
     dest.previous_secret_hash = dest.secret_hash
+    dest.previous_secret_enc = dest.secret_enc
     dest.previous_valid_until = _naive(now + ROTATION_OVERLAP)
     dest.secret_hash = _hash_secret(secret)
+    dest.secret_enc = webhook_crypto.encrypt(secret, destination_id=dest.id)
     dest.secret_prefix = secret[:len(SECRET_PREFIX) + 8]
     dest.rotated_at = _naive(now)
     _audit(db, dest, "rotated", caller, {"previous_valid_until": dest.previous_valid_until.isoformat() + "Z"}, now)
@@ -145,4 +148,23 @@ def current_secret_hashes(dest: models.WebhookDestination, now: Optional[datetim
     out = [dest.secret_hash]
     if dest.previous_secret_hash and dest.previous_valid_until and dest.previous_valid_until > now:
         out.append(dest.previous_secret_hash)
+    return out
+
+
+def signing_secrets(dest: models.WebhookDestination, now: Optional[datetime] = None) -> List[str]:
+    """The plaintext secrets a delivery is signed under right now (decision
+    8): the current one, plus the previous one while its overlap lasts.
+    Empty when the row predates Day 2 and holds a hash only; the caller must
+    rotate the destination to get signing material."""
+    now = _naive(now or _now())
+    out: List[str] = []
+    try:
+        out.append(webhook_crypto.decrypt(dest.secret_enc or "", destination_id=dest.id))
+    except webhook_crypto.SecretUnreadable:
+        return []
+    if dest.previous_secret_enc and dest.previous_valid_until and dest.previous_valid_until > now:
+        try:
+            out.append(webhook_crypto.decrypt(dest.previous_secret_enc, destination_id=dest.id))
+        except webhook_crypto.SecretUnreadable:
+            pass
     return out

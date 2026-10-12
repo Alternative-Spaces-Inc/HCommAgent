@@ -550,7 +550,14 @@ paths:
         and Teredo IPv6 forms are judged by the inner address). The addresses
         it resolved to are pinned on the row and re-checked at every send. The
         same url cannot be registered twice while active; rotate or revoke.
-        Each registration writes a registry audit row.
+        Each registration writes a registry audit row. Deliveries to the
+        destination (Day 2) carry X-HCA-Delivery-Id (stable across retries,
+        deduplicate on it), X-HCA-Timestamp (unix seconds), X-HCA-Event,
+        X-HCA-Request-Id and X-HCA-Signature "t=<ts>,v1=<hex>" where v1 is
+        HMAC-SHA256 under the secret over "<ts>.<raw body>"; during a
+        rotation overlap a second v1 under the previous secret follows.
+        Failed deliveries retry at 1 s, 5 s, 30 s, 2 min, 10 min, 30 min
+        and 1 h (jittered) and are marked dead after the 7th failure.
       security:
         - AgentKey: []
       requestBody:

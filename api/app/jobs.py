@@ -46,7 +46,8 @@ log = logging.getLogger("hca.jobs")
 
 KIND_ESCALATE = "escalate"
 KIND_EXPIRE = "expire"
-KINDS = (KIND_ESCALATE, KIND_EXPIRE)
+KIND_WEBHOOK = "webhook"  # HCA-P21a Day 2: one outbox attempt, ref_id = webhook_deliveries.id
+KINDS = (KIND_ESCALATE, KIND_EXPIRE, KIND_WEBHOOK)
 
 POLL_SECONDS = float(os.environ.get("HCA_JOBS_POLL_SECONDS", "2"))
 LEASE_SECONDS = int(os.environ.get("HCA_JOBS_LEASE_SECONDS", "60"))
@@ -75,12 +76,16 @@ def _session_factory():
 
 # ------------------------------------------------------------------ writing
 
-def schedule(db, *, tenant_id: str, ask_id: str, kind: str, run_at: datetime, now: Optional[datetime] = None) -> models.ScheduledJob:
+def schedule(db, *, tenant_id: str, ask_id: str, kind: str, run_at: datetime, now: Optional[datetime] = None,
+             ref_id: Optional[str] = None) -> models.ScheduledJob:
     """Add one job row to the caller's transaction (the caller commits with the ask)."""
     if kind not in KINDS:
         raise ValueError(f"unknown job kind: {kind}")
+    if kind == KIND_WEBHOOK and not ref_id:
+        raise ValueError("webhook jobs need ref_id (the delivery id)")
     now = now or datetime.now(timezone.utc)
-    row = models.ScheduledJob(tenant_id=tenant_id, ask_id=ask_id, kind=kind, run_at=_naive(run_at), created_at=_naive(now))
+    row = models.ScheduledJob(tenant_id=tenant_id, ask_id=ask_id, kind=kind, run_at=_naive(run_at), created_at=_naive(now),
+                              ref_id=ref_id)
     db.add(row)
     return row
 
@@ -174,11 +179,14 @@ def claim_due(db, owner: str, now: Optional[datetime] = None, limit: int = CLAIM
 
 # ------------------------------------------------------------------ running
 
-def _run_one(job_id: str, kind: str, ask_id: str, session_factory, now: datetime) -> Optional[dict]:
+def _run_one(job_id: str, kind: str, ask_id: str, session_factory, now: datetime, ref_id: Optional[str] = None) -> Optional[dict]:
     from . import routing
     from .auth import google_link_required
     from .events import publish
     from .expiry import expire_ask
+    if kind == KIND_WEBHOOK:
+        from .webhooks import attempt_delivery
+        return attempt_delivery(ref_id or "", session_factory, now)
     if kind == KIND_ESCALATE:
         env = routing.fire_escalation(ask_id, session_factory, google_link_required, publish, now=now)
         return {"action": "escalated", "event_id": env.get("id")} if env else {"action": "nothing_to_do"}
@@ -196,9 +204,9 @@ def run_claimed(jobs: List[models.ScheduledJob], session_factory=None, now: Opti
     now_naive = _naive(now)
     results: List[dict] = []
     for job in jobs:
-        job_id, kind, ask_id, attempts = job.id, job.kind, job.ask_id, int(job.attempts or 0)
+        job_id, kind, ask_id, attempts, ref_id = job.id, job.kind, job.ask_id, int(job.attempts or 0), job.ref_id
         try:
-            result = _run_one(job_id, kind, ask_id, session_factory, now)
+            result = _run_one(job_id, kind, ask_id, session_factory, now, ref_id)
             with session_factory() as db:
                 db.execute(update(models.ScheduledJob).where(models.ScheduledJob.id == job_id)
                            .values(done_at=now_naive, result=result, lease_owner=None, lease_expires_at=None))

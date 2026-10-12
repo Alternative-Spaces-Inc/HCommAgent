@@ -28,6 +28,7 @@ The admin token is read from the env var HCA_ADMIN_TOKEN, never from argv.
 import argparse
 import base64
 import hashlib
+import hmac
 import json
 import os
 import secrets
@@ -107,12 +108,32 @@ class _Hook(BaseHTTPRequestHandler):
     def do_POST(self):
         n = int(self.headers.get("Content-Length", "0"))
         body = self.rfile.read(n) if n else b""
-        _Hook.received.append({"headers": dict(self.headers), "body": json.loads(body or b"{}")})
+        _Hook.received.append({"headers": dict(self.headers), "raw": body, "body": json.loads(body or b"{}")})
         self.send_response(200)
         self.end_headers()
 
     def log_message(self, *a):
         pass
+
+
+def verify_signature(secret: str, header: str, body: bytes, tolerance: int = 300) -> bool:
+    """Receiver side check of X-HCA-Signature "t=<ts>,v1=<hex>[,v1=<hex>]":
+    recompute HMAC-SHA256(secret, "<ts>.<body>") and accept when any v1
+    matches and ts is within tolerance of now."""
+    ts, sigs = None, []
+    for item in header.split(","):
+        k, _, v = item.strip().partition("=")
+        if k == "t":
+            try:
+                ts = int(v)
+            except ValueError:
+                return False
+        elif k == "v1":
+            sigs.append(v)
+    if ts is None or not sigs or abs(int(time.time()) - ts) > tolerance:
+        return False
+    expected = hmac.new(secret.encode(), f"{ts}.".encode() + body, hashlib.sha256).hexdigest()
+    return any(hmac.compare_digest(expected, s) for s in sigs)
 
 
 def start_hook() -> str:
@@ -192,6 +213,7 @@ def main():
     code, body = http("POST", f"{base}/v1/webhooks", {"url": hook_url}, agent)
     check("POST /v1/webhooks", code == 201 and body.get("id", "").startswith("whd_") and body.get("secret", "").startswith("whsec_"), f"{code} {body if code != 201 else ''}")
     destination_id = body["id"]
+    hook_secret = body["secret"]
     code, body = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "webhook", "url": hook_url}), agent)
     check("POST /v1/requests (webhook)", code == 201 and body.get("state") == "queued", f"{code} {body if code != 201 else ''}")
     rid = body["request_id"]
@@ -216,6 +238,13 @@ def main():
     got = _Hook.received[0] if _Hook.received else None
     check("webhook delivered", got is not None and got["headers"].get("X-HCA-Event") == "request.answered"
           and got["headers"].get("X-HCA-Request-Id") == rid, "none within 20s" if got is None else "")
+    # HCA-P21a Day 2: the delivery is signed under the secret returned once at
+    # registration; this is the receiver check docs/webhooks.md documents.
+    sig_ok = False
+    if got is not None:
+        sig_ok = verify_signature(hook_secret, got["headers"].get("X-HCA-Signature", ""), got["raw"])
+    check("webhook signature verifies", sig_ok and bool(got and got["headers"].get("X-HCA-Delivery-Id", "").startswith("whdl_")),
+          "" if sig_ok else f"header {got['headers'].get('X-HCA-Signature') if got else None}")
 
     q = "/v1/audit?" + "agent=" + caller
     code, body = http("GET", f"{base}{q}", headers=human("GET", q))

@@ -3,7 +3,7 @@ from datetime import datetime, timedelta, timezone
 
 from typing import Optional
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -12,7 +12,7 @@ from . import models
 from .db import get_db
 from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, AnswerRecord, RequestView, CancelRequestBody
 from .events import publish
-from .webhooks import deliver_outcome
+from . import webhooks
 from . import webhook_destinations
 from .auth import require_agent_key, require_linked_device, google_link_required
 from . import routing, jobs
@@ -204,7 +204,7 @@ def get_request(request_id: str, db: Session = Depends(get_db), key: models.ApiK
 
 
 @router.post("/{request_id}/answer", status_code=201, response_model=AnswerRecord)
-def answer_request(request_id: str, body: AnswerSubmission, request: Request, background: BackgroundTasks, db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
+def answer_request(request_id: str, body: AnswerSubmission, request: Request, db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
     replayed = idempotency.replay(db, device.tenant_id, device.id, "answer", idem_key, payload)
@@ -248,6 +248,9 @@ def answer_request(request_id: str, body: AnswerSubmission, request: Request, ba
     db.add(row)
     ask.state = "answered"
     try:
+        db.flush()  # the audit_rows INSERT runs here; a race loser fails on its unique ask_id
+        record = _audit_to_answer_record(row)
+        webhooks.enqueue(db, ask, "request.answered", ask.state, record, now)
         db.commit()
     except IntegrityError:
         # Two answers for the same ask raced past the state check above
@@ -261,7 +264,6 @@ def answer_request(request_id: str, body: AnswerSubmission, request: Request, ba
 
     record = _audit_to_answer_record(row)
     publish("request.answered", record, tenant_id=ask.tenant_id)
-    background.add_task(deliver_outcome, ask.id, "request.answered", ask.state, record, ask.deliver_to)
     idempotency.store(db, ask.tenant_id, device.id, "answer", idem_key, payload, 201, record)
     return record
 
@@ -275,7 +277,7 @@ def _outcome_of(value) -> Optional[str]:
 
 
 @router.post("/{request_id}/cancel", response_model=RequestReceipt)
-def cancel_request(request_id: str, body: CancelRequestBody, request: Request, background: BackgroundTasks, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def cancel_request(request_id: str, body: CancelRequestBody, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
     replayed = idempotency.replay(db, key.tenant_id, key.caller, "cancel", idem_key, payload)
@@ -306,6 +308,9 @@ def cancel_request(request_id: str, body: CancelRequestBody, request: Request, b
     db.add(row)
     ask.state = "cancelled"
     try:
+        db.flush()  # the audit_rows INSERT runs here; a race loser fails on its unique ask_id
+        record = _audit_to_answer_record(row)
+        webhooks.enqueue(db, ask, "request.cancelled", ask.state, record, now)
         db.commit()
     except IntegrityError:
         db.rollback()
@@ -313,7 +318,6 @@ def cancel_request(request_id: str, body: CancelRequestBody, request: Request, b
 
     record = _audit_to_answer_record(row)
     publish("request.cancelled", record, tenant_id=ask.tenant_id)
-    background.add_task(deliver_outcome, ask.id, "request.cancelled", ask.state, record, ask.deliver_to)
     receipt = {"request_id": ask.id, "state": ask.state}
     idempotency.store(db, key.tenant_id, key.caller, "cancel", idem_key, payload, 200, receipt)
     return receipt

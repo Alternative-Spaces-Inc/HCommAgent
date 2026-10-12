@@ -16,7 +16,8 @@
 #   4. run alembic upgrade head as a Cloud Run job against Cloud SQL
 #      (a job, not a startup hook, so migrations never race across instances)
 #   5. deploy the service revision
-#   6. smoke-live (HCA-P9): agent path against the new revision with the
+#   6. check-config (HCA-P21a): no local only switch on the live service
+#   7. smoke-live (HCA-P9): agent path against the new revision with the
 #      real admin token (Secret Manager): healthz, key, ask, read, cancel.
 #      The gate stays on; a test device cannot hold a Google account.
 #
@@ -192,6 +193,17 @@ steps:
           --allow-unauthenticated \
           --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
           --quiet
+
+  - id: check-config
+    # HCA-P21a Day 2: the deployed service must not carry local only switches
+    # (HCA_WEBHOOK_ALLOW_INSECURE would turn the webhook SSRF rules off).
+    name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: bash
+    args:
+      - -c
+      - |
+        set -euo pipefail
+        gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json | python3 scripts/check_config.py
 
   - id: smoke-live
     name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
