@@ -53,7 +53,7 @@ def main():
     args = parser.parse_args()
     try:
         allowlist = json.loads(args.allowlist_path.read_text())
-        if allowlist.get("allowed_differences") != []:
+        if not isinstance(allowlist, dict) or allowlist.get("allowed_differences") != []:
             raise ValueError("full contract parity permits no allowlisted differences")
         saved = yaml.safe_load(args.yaml_path.read_text())
         generated = load_app_schema()

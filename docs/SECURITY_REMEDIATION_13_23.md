@@ -18,7 +18,7 @@ This branch builds on the approval security fixes in [items 1 to 12](SECURITY_RE
 
 ## API resource and retention defaults
 
-The maximum HTTP request body is 1 MiB. Collection requests permit 500 options/rows and 50 delivery descriptors; answer paths permit 30 segments. Default strings are at most 4,000 characters, with tighter limits on identity/title/labels and other documented fields. Nested dictionaries/lists permit depth 12 and 10,000 visited values per field, with field names at most 100 characters. Non-finite numbers and unknown typed model fields are rejected.
+The maximum HTTP request body is 1 MiB. Collection requests permit 500 options/rows and 50 delivery descriptors; answer paths permit 30 segments. Default strings are at most 4,000 characters, with tighter limits on identity/title/labels and other documented fields. Client input dictionaries/lists permit depth 12 and 10,000 visited values per untyped field, with field names at most 100 characters. Non-finite numbers and unknown typed model fields are rejected.
 
 Typed nested records validate their own fields rather than applying one aggregate cap to a complete request and answer. Human answer output permits depth 14 and 10,009 nodes for the server's audit wrapper while preserving the input limits above. Boundary regressions cover successful answers, original metadata retention, identical idempotent replay and valid readback. Response timestamps identify UTC explicitly; input fingerprints and database storage retain their existing representation.
 

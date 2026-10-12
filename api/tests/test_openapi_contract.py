@@ -156,9 +156,10 @@ def test_all_device_headers_are_required_together_and_sweep_uses_its_own_bearer(
     assert schema["paths"]["/v1/internal/expiry-sweep"]["post"]["security"] == [{"SweepBearer": []}]
 
 
-def test_gate_refuses_exceptions(tmp_path):
+@pytest.mark.parametrize("contents", [{"allowed_differences": ["anything"]}, []])
+def test_gate_refuses_exceptions(tmp_path, contents):
     allowlist = tmp_path / "exceptions.json"
-    allowlist.write_text(json.dumps({"allowed_differences": ["anything"]}))
+    allowlist.write_text(json.dumps(contents))
     result = subprocess.run([sys.executable, str(GATE), "--allowlist-path", str(allowlist)],
                             capture_output=True, text=True, timeout=30)
     assert result.returncode == 1 and "no allowlisted differences" in result.stderr
