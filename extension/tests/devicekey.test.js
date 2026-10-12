@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import {
   b64url, canonicalString, deviceIdFromSpki, loadOrCreateDeviceKey, pathAndQueryOf,
-  sha256hex, signRequest, spkiToPem, STORAGE_KEY,
+  sha256hex, signRequest, spkiToPem, STORAGE_KEY, createSignedFetch,
 } from "../lib/devicekey.js";
 
 const subtle = webcrypto.subtle;
@@ -67,4 +67,55 @@ test("signRequest produces a raw 64-byte signature the public key verifies over 
   const bad = await subtle.verify({ name: "ECDSA", hash: { name: "SHA-256" } }, device.publicKey, raw,
     new TextEncoder().encode(canonical.replace("/answer", "/cancel")));
   assert.equal(bad, false);
+});
+
+
+test("key creation is single flight and the persisted private key cannot be exported", async () => {
+  const storage = memoryStorage();
+  const devices = await Promise.all(Array.from({ length: 30 }, () => loadOrCreateDeviceKey(storage, subtle)));
+  assert.equal(new Set(devices.map((device) => device.deviceId)).size, 1);
+  assert.equal(storage.map.get(STORAGE_KEY).privateKey.extractable, false);
+  await assert.rejects(subtle.exportKey("jwk", devices[0].privateKey));
+  assert.equal(storage.map.get(STORAGE_KEY).privateJwk, undefined);
+});
+
+test("independent contexts race for one atomic durable key and survive restart", async () => {
+  let stored;
+  let writes = 0;
+  const adapter = () => ({
+    async get() { return stored; },
+    async insertIfAbsent(_, candidate) { stored ||= structuredClone(candidate); writes += 1; return stored; },
+  });
+  const first = await Promise.all(Array.from({ length: 12 }, () => loadOrCreateDeviceKey(adapter(), subtle)));
+  assert.equal(new Set(first.map((device) => device.deviceId)).size, 1);
+  assert.ok(writes > 1, "multiple contexts actually attempted insertion");
+  assert.equal((await loadOrCreateDeviceKey(adapter(), subtle)).deviceId, first[0].deviceId);
+  await assert.rejects(subtle.exportKey("jwk", stored.privateKey));
+});
+
+test("legacy JWK migration keeps the registered identity and deletes plaintext only after persistence", async () => {
+  const pair = await subtle.generateKey({ name: "ECDSA", namedCurve: "P-256" }, true, ["sign", "verify"]);
+  const legacy = { privateJwk: await subtle.exportKey("jwk", pair.privateKey), publicJwk: await subtle.exportKey("jwk", pair.publicKey), createdAt: "2026-01-01" };
+  let stored, removed = false;
+  const device = await loadOrCreateDeviceKey({
+    async get() { return stored; }, async legacy() { return legacy; },
+    async insertIfAbsent(_, candidate) { stored = structuredClone(candidate); return stored; },
+    async clearLegacy() { assert.ok(stored.privateKey); removed = true; },
+  }, subtle);
+  assert.equal(device.deviceId, await deviceIdFromSpki(await subtle.exportKey("spki", pair.publicKey), subtle));
+  assert.equal(device.createdAt, "2026-01-01");
+  assert.equal(removed, true);
+  assert.equal(stored.privateKey.extractable, false);
+});
+
+test("signed fetch preserves idempotency headers and forcibly rejects redirects and cookies", async () => {
+  const device = await loadOrCreateDeviceKey(memoryStorage(), subtle);
+  let call;
+  const run = createSignedFetch(async () => device, async (...args) => { call = args; return {}; });
+  await run("https://api.example/answer", { method: "POST", body: "{}", redirect: "follow", credentials: "include", headers: new Headers({ "Idempotency-Key": "stable" }) });
+  assert.equal(call[1].redirect, "error");
+  assert.equal(call[1].credentials, "omit");
+  assert.equal(call[1].headers.get("Idempotency-Key"), "stable");
+  assert.equal(call[1].headers.get("X-HCA-Device"), device.deviceId);
+  for (const url of ["http://api.example/answer", "https://name:pw@api.example/answer", "https://api.example/answer#x"]) await assert.rejects(run(url));
 });

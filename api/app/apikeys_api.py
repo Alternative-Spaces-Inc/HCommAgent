@@ -1,8 +1,8 @@
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -15,10 +15,10 @@ router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
 
 
 class ApiKeyIssueRequest(BaseModel):
-    caller: str
+    caller: str = Field(min_length=1, max_length=100)
     # HCA-P19: the tenant the key acts for; omitted means the default tenant
     # so pre-P19 callers keep working.
-    tenant_id: str = models.DEFAULT_TENANT_ID
+    tenant_id: str = Field(default=models.DEFAULT_TENANT_ID, min_length=1, max_length=100)
 
 
 class ApiKeyIssueResponse(BaseModel):
@@ -51,9 +51,15 @@ def issue_key(body: ApiKeyIssueRequest, db: Session = Depends(get_db), _admin=De
         raise HTTPException(status_code=422, detail=str(e)) from None
 
 
-@router.get("", response_model=list[ApiKeyView])
-def list_keys(db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
-    rows = db.execute(select(models.ApiKey).order_by(models.ApiKey.created_at)).scalars().all()
+@router.get("", response_model=list[ApiKeyView], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
+def list_keys(response: Response, limit: int = Query(default=200, ge=1, le=500),
+               after: str = Query(default="", max_length=100),
+               db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    rows = db.execute(select(models.ApiKey).where(models.ApiKey.key_prefix > after)
+                      .order_by(models.ApiKey.key_prefix).limit(limit + 1)).scalars().all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-HCA-Next-Cursor"] = rows[-1].key_prefix
     return [_view(r) for r in rows]
 
 

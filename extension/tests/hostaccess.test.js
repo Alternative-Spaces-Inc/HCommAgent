@@ -6,8 +6,9 @@ test("originPatternFor maps a service URL to its origin pattern", () => {
   assert.equal(originPatternFor("https://api-service-abc123-uw.example.test"), "https://api-service-abc123-uw.example.test/*");
 });
 
-test("originPatternFor drops any path, query and trailing slash", () => {
-  assert.equal(originPatternFor("https://example.test/v1/inbox?x=1/"), "https://example.test/*");
+test("originPatternFor refuses paths, queries and fragments", () => {
+  for (const url of ["https://example.test/v1/inbox", "https://example.test?x=1", "https://example.test/#x"]) assert.throws(() => originPatternFor(url), /origin without/);
+  assert.equal(originPatternFor("https://example.test/"), "https://example.test/*");
 });
 
 test("originPatternFor keeps a non-default port", () => {

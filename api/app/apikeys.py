@@ -24,14 +24,16 @@ import secrets
 from datetime import datetime, timezone
 from typing import Optional
 
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import select
+from sqlalchemy import select, func
 
 from . import models
 
 KEY_SCHEME = "hca_live"
 PREFIX_BYTES = 6
 SECRET_BYTES = 24
+MAX_ACTIVE_API_KEYS = max(1, int(os.environ.get("HCA_MAX_ACTIVE_API_KEYS", "1000")))
 
 
 HASH_SCHEME = "hmac256"
@@ -73,11 +75,18 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
     tenant = db.get(models.Tenant, tenant_id)
     if tenant is None or tenant.disabled_at is not None:
         raise ValueError("unknown or disabled tenant")
+    from .requests_api import _lock_tenant_for_quota
+    _lock_tenant_for_quota(db, tenant_id)
     prefix = secrets.token_hex(PREFIX_BYTES)
     secret = secrets.token_urlsafe(SECRET_BYTES)
     plaintext = f"{KEY_SCHEME}_{prefix}_{secret}"
 
     existing = db.execute(select(models.ApiKey).where(models.ApiKey.caller == caller)).scalar_one_or_none()
+    if existing is None or existing.revoked_at is not None:
+        active = db.execute(select(func.count(models.ApiKey.id)).where(
+            models.ApiKey.tenant_id == tenant_id, models.ApiKey.revoked_at.is_(None))).scalar_one()
+        if active >= MAX_ACTIVE_API_KEYS:
+            raise HTTPException(status_code=429, detail="tenant active API key limit reached", headers={"Retry-After": "60"})
     now = datetime.now(timezone.utc)
     if existing:
         if existing.tenant_id != tenant_id:

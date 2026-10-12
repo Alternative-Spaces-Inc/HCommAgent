@@ -3,7 +3,7 @@ import time
 
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Header, Query
+from fastapi import APIRouter, Depends, Header, Query, Response
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import select
@@ -12,6 +12,7 @@ from . import models
 from .db import get_db, SessionLocal
 from .events import SUPERSEDED_ENVELOPE, is_closed, subscribe, unsubscribe, format_sse, replay, parse_last_event_id, mark_sent
 from .requests_api import _ask_to_collection_request
+from .schemas import InboxItem
 from .auth import require_linked_device, google_link_required, device_is_authorized
 from . import routing
 from datetime import datetime, timezone
@@ -32,10 +33,16 @@ def _sort_key(ask: models.Ask):
     return (has_deadline, deadline, is_red_gate)
 
 
-@router.get("")
-def list_inbox(db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
+@router.get("", response_model=list[InboxItem], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
+def list_inbox(response: Response, limit: int = Query(default=200, ge=1, le=500),
+               after: str = Query(default="", max_length=100),
+               db: Session = Depends(get_db), device: models.Device = Depends(require_linked_device)):
     asks = db.execute(select(models.Ask).where(models.Ask.state.in_(PENDING_STATES))
-                      .where(models.Ask.tenant_id == device.tenant_id)).scalars().all()
+                      .where(models.Ask.tenant_id == device.tenant_id, models.Ask.id > after)
+                      .order_by(models.Ask.id).limit(limit + 1)).scalars().all()
+    if len(asks) > limit:
+        asks = asks[:limit]
+        response.headers["X-HCA-Next-Cursor"] = asks[-1].id
     # HCA-P14: a device sees an ask only once its rank's window has opened
     # (app/routing.py). The poll path applies the same rule as the stream.
     now = datetime.now(timezone.utc)
@@ -85,6 +92,14 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
         yield ": connected\n\n"
         high_water = -1
         if last_event_id is not None:
+            def replay_gap():
+                from .events import replay_gap
+                with SessionLocal() as db:
+                    return replay_gap(db, tenant_id=device.tenant_id, device_id=device.id, after_id=last_event_id)
+            gap = await asyncio.to_thread(replay_gap)
+            if gap:
+                yield format_sse({"event": "stream.reset", "data": {"reason": gap}})
+                return
             for envelope in await asyncio.to_thread(_replay_for, device, last_event_id):
                 if time.monotonic() >= next_auth_check:
                     if not await asyncio.to_thread(authorized_fn, device.id):
@@ -113,7 +128,7 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
                         yield 'event: stream.closed\ndata: {"reason":"authorization revoked"}\n\n'
                         return
                     next_auth_check = time.monotonic() + keepalive_seconds
-                if envelope.get("event") == "stream.closed":
+                if envelope.get("event") in {"stream.closed", "stream.reset"}:
                     # HCA-P20 Day 5: a newer stream of this device took our
                     # slot (STREAM_MAX_PER_DEVICE); tell the client and stop.
                     yield format_sse(envelope)
@@ -135,7 +150,8 @@ async def inbox_event_source(device: models.Device, keepalive_seconds: float = S
         unsubscribe(q)
 
 
-@router.get("/stream")
+@router.get("/stream", response_class=StreamingResponse,
+            responses={200: {"content": {"text/event-stream": {"schema": {"type": "string"}}}}})
 async def stream_inbox(device: models.Device = Depends(require_linked_device),
                        last_event_id_header: Optional[str] = Header(default=None, alias="Last-Event-ID"),
                        since: Optional[str] = Query(default=None, description="Last event id seen, for clients that cannot set the Last-Event-ID header")):

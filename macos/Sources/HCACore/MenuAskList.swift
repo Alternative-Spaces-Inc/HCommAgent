@@ -3,8 +3,8 @@ import Foundation
 /// HCA-P15: pending asks as menu rows. Pure state so the ordering, the red
 /// gate prefix, the truncation and the suggested marker are unit tested
 /// without AppKit. Red gates come first, then by request id.
-public struct MenuAskRow: Equatable {
-    public struct Choice: Equatable {
+public struct MenuAskRow: Equatable, Sendable {
+    public struct Choice: Equatable, Sendable {
         public let optionId: String
         public let title: String
         public let suggested: Bool

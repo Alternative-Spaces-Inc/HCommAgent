@@ -1,214 +1,79 @@
-import { buildAnswerPayload, postAnswer, SUPPORTED_CONTROLS } from "./lib/api.js";
-import { isOfflineError, enqueue, readQueue, writeQueue, QUEUE_KEY } from "./lib/offlinequeue.js";
+import { buildAnswerPayload } from "./lib/api.js";
+import { renderControl, renderContext } from "./lib/controls.js";
 
-const CACHE_KEY = "hca_inbox_cache";
-const API_BASE_KEY = "hca_api_base";
-const FOCUS_KEY = "hca_focus_request_id";
-
-function requestIdOf(item) {
-  return item.request_id || item.id;
+const pending = new Set();
+let generation = 0;
+async function message(payload) {
+  const response = await chrome.runtime.sendMessage(payload);
+  if (!response?.ok) throw new Error(response?.error || "The background worker is unavailable. Reopen the popup.");
+  return response;
 }
-
-function optionLabel(opt) {
-  const desc = opt.description ? ` (${opt.description})` : "";
-  return `${opt.label}${desc}`;
+function setBusy(card, busy) {
+  card.setAttribute("aria-busy", String(busy));
+  for (const input of card.querySelectorAll("button, input, select, textarea")) input.disabled = busy;
 }
-
-function renderOptionsFor(control, options, suggestedId, containerId) {
-  const container = document.createElement("div");
-  container.className = "options";
-
-  if (control === "approve_deny") {
-    // Two prominent buttons rather than radio inputs, per
-    // docs/HCA_CHARTER_v1.md's control library: "approve_deny (one
-    // decision ... rendered inside the card when present)".
-    const wrap = document.createElement("div");
-    wrap.className = "actions";
-    for (const opt of options) {
-      const btn = document.createElement("button");
-      btn.textContent = optionLabel(opt);
-      btn.dataset.optionId = opt.id;
-      btn.className = opt.id === "deny" ? "deny" : "primary";
-      wrap.appendChild(btn);
-    }
-    container.appendChild(wrap);
-    return { container, getSelection: null, buttonGroup: container.querySelector(".actions") };
-  }
-
-  const inputType = control === "checkbox" ? "checkbox" : "radio";
-  for (const opt of options) {
-    const label = document.createElement("label");
-    const input = document.createElement("input");
-    input.type = inputType;
-    input.name = `${containerId}-choice`;
-    input.value = opt.id;
-    if (opt.id === suggestedId) input.checked = true;
-    label.appendChild(input);
-    label.append(optionLabel(opt) + (opt.id === suggestedId ? " (suggested)" : ""));
-    container.appendChild(label);
-  }
-
-  const getSelection = () => {
-    const inputs = [...container.querySelectorAll("input")];
-    if (control === "checkbox") {
-      return inputs.filter((i) => i.checked).map((i) => i.value);
-    }
-    const picked = inputs.find((i) => i.checked);
-    return picked ? picked.value : null;
-  };
-
-  return { container, getSelection, buttonGroup: null };
-}
-
-async function dropFromCache(requestId) {
-  const stored = await chrome.storage.local.get(CACHE_KEY);
-  const cache = stored[CACHE_KEY] || {};
-  delete cache[requestId];
-  await chrome.storage.local.set({ [CACHE_KEY]: cache });
-}
-
-// HCA-P12: a transport failure (no response at all) queues the unsigned
-// answer for the service worker to sign and send when the API is back.
-// Any server reply, including 5xx, is shown as an error instead: we were
-// online, and retrying a human decision blindly could double-post it.
-async function submitAnswer(apiBase, requestId, control, selection, cardEl, errorEl) {
-  errorEl.textContent = "";
-  let body;
+async function submit(snapshot, item, selection, card, error, reviewed) {
+  const id = item.request_id || item.id;
+  if (pending.has(id)) return;
+  error.textContent = "";
   try {
-    body = buildAnswerPayload({ control, selection });
-  } catch (e) {
-    errorEl.textContent = e.message || String(e);
-    return;
+    if (reviewed && !reviewed.checked) throw new Error("Review the decision context and confirm that you have read it first.");
+    buildAnswerPayload({ control: item.control, selection });
+  } catch (failure) { error.textContent = failure.message; return; }
+  pending.add(id); setBusy(card, true);
+  try {
+    await message({ type: "hca_submit_answer", origin: snapshot.origin, deviceId: snapshot.deviceId, requestId: id, control: item.control, selection });
+    card.remove();
+  } catch (failure) { error.textContent = failure.message; setBusy(card, false); }
+  finally { pending.delete(id); }
+}
+function renderCard(snapshot, item) {
+  const id = item.request_id || item.id;
+  const card = document.createElement("section"); card.className = `card${item.red_gate ? " red-gate" : ""}`;
+  const title = document.createElement("h2"); title.id = `title-${id}`; title.textContent = item.title; card.setAttribute("aria-labelledby", title.id); card.appendChild(title);
+  for (const [text, className] of [[item.why, "why"], [item.suggested?.why ? `Suggestion: ${item.suggested.why}` : null, "suggested"]]) {
+    if (text) { const paragraph = document.createElement("p"); paragraph.className = className; paragraph.textContent = text; card.appendChild(paragraph); }
+  }
+  card.appendChild(renderContext(document, item));
+  const error = document.createElement("p"); error.className = "error"; error.setAttribute("role", "alert");
+  let reviewed;
+  if (item.red_gate) {
+    const label = document.createElement("label"); label.className = "review-confirm";
+    reviewed = document.createElement("input"); reviewed.type = "checkbox"; label.append(reviewed, "I have reviewed the resource, change, impact, command and rollback."); card.appendChild(label);
   }
   try {
-    await postAnswer(apiBase, requestId, body);
-    await dropFromCache(requestId);
-    cardEl.remove();
-    await renderQueueNotice();
-  } catch (e) {
-    if (!isOfflineError(e)) {
-      errorEl.textContent = e.message || String(e);
-      return;
+    const control = renderControl(document, item, id); card.appendChild(control.container);
+    for (const button of control.buttons) button.addEventListener("click", () => submit(snapshot, item, button.dataset.optionId, card, error, reviewed));
+    if (control.getSelection) {
+      const button = document.createElement("button"); button.className = "primary"; button.type = "button"; button.textContent = "Submit response";
+      button.addEventListener("click", () => submit(snapshot, item, control.getSelection(), card, error, reviewed)); card.appendChild(button);
     }
-    const queue = enqueue(await readQueue(), { requestId, body });
-    await writeQueue(queue);
-    await dropFromCache(requestId);
-    cardEl.remove();
-    chrome.runtime.sendMessage({ type: "hca_flush_queue" }).catch(() => {});
-    await renderQueueNotice();
-  }
-}
-
-async function renderQueueNotice() {
-  const el = document.getElementById("queue-notice");
-  if (!el) return;
-  const queue = await readQueue();
-  if (!queue.length) { el.hidden = true; el.textContent = ""; return; }
-  el.hidden = false;
-  el.textContent = queue.length === 1
-    ? "1 answer saved offline; it will be sent when the API is reachable."
-    : `${queue.length} answers saved offline; they will be sent when the API is reachable.`;
-}
-
-function renderCard(apiBase, item, isFocused) {
-  const requestId = requestIdOf(item);
-  const card = document.createElement("div");
-  card.className = "card" + (item.red_gate ? " red-gate" : "");
-  card.id = `hca-card-${requestId}`;
-
-  const title = document.createElement("div");
-  title.className = "title";
-  title.textContent = item.title;
-  card.appendChild(title);
-
-  if (item.why) {
-    const why = document.createElement("div");
-    why.className = "why";
-    why.textContent = item.why;
-    card.appendChild(why);
-  }
-
-  if (item.suggested && item.suggested.why) {
-    const suggested = document.createElement("div");
-    suggested.className = "suggested";
-    suggested.textContent = `Suggested: ${item.suggested.why}`;
-    card.appendChild(suggested);
-  }
-
-  const control = item.control;
-  const errorEl = document.createElement("div");
-  errorEl.className = "error";
-
-  if (!SUPPORTED_CONTROLS.has(control)) {
-    const note = document.createElement("div");
-    note.className = "unsupported";
-    note.textContent = `This client does not yet render the "${control}" control. Answer from another surface.`;
-    card.appendChild(note);
-    return card;
-  }
-
-  const { container, getSelection, buttonGroup } = renderOptionsFor(
-    control,
-    item.options_or_fields || [],
-    item.suggested && item.suggested.option_id,
-    requestId
-  );
-  card.appendChild(container);
-
-  if (buttonGroup) {
-    for (const btn of buttonGroup.querySelectorAll("button")) {
-      btn.addEventListener("click", () => submitAnswer(apiBase, requestId, control, btn.dataset.optionId, card, errorEl));
-    }
-  } else {
-    const actions = document.createElement("div");
-    actions.className = "actions";
-    const submitBtn = document.createElement("button");
-    submitBtn.className = "primary";
-    submitBtn.textContent = "Submit";
-    submitBtn.addEventListener("click", () => submitAnswer(apiBase, requestId, control, getSelection(), card, errorEl));
-    actions.appendChild(submitBtn);
-    card.appendChild(actions);
-  }
-
-  card.appendChild(errorEl);
-  if (isFocused) card.style.outline = "2px solid #2a6fdb";
+  } catch (failure) { error.textContent = failure.message; }
+  card.appendChild(error);
+  if (pending.has(id)) setBusy(card, true);
+  if (id === snapshot.focusId) { card.tabIndex = -1; requestAnimationFrame(() => card.focus()); }
   return card;
 }
-
 async function render() {
-  const container = document.getElementById("cards");
-  container.innerHTML = "";
-
-  const stored = await chrome.storage.local.get([CACHE_KEY, API_BASE_KEY, FOCUS_KEY]);
-  const apiBase = stored[API_BASE_KEY];
-  const cache = stored[CACHE_KEY] || {};
-  const focusId = stored[FOCUS_KEY];
-  const items = Object.values(cache);
-  await renderQueueNotice();
-
-  if (!apiBase) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "Set the API base URL in the extension's options page first.";
-    container.appendChild(empty);
-    return;
-  }
-
-  if (items.length === 0) {
-    const empty = document.createElement("div");
-    empty.className = "empty";
-    empty.textContent = "Nothing pending.";
-    container.appendChild(empty);
-    return;
-  }
-
-  for (const item of items) {
-    container.appendChild(renderCard(apiBase, item, requestIdOf(item) === focusId));
-  }
-
-  if (focusId) {
-    await chrome.storage.local.remove(FOCUS_KEY);
-  }
+  const version = ++generation;
+  try {
+    const snapshot = await message({ type: "hca_snapshot" });
+    if (version !== generation) return;
+    const container = document.getElementById("cards"); container.replaceChildren();
+    document.getElementById("api-origin").textContent = snapshot.origin ? `Server: ${snapshot.origin}` : "";
+    const notice = document.getElementById("queue-notice");
+    notice.textContent = [snapshot.queue.length ? `${snapshot.queue.length} response(s) saved on this device; delivery is retried for up to 24 hours. A saved response is not yet an accepted decision.` : "", snapshot.notice].filter(Boolean).join(" ");
+    notice.hidden = !notice.textContent;
+    document.getElementById("dismiss-notice").hidden = !snapshot.notice;
+    const queued = new Set(snapshot.queue.map((entry) => entry.requestId));
+    const items = Object.values(snapshot.cache).filter((item) => !queued.has(item.request_id || item.id));
+    if (!snapshot.origin || !items.length) {
+      const empty = document.createElement("p"); empty.className = "empty"; empty.textContent = snapshot.origin ? "Nothing pending." : "Set the API server in the extension options first."; container.appendChild(empty);
+    }
+    for (const item of items) container.appendChild(renderCard(snapshot, item));
+  } catch (failure) { document.getElementById("popup-error").textContent = failure.message; }
 }
+chrome.storage.onChanged.addListener(() => { void render(); });
+void render();
 
-render();
+document.getElementById("dismiss-notice").addEventListener("click", () => message({ type: "hca_dismiss_notice" }).then(render).catch((error) => { document.getElementById("popup-error").textContent = error.message; }));

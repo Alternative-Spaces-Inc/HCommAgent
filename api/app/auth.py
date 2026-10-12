@@ -55,6 +55,7 @@ from . import models
 from .apikeys import verify_api_key
 from .db import get_db
 from . import devicesig, nonces
+from .limits import authorize_budget, consume
 
 
 # auto_error=False so a missing header is our own 401 (with WWW-Authenticate)
@@ -86,6 +87,9 @@ def require_agent_key(
     tenant = db.get(models.Tenant, key.tenant_id)
     if tenant is None or tenant.disabled_at is not None:
         raise HTTPException(status_code=403, detail="tenant disabled")
+    authorize_budget(db, key.tenant_id, "agent:" + key.key_prefix)
+    db.expire_on_commit = False
+    db.commit()
     return key
 
 
@@ -97,6 +101,8 @@ def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends
     token = _token(creds)
     if not hmac.compare_digest(token, expected):
         raise HTTPException(status_code=403, detail="invalid admin token")
+    consume(db, "platform-admin", 300)
+    db.commit()
 
 
 def _device_401(detail: str) -> HTTPException:
@@ -136,6 +142,8 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     # instance shares and which survives a restart (app/nonces.py).
     if not await asyncio.to_thread(nonces.check_and_record, device_id, nonce):
         raise _device_401("device signature replayed")
+
+    authorize_budget(db, device.tenant_id, "device:" + device_id)
 
     device.last_seen_at = datetime.now(timezone.utc)
     # HCA-P19 hotfix: keep the loaded device readable after this commit. With

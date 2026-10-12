@@ -69,6 +69,7 @@ class Subscriber:
     tenant_id: str
     loop: Optional[asyncio.AbstractEventLoop]
     closed: bool = False
+    reset_required: bool = False
 
 
 @dataclass
@@ -261,43 +262,46 @@ def publish(event: str, data: Dict[str, Any], *, tenant_id: str, device_ids: Opt
     return envelope
 
 
+def _replay_rows(db, tenant_id, device_id, after_id, now, window_seconds, max_events):
+    from . import models
+    floor = _naive_utc(now) - timedelta(seconds=window_seconds)
+    # Bound scanning as well as output. If a busy tenant's routing records
+    # exceed this budget, explicitly ask the client to reconcile its inbox.
+    rows = db.execute(select(models.Event).where(
+        models.Event.tenant_id == tenant_id, models.Event.id > after_id,
+        models.Event.created_at >= floor,
+    ).order_by(models.Event.id).limit(max_events + 1)).scalars().all()
+    truncated = len(rows) > max_events
+    envelopes = [_envelope(int(r.id), r.event, r.data, r.created_at) for r in rows[:max_events]
+                 if r.device_ids is None or device_id in r.device_ids]
+    aged_out = db.execute(select(models.Event.id).where(
+        models.Event.tenant_id == tenant_id, models.Event.id > after_id,
+        models.Event.created_at < floor,
+    ).limit(1)).first() is not None
+    latest = db.execute(select(func.max(models.Event.id))).scalar() or 0
+    oldest = db.execute(select(func.min(models.Event.id)).where(models.Event.tenant_id == tenant_id)).scalar()
+    removed = after_id > 0 and (oldest is None or after_id < oldest - 1)
+    gap = "cursor_ahead" if after_id > latest else "replay_limit" if truncated else "replay_expired" if aged_out or removed else None
+    return envelopes, gap
+
+
+def replay_gap(db, *, tenant_id: str, device_id: str, after_id: int, now: Optional[datetime] = None,
+               window_seconds: int = REPLAY_WINDOW_SECONDS, max_events: int = REPLAY_MAX_EVENTS) -> Optional[str]:
+    """Reason a reconnect must poll its current inbox instead of trusting a partial log."""
+    return _replay_rows(db, tenant_id, device_id, after_id, now or datetime.now(timezone.utc),
+                        window_seconds, max_events)[1]
+
+
 def replay(db, *, tenant_id: str, device_id: str, after_id: int, now: Optional[datetime] = None,
            window_seconds: int = REPLAY_WINDOW_SECONDS, max_events: int = REPLAY_MAX_EVENTS) -> List[Dict[str, Any]]:
-    """Envelopes the device missed: rows of its tenant with id greater than
-    after_id, no older than the window, addressed to every device or to this
-    one, oldest first, at most max_events. Same authorization rule as live
-    delivery, applied again here from the stored routing set, so a device
-    cannot widen what it sees by sending a small Last-Event-ID."""
-    from . import models
-    now = now or datetime.now(timezone.utc)
-    floor = _naive_utc(now) - timedelta(seconds=window_seconds)
-    stmt = (select(models.Event)
-            .where(models.Event.tenant_id == tenant_id)
-            .where(models.Event.id > after_id)
-            .where(models.Event.created_at >= floor)
-            .order_by(models.Event.id.asc()))
-    out: List[Dict[str, Any]] = []
-    truncated = False
-    for row in db.execute(stmt).scalars():
-        if row.device_ids is not None and device_id not in row.device_ids:
-            continue
-        out.append(_envelope(int(row.id), row.event, row.data, row.created_at))
-        if len(out) >= max_events:
-            truncated = True
-            break
-    # HCA-P20 Day 4: a replay gap is a reconnect whose missed rows cannot all
-    # be served: the client's last id is older than the oldest row still in
-    # the window (rows between may have aged out), or the replay hit
-    # max_events (rows beyond it are not sent now; the client gets them on its
-    # next reconnect from the last id it saw). Counted, never hidden.
-    oldest_in_window = db.execute(select(func.min(models.Event.id)).where(models.Event.created_at >= floor)).scalar()
-    oldest_any = db.execute(select(func.min(models.Event.id))).scalar()
-    aged_out = oldest_in_window is not None and oldest_any is not None and oldest_any < oldest_in_window and after_id < oldest_in_window - 1
+    """Bounded replay of authorized rows; replay_gap exposes required reconciliation."""
+    out, gap = _replay_rows(db, tenant_id, device_id, after_id, now or datetime.now(timezone.utc),
+                            window_seconds, max_events)
     replay_state["replays"] += 1
     replay_state["replayed_events"] += len(out)
-    if truncated:
+    if gap == "replay_limit":
         replay_state["truncated"] += 1
-    if aged_out or truncated:
+    if gap:
         replay_state["gaps"] += 1
     return out
 
@@ -346,11 +350,23 @@ def _deliver(d: Dispatcher, rows) -> None:
                 continue
             if allowed is not None and sub.device_id not in allowed:
                 continue
+            if sub.closed:
+                if sub.reset_required:
+                    dropped[sub.device_id] = dropped.get(sub.device_id, 0) + 1
+                continue
             try:
                 sub.queue.put_nowait(envelope)
                 d.stats["dispatched"] += 1
             except asyncio.QueueFull:
-                dropped[sub.device_id] = dropped.get(sub.device_id, 0) + 1
+                # Count both the refused event and the queued event evicted
+                # to make room for the recovery instruction.
+                dropped[sub.device_id] = dropped.get(sub.device_id, 0) + 2
+                # Make the loss visible. Replace one queued event with a
+                # reset instruction and close the stream after that notice.
+                sub.closed = True
+                sub.reset_required = True
+                sub.queue.get_nowait()
+                sub.queue.put_nowait({"event": "stream.reset", "data": {"reason": "queue_overflow"}, "id": None})
         d.cursor = max(d.cursor, event_id)
 
 

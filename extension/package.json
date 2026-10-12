@@ -1,10 +1,14 @@
 {
   "name": "hca-browser-overlay-extension",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "type": "module",
-  "description": "Human Collections Agent browser overlay client (Chrome MV3): SSE inbox stream with an alarm fallback, native radio, checkbox, and approve/deny controls.",
+  "description": "Human Collections Agent browser overlay client (Chrome MV3): SSE inbox stream with an alarm fallback, accessible radio, checkbox, approve/deny, dropdown, chat, and row confirmation controls.",
   "scripts": {
-    "test": "node --test tests/*.test.js"
+    "test": "node --test tests/*.test.js",
+    "test:browser": "node tests/browser.integration.js"
+  },
+  "devDependencies": {
+    "playwright": "1.62.1"
   }
 }

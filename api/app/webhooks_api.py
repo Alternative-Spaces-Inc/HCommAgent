@@ -11,9 +11,10 @@ tenant and another caller's id is a 404, never a 403, so ids do not leak.
 from datetime import datetime
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
+from sqlalchemy import select
 
 from . import models, webhook_destinations as registry
 from .auth import require_agent_key
@@ -23,7 +24,7 @@ router = APIRouter(prefix="/v1/webhooks", tags=["webhooks"])
 
 
 class WebhookRegisterRequest(BaseModel):
-    url: str
+    url: str = Field(min_length=1, max_length=2048)
 
 
 class WebhookDestinationView(BaseModel):
@@ -67,9 +68,18 @@ def register_destination(body: WebhookRegisterRequest, db: Session = Depends(get
     return {**_view(dest), "secret": secret}
 
 
-@router.get("", response_model=List[WebhookDestinationView])
-def list_destinations(include_revoked: bool = False, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
-    rows = registry.all_for(db, key.tenant_id, key.caller) if include_revoked else registry.active_for(db, key.tenant_id, key.caller)
+@router.get("", response_model=List[WebhookDestinationView], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
+def list_destinations(response: Response, include_revoked: bool = False, limit: int = Query(default=200, ge=1, le=500),
+                       after: str = Query(default="", max_length=100),
+                       db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+    statement = select(models.WebhookDestination).where(models.WebhookDestination.tenant_id == key.tenant_id,
+        models.WebhookDestination.caller == key.caller, models.WebhookDestination.id > after)
+    if not include_revoked:
+        statement = statement.where(models.WebhookDestination.revoked_at.is_(None))
+    rows = db.execute(statement.order_by(models.WebhookDestination.id).limit(limit + 1)).scalars().all()
+    if len(rows) > limit:
+        rows = rows[:limit]
+        response.headers["X-HCA-Next-Cursor"] = rows[-1].id
     return [_view(d) for d in rows]
 
 

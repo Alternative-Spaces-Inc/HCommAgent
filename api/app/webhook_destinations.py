@@ -17,7 +17,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 from typing import List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import select, func
 from sqlalchemy.orm import Session
 
 from . import models, ssrf, webhook_crypto
@@ -92,9 +92,14 @@ def register(db: Session, *, tenant_id: str, caller: str, url: str, now: Optiona
         checked = ssrf.check_url(url)
     except ssrf.DestinationRejected as exc:
         raise RegistryError(f"url rejected: {exc}") from None
+    from .requests_api import _lock_tenant_for_quota
+    _lock_tenant_for_quota(db, tenant_id)
     if find_active_by_url(db, tenant_id, caller, url) is not None:
         raise RegistryError("url is already registered; rotate its secret or revoke it first")
-    if len(active_for(db, tenant_id, caller)) >= MAX_ACTIVE_PER_CALLER:
+    active = db.execute(select(func.count(models.WebhookDestination.id)).where(
+        models.WebhookDestination.tenant_id == tenant_id, models.WebhookDestination.caller == caller,
+        models.WebhookDestination.revoked_at.is_(None))).scalar_one()
+    if active >= MAX_ACTIVE_PER_CALLER:
         raise RegistryError(f"caller already has {MAX_ACTIVE_PER_CALLER} active destinations")
     secret = _new_secret()
     dest = models.WebhookDestination(

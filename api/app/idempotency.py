@@ -142,8 +142,10 @@ def discard(db, tenant_id, scope, route, key):
         db.flush()
 
 
-def sweep(db: Session, now: Optional[datetime] = None) -> int:
+def sweep(db: Session, now: Optional[datetime] = None, batch: int = 500) -> int:
     cutoff = (now or datetime.now(timezone.utc)) - timedelta(seconds=TTL_SECONDS)
-    result = db.execute(delete(models.IdempotencyKey).where(models.IdempotencyKey.created_at < cutoff))
+    ids = list(db.execute(select(models.IdempotencyKey.id).where(models.IdempotencyKey.created_at < cutoff)
+                         .order_by(models.IdempotencyKey.id).limit(max(1, min(batch, 500)))).scalars())
+    result = db.execute(delete(models.IdempotencyKey).where(models.IdempotencyKey.id.in_(ids)))
     db.commit()
     return result.rowcount or 0

@@ -12,7 +12,7 @@ public enum GoogleOAuth {
     /// Enough for tokeninfo to report email and sub; nothing else is read.
     public static let scopes = ["openid", "email"]
 
-    public struct PKCE: Equatable {
+    public struct PKCE: Equatable, Sendable {
         public let verifier: String
         public let challenge: String
 
@@ -54,7 +54,9 @@ public enum GoogleOAuth {
         return c.url!
     }
 
-    public enum RedirectResult: Equatable {
+    public enum CallbackError: Error { case denied(String) }
+
+    public enum RedirectResult: Equatable, Sendable {
         case code(String)
         case error(String)
         case stateMismatch
@@ -65,11 +67,17 @@ public enum GoogleOAuth {
     public static func parseRedirect(requestLine: String, expectedState: String) -> RedirectResult {
         // "GET /oauth2?state=...&code=... HTTP/1.1"
         let parts = requestLine.split(separator: " ")
-        guard parts.count >= 2, parts[0] == "GET" else { return .notARedirect }
+        guard parts.count == 3, parts[0] == "GET", parts[2] == "HTTP/1.1" || parts[2] == "HTTP/1.0",
+              parts[1].hasPrefix("/oauth2?"), !parts[1].contains("#") else { return .notARedirect }
         guard let c = URLComponents(string: "http://127.0.0.1" + parts[1]), c.path == "/oauth2" else { return .notARedirect }
-        let q = Dictionary(uniqueKeysWithValues: (c.queryItems ?? []).map { ($0.name, $0.value ?? "") })
+        var q: [String: String] = [:]
+        for item in c.queryItems ?? [] {
+            guard q[item.name] == nil else { return .notARedirect }
+            q[item.name] = item.value ?? ""
+        }
+        guard !expectedState.isEmpty, q["state"] == expectedState else { return .stateMismatch }
+        guard !(q["error"] != nil && q["code"] != nil) else { return .notARedirect }
         if let err = q["error"], !err.isEmpty { return .error(err) }
-        guard q["state"] == expectedState else { return .stateMismatch }
         guard let code = q["code"], !code.isEmpty else { return .notARedirect }
         return .code(code)
     }
@@ -90,7 +98,7 @@ public enum GoogleOAuth {
             .joined(separator: "&").utf8)
     }
 
-    public struct TokenResponse: Decodable, Equatable {
+    public struct TokenResponse: Decodable, Equatable, Sendable {
         public let access_token: String?
         public let expires_in: Int?
         public let error: String?
