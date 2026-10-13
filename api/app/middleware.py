@@ -40,7 +40,7 @@ class QueryCredentialGuard:
                         "type": "http.response.body",
                         "body": json.dumps({"detail": "credentials are not accepted in the query string"}).encode("utf-8"),
                     })
-                    return
+                    return None
         return await self.app(scope, receive, send)
 
 
