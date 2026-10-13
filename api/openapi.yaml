@@ -1433,6 +1433,270 @@ paths:
               schema:
                 type: string
                 pattern: ^[0-9a-f]{32}$
+  /v1/api-keys/{prefix}:
+    patch:
+      tags:
+      - api-keys
+      summary: Patch Key Scopes
+      description: 'HCA-P21b: replace the scope list of a live key. The change and
+        its
+
+        scopes_changed event commit together; a revoked key is refused with 409
+
+        because its scopes no longer matter and silently editing it would hide
+
+        the revocation.'
+      operationId: patch_key_scopes_v1_api_keys__prefix__patch
+      security:
+      - AdminToken: []
+      parameters:
+      - name: prefix
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prefix
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ApiKeyScopesPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyView'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+  /v1/api-keys/{prefix}/events:
+    get:
+      tags:
+      - api-keys
+      summary: List Key Events
+      description: 'HCA-P21b: lifecycle events of one key, newest first.'
+      operationId: list_key_events_v1_api_keys__prefix__events_get
+      security:
+      - AdminToken: []
+      parameters:
+      - name: prefix
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prefix
+      - name: limit
+        in: query
+        required: false
+        schema:
+          type: integer
+          maximum: 500
+          minimum: 1
+          default: 100
+          title: Limit
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/ApiKeyEventView'
+                title: Response List Key Events V1 Api Keys  Prefix  Events Get
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/internal/expiry-sweep:
     post:
       tags:
@@ -4287,6 +4551,35 @@ components:
         finiteNumbersOnly: true
         appliesTo: Each untyped dictionary/array field; typed nested models validate
           their own fields
+    ApiKeyEventView:
+      properties:
+        id:
+          type: string
+          title: Id
+        action:
+          type: string
+          title: Action
+        actor:
+          type: string
+          title: Actor
+        detail:
+          anyOf:
+          - additionalProperties: true
+            type: object
+          - type: 'null'
+          title: Detail
+        at:
+          type: string
+          format: date-time
+          title: At
+      type: object
+      required:
+      - id
+      - action
+      - actor
+      - at
+      title: ApiKeyEventView
+      description: 'One lifecycle event of a key: issued, scopes_changed or revoked.'
     ApiKeyIssueRequest:
       properties:
         caller:
@@ -4300,6 +4593,17 @@ components:
           minLength: 1
           title: Tenant Id
           default: default
+        scopes:
+          anyOf:
+          - items:
+              type: string
+            type: array
+            maxItems: 4
+            minItems: 1
+          - type: 'null'
+          title: Scopes
+          description: Subset of asks:create, asks:read, asks:cancel, webhooks:manage;
+            omitted means all four
       type: object
       required:
       - caller
@@ -4322,6 +4626,11 @@ components:
           type: string
           format: date-time
           title: Created At
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
       type: object
       required:
       - api_key
@@ -4329,7 +4638,23 @@ components:
       - caller
       - tenant_id
       - created_at
+      - scopes
       title: ApiKeyIssueResponse
+    ApiKeyScopesPatch:
+      properties:
+        scopes:
+          items:
+            type: string
+          type: array
+          maxItems: 4
+          minItems: 1
+          title: Scopes
+          description: Replacement scope list, a non-empty subset of the four known
+            scopes
+      type: object
+      required:
+      - scopes
+      title: ApiKeyScopesPatch
     ApiKeyView:
       properties:
         prefix:
@@ -4351,12 +4676,18 @@ components:
             format: date-time
           - type: 'null'
           title: Revoked At
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
       type: object
       required:
       - prefix
       - caller
       - tenant_id
       - created_at
+      - scopes
       title: ApiKeyView
       description: 'One key row without any secret material: the prefix is the lookup
 
@@ -5358,6 +5689,13 @@ components:
     AgentKey:
       type: http
       scheme: bearer
+      description: 'Agent api key hca_live_<prefix>_<secret> issued under the admin
+        bearer. Each key carries a subset of the fixed scopes asks:create (POST /v1/requests),
+        asks:read (GET /v1/requests/{request_id}), asks:cancel (POST /v1/requests/{request_id}/cancel)
+        and webhooks:manage (every /v1/webhooks route); omitted at issuance means
+        all four. A key lacking the route''s scope gets 403 with detail ''api key
+        lacks scope <name>'' and a WWW-Authenticate: Bearer scope="<name>" challenge.
+        Credentials are never accepted in a query string.'
     DeviceSignature:
       type: apiKey
       in: header

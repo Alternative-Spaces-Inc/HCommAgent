@@ -51,6 +51,8 @@ OPERATION_ERRORS = {
     ("/v1/tenants/{tenant_id}/records/purge", "post"): {"404", "422"},
     ("/v1/api-keys", "post"): {"422"},
     ("/v1/api-keys/{prefix}/revoke", "post"): {"404"},
+    ("/v1/api-keys/{prefix}", "patch"): {"404", "409", "422"},
+    ("/v1/api-keys/{prefix}/events", "get"): {"404"},
     ("/v1/webhooks", "post"): {"400", "422"},
     ("/v1/webhooks/{destination_id}/rotate", "post"): {"404", "409"},
     ("/v1/webhooks/{destination_id}", "delete"): {"404"},
@@ -102,6 +104,13 @@ def enrich_schema(generated):
         "HCA1, timestamp, nonce, METHOD, path-and-query, SHA256(body). "
         f"Timestamp skew is at most {devicesig.MAX_SKEW_SECONDS} seconds; nonce retention is "
         f"{devicesig.NONCE_RETENTION_SECONDS} seconds. Production human decision routes also require current Google owner membership."
+    )
+    security.setdefault("AgentKey", {"type": "http", "scheme": "bearer"})["description"] = (
+        "Agent api key hca_live_<prefix>_<secret> issued under the admin bearer. Each key carries a subset of the "
+        "fixed scopes asks:create (POST /v1/requests), asks:read (GET /v1/requests/{request_id}), asks:cancel "
+        "(POST /v1/requests/{request_id}/cancel) and webhooks:manage (every /v1/webhooks route); omitted at issuance "
+        "means all four. A key lacking the route's scope gets 403 with detail 'api key lacks scope <name>' and a "
+        "WWW-Authenticate: Bearer scope=\"<name>\" challenge. Credentials are never accepted in a query string."
     )
     security["SweepBearer"] = {"type": "http", "scheme": "bearer",
         "description": "SWEEP_TRIGGER_TOKEN used only by the internal scheduler; missing server configuration fails closed."}
