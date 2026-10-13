@@ -60,3 +60,6 @@ Plan v1 drafted 2026-10-12 against main c79821a8. All three selections taken 202
 1. Taken 2026-10-12 08:0x PT: fixed four scopes with all four as the default at issuance. Declined: no scopes in v1, free form scope strings.
 2. Taken 2026-10-12 08:3x PT: per key 600 calls and 60 asks per minute in a shared database counter with 429 and Retry-After. Declined: per instance in memory counters, no limits in v1.
 3. Taken 2026-10-12 08:3x PT: admin rotate and agent self rotate, 24 h overlap. Declined: admin rotate only, immediate cut over.
+
+
+2026-10-13 (Day 3): rotation code is in PR 22, branch `p21b/day3-rotation`, commit `136480a2d5d28867396a3b1cf49ed6e0a8790aa2`. It adds migration `e2f3a4b5c6d7`, admin and self-rotation routes, the configurable overlap, lifecycle state fields and tests. Part B documents the caller-key contract and rotation runbook, extends the golden-path smoke to exercise rotation and overlap, and links the guidance throughout operations and architecture. Part B commit and PR are recorded in its implementation PR after checks complete. Merge code PR 22 before the documentation and smoke PR; production deployment remains a separate approved-commit operation.
