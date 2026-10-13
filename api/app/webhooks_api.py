@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy import select
 
 from . import models, webhook_destinations as registry
-from .auth import require_agent_key
+from .auth import require_scope
 from .db import get_db
 from .json_dates import UTCJSONModel
 
@@ -61,7 +61,7 @@ def _raise(exc: registry.RegistryError):
 
 
 @router.post("", response_model=WebhookSecretResponse, status_code=201)
-def register_destination(body: WebhookRegisterRequest, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def register_destination(body: WebhookRegisterRequest, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("webhooks:manage"))):
     try:
         dest, secret = registry.register(db, tenant_id=key.tenant_id, caller=key.caller, url=body.url)
     except registry.RegistryError as exc:
@@ -72,7 +72,7 @@ def register_destination(body: WebhookRegisterRequest, db: Session = Depends(get
 @router.get("", response_model=List[WebhookDestinationView], responses={200: {"headers": {"X-HCA-Next-Cursor": {"description": "Pass as after for the next page", "schema": {"type": "string"}}}}})
 def list_destinations(response: Response, include_revoked: bool = False, limit: int = Query(default=200, ge=1, le=500),
                        after: str = Query(default="", max_length=100),
-                       db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+                       db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("webhooks:manage"))):
     statement = select(models.WebhookDestination).where(models.WebhookDestination.tenant_id == key.tenant_id,
         models.WebhookDestination.caller == key.caller, models.WebhookDestination.id > after)
     if not include_revoked:
@@ -86,7 +86,7 @@ def list_destinations(response: Response, include_revoked: bool = False, limit: 
 
 @router.post("/{destination_id}/rotate", response_model=WebhookSecretResponse,
              responses={409: {"description": "Previous signing secret is still within its 24-hour rotation overlap"}})
-def rotate_destination(destination_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def rotate_destination(destination_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("webhooks:manage"))):
     try:
         dest, secret = registry.rotate(db, tenant_id=key.tenant_id, caller=key.caller, destination_id=destination_id)
     except registry.RegistryError as exc:
@@ -95,7 +95,7 @@ def rotate_destination(destination_id: str, db: Session = Depends(get_db), key: 
 
 
 @router.delete("/{destination_id}", response_model=WebhookDestinationView)
-def revoke_destination(destination_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def revoke_destination(destination_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("webhooks:manage"))):
     try:
         dest = registry.revoke(db, tenant_id=key.tenant_id, caller=key.caller, destination_id=destination_id)
     except registry.RegistryError as exc:

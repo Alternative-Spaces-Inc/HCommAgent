@@ -41,6 +41,40 @@ MAX_ACTIVE_API_KEYS = max(1, int(os.environ.get("HCA_MAX_ACTIVE_API_KEYS", "1000
 HASH_SCHEME = "hmac256"
 MAX_PREVIOUS_PEPPERS = 3
 
+# HCA-P21b decision 9: a fixed vocabulary of four scopes. A key carries any
+# subset; omitted at issuance means all four so pre-P21b callers and the
+# smoke script keep working. Agent routes declare the scope they need via
+# auth.require_scope and answer 403 naming the missing scope.
+SCOPES = ("asks:create", "asks:read", "asks:cancel", "webhooks:manage")
+
+
+def normalize_scopes(value) -> list[str]:
+    """Validates a requested scope list: None means every scope; otherwise a
+    non-empty list of distinct known names, returned in vocabulary order."""
+    if value is None:
+        return list(SCOPES)
+    if not isinstance(value, (list, tuple)) or not value:
+        raise ValueError("scopes must be a non-empty list")
+    seen = []
+    for item in value:
+        if not isinstance(item, str) or item not in SCOPES:
+            raise ValueError(f"unknown scope {item!r}; known scopes: {', '.join(SCOPES)}")
+        if item in seen:
+            raise ValueError(f"duplicate scope {item!r}")
+        seen.append(item)
+    return [s for s in SCOPES if s in seen]
+
+
+def record_key_event(db: Session, row: models.ApiKey, action: str, actor: str, detail: Optional[dict] = None,
+                     at: Optional[datetime] = None) -> models.ApiKeyEvent:
+    """Adds an api_key_events row to the current transaction (the caller
+    commits), so the event and the change land together or not at all."""
+    event = models.ApiKeyEvent(tenant_id=row.tenant_id, api_key_id=row.id, action=action, actor=actor,
+                               detail=json.dumps(detail, sort_keys=True) if detail is not None else None,
+                               at=at or datetime.now(timezone.utc))
+    db.add(event)
+    return event
+
 
 def previous_peppers(env=None) -> list[str]:
     """Explicit, bounded verification/decryption overlap; never log values."""
@@ -86,7 +120,7 @@ def _legacy_hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENANT_ID) -> dict:
+def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENANT_ID, scopes=None) -> dict:
     """Mints a new key for caller inside tenant_id, replacing any existing one
     (the api_keys.caller column is unique: one live key per caller, matching
     a single-integration-per-caller model; the caller name is global, the
@@ -108,6 +142,8 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
             models.ApiKey.tenant_id == tenant_id, models.ApiKey.revoked_at.is_(None))).scalar_one()
         if active >= MAX_ACTIVE_API_KEYS:
             raise HTTPException(status_code=429, detail="tenant active API key limit reached", headers={"Retry-After": "60"})
+    scope_list = normalize_scopes(scopes)
+    scopes_json = json.dumps(scope_list)
     now = datetime.now(timezone.utc)
     if existing:
         if existing.tenant_id != tenant_id:
@@ -116,13 +152,18 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
         existing.key_hash = _hash_secret(secret)
         existing.created_at = now
         existing.revoked_at = None
+        existing.scopes = scopes_json
         row = existing
     else:
-        row = models.ApiKey(tenant_id=tenant_id, caller=caller, key_prefix=prefix, key_hash=_hash_secret(secret), created_at=now)
+        row = models.ApiKey(tenant_id=tenant_id, caller=caller, key_prefix=prefix, key_hash=_hash_secret(secret),
+                            created_at=now, scopes=scopes_json)
         db.add(row)
+        db.flush()
+    record_key_event(db, row, "issued", "admin", {"scopes": scope_list, "prefix": prefix}, at=now)
     db.commit()
 
-    return {"api_key": plaintext, "prefix": prefix, "caller": caller, "tenant_id": row.tenant_id, "created_at": row.created_at}
+    return {"api_key": plaintext, "prefix": prefix, "caller": caller, "tenant_id": row.tenant_id, "created_at": row.created_at,
+            "scopes": scope_list}
 
 
 def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:

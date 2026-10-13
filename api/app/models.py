@@ -1,5 +1,6 @@
+import json
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Integer, BigInteger, Boolean, ForeignKey, UniqueConstraint, Index
+from sqlalchemy import Column, String, DateTime, JSON, Integer, BigInteger, Boolean, ForeignKey, UniqueConstraint, Index, Text
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -13,6 +14,7 @@ def gen_id() -> str:
 # tenants table were backfilled to this id by the P19 migration so an
 # upgraded deployment keeps working as a one-tenant installation.
 DEFAULT_TENANT_ID = "default"
+ALL_SCOPES_JSON = '["asks:create", "asks:read", "asks:cancel", "webhooks:manage"]'
 
 
 class Tenant(Base):
@@ -123,6 +125,32 @@ class ApiKey(Base):
     key_hash = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
+    # HCA-P21b: fixed scope vocabulary (apikeys.SCOPES) stored as a JSON list;
+    # the server default backfills pre-P21b rows with every scope so existing
+    # callers keep working.
+    scopes = Column(Text, nullable=False, server_default=ALL_SCOPES_JSON, default=ALL_SCOPES_JSON)
+
+    @property
+    def scope_list(self) -> list:
+        try:
+            value = json.loads(self.scopes or "[]")
+        except ValueError:
+            return []
+        return [v for v in value if isinstance(v, str)] if isinstance(value, list) else []
+
+
+class ApiKeyEvent(Base):
+    """HCA-P21b audit trail for key lifecycle changes (issued, scopes_changed,
+    revoked), written in the same transaction as the change."""
+    __tablename__ = "api_key_events"
+    __table_args__ = (Index("ix_api_key_events_key_at", "api_key_id", "at"),)
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    api_key_id = Column(String, ForeignKey("api_keys.id"), nullable=False)
+    action = Column(String, nullable=False)
+    actor = Column(String, nullable=False)
+    detail = Column(Text, nullable=True)
+    at = Column(DateTime, nullable=False)
 
 
 class AuditRow(Base):
