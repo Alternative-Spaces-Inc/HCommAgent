@@ -1,6 +1,7 @@
 import json
 import uuid
-from sqlalchemy import Column, String, DateTime, JSON, Integer, BigInteger, Boolean, ForeignKey, UniqueConstraint, Index, Text
+from datetime import datetime, timezone
+from sqlalchemy import Column, String, DateTime, JSON, Integer, BigInteger, Boolean, ForeignKey, UniqueConstraint, Index, Text, text
 from sqlalchemy.orm import relationship
 
 from .db import Base
@@ -8,6 +9,13 @@ from .db import Base
 
 def gen_id() -> str:
     return uuid.uuid4().hex
+
+
+def _utc(value):
+    """SQLite hands naive datetimes back; treat them as UTC."""
+    if value is not None and value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value
 
 
 # HCA-P19: every record belongs to exactly one tenant. Rows that predate the
@@ -119,9 +127,15 @@ class ApiKey(Base):
     """Caller credentials, named in the plan's Day 4 auth work; stored now so
     later migrations do not need a new table."""
     __tablename__ = "api_keys"
+    # HCA-P21b Day 3: one active key per caller; rotated (superseded) and
+    # revoked rows may share the caller, so the plain unique constraint
+    # became this partial unique index (migration e2f3a4b5c6d7).
+    __table_args__ = (Index("ux_api_keys_caller_active", "caller", unique=True,
+                            postgresql_where=text("revoked_at IS NULL AND superseded_by IS NULL"),
+                            sqlite_where=text("revoked_at IS NULL AND superseded_by IS NULL")),)
 
     id = Column(String, primary_key=True, default=gen_id)
-    caller = Column(String, nullable=False, unique=True)
+    caller = Column(String, nullable=False)
     tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False, default=DEFAULT_TENANT_ID, server_default=DEFAULT_TENANT_ID, index=True)
     key_prefix = Column(String, nullable=True, unique=True)
     key_hash = Column(String, nullable=False)
@@ -135,6 +149,22 @@ class ApiKey(Base):
     # (HCA_KEY_RATE_PER_MINUTE 600, HCA_KEY_ASKS_PER_MINUTE 60, see app/limits.py).
     rate_per_minute = Column(Integer, nullable=True)
     asks_per_minute = Column(Integer, nullable=True)
+    # HCA-P21b Day 3: set on the old row by a rotation; the old key verifies
+    # until previous_valid_until (24 h overlap), then counts as expired.
+    superseded_by = Column(String, nullable=True)
+    previous_valid_until = Column(DateTime, nullable=True)
+
+    @property
+    def state(self) -> str:
+        """active, rotating (superseded, old key still valid), expired
+        (superseded and past the overlap) or revoked."""
+        until = _utc(self.previous_valid_until)
+        revoked = _utc(self.revoked_at)
+        if self.superseded_by is not None and until is not None:
+            if revoked is not None and revoked < until:
+                return "revoked"
+            return "expired" if until <= datetime.now(timezone.utc) else "rotating"
+        return "revoked" if revoked is not None else "active"
 
     @property
     def scope_list(self) -> list:

@@ -54,6 +54,8 @@ OPERATION_ERRORS = {
     ("/v1/api-keys/{prefix}/revoke", "post"): {"404"},
     ("/v1/api-keys/{prefix}", "patch"): {"404", "409", "422"},
     ("/v1/api-keys/{prefix}/events", "get"): {"404"},
+    ("/v1/api-keys/{prefix}/rotate", "post"): {"404", "409"},
+    ("/v1/api-keys/self/rotate", "post"): {"409"},
     ("/v1/webhooks", "post"): {"400", "422"},
     ("/v1/webhooks/{destination_id}/rotate", "post"): {"404", "409"},
     ("/v1/webhooks/{destination_id}", "delete"): {"404"},

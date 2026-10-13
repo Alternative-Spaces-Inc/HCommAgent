@@ -1596,6 +1596,315 @@ paths:
               schema:
                 type: string
                 pattern: ^[0-9a-f]{32}$
+  /v1/api-keys/self/rotate:
+    post:
+      tags:
+      - api-keys
+      summary: Rotate Own Key
+      description: 'HCA-P21b Day 3: an automation rotates its own credential under
+        the key
+
+        itself (any scope, no admin token). The presented key keeps working for
+
+        the overlap window named in previous_valid_until; a key that has already
+
+        been rotated cannot rotate again (409), so a leaked old key cannot chain
+
+        itself into a fresh one.'
+      operationId: rotate_own_key_v1_api_keys_self_rotate_post
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyRotateResponse'
+          headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+      security:
+      - AgentKey: []
+  /v1/api-keys/{prefix}/rotate:
+    post:
+      tags:
+      - api-keys
+      summary: Rotate Key
+      description: 'HCA-P21b Day 3: admin rotation by the visible prefix. Same scopes
+        and
+
+        ceilings on the new key; the old key verifies until previous_valid_until
+
+        (HCA_KEY_ROTATION_OVERLAP_HOURS, default 24) and then reads expired.
+
+        Revoked or already rotated keys answer 409.'
+      operationId: rotate_key_v1_api_keys__prefix__rotate_post
+      security:
+      - AdminToken: []
+      parameters:
+      - name: prefix
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Prefix
+      responses:
+        '201':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ApiKeyRotateResponse'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/api-keys/{prefix}/revoke:
     post:
       tags:
@@ -5339,7 +5648,9 @@ components:
       - actor
       - at
       title: ApiKeyEventView
-      description: 'One lifecycle event of a key: issued, scopes_changed or revoked.'
+      description: 'One lifecycle event of a key: issued, scopes_changed, limits_changed,
+
+        rotated, expired or revoked.'
     ApiKeyIssueRequest:
       properties:
         caller:
@@ -5459,6 +5770,59 @@ components:
         to
 
         null return the key to the deployment default.'
+    ApiKeyRotateResponse:
+      properties:
+        api_key:
+          type: string
+          title: Api Key
+        prefix:
+          type: string
+          title: Prefix
+        caller:
+          type: string
+          title: Caller
+        tenant_id:
+          type: string
+          title: Tenant Id
+        created_at:
+          type: string
+          format: date-time
+          title: Created At
+        scopes:
+          items:
+            type: string
+          type: array
+          title: Scopes
+        rate_per_minute:
+          type: integer
+          title: Rate Per Minute
+        asks_per_minute:
+          type: integer
+          title: Asks Per Minute
+        previous_prefix:
+          type: string
+          title: Previous Prefix
+        previous_valid_until:
+          type: string
+          format: date-time
+          title: Previous Valid Until
+      type: object
+      required:
+      - api_key
+      - prefix
+      - caller
+      - tenant_id
+      - created_at
+      - scopes
+      - rate_per_minute
+      - asks_per_minute
+      - previous_prefix
+      - previous_valid_until
+      title: ApiKeyRotateResponse
+      description: 'HCA-P21b Day 3: the replacement key (returned once) plus the prefix
+        of
+
+        the key it replaces and the instant that old key stops verifying.'
     ApiKeyView:
       properties:
         prefix:
@@ -5491,6 +5855,21 @@ components:
         asks_per_minute:
           type: integer
           title: Asks Per Minute
+        state:
+          type: string
+          title: State
+        superseded_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Superseded By
+          description: Prefix of the key that replaced this one
+        previous_valid_until:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Previous Valid Until
       type: object
       required:
       - prefix
@@ -5500,6 +5879,7 @@ components:
       - scopes
       - rate_per_minute
       - asks_per_minute
+      - state
       title: ApiKeyView
       description: 'One key row without any secret material: the prefix is the lookup
 
