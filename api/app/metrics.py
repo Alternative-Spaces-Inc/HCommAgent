@@ -33,7 +33,7 @@ request from this process and the database; nothing is sampled or stored.
 import os
 import re
 import socket
-from datetime import datetime, timezone
+from datetime import timedelta, datetime, timezone
 from typing import Any, Dict
 
 from sqlalchemy import func, select
@@ -63,6 +63,16 @@ def _pool_status(engine) -> Dict[str, Any]:
     if m and "overflow" not in out:
         out["overflow"] = int(m.group(1))
     return out
+
+
+def _api_key_stats(db, now) -> Dict[str, Any]:
+    """HCA-P21b: key population and how often a key limit was hit in the
+    last hour (one limit_hit event per key per window, see app/limits.py)."""
+    active = db.execute(select(func.count(models.ApiKey.id)).where(models.ApiKey.revoked_at.is_(None))).scalar()
+    revoked = db.execute(select(func.count(models.ApiKey.id)).where(models.ApiKey.revoked_at.is_not(None))).scalar()
+    limited = db.execute(select(func.count(models.ApiKeyEvent.id)).where(
+        models.ApiKeyEvent.action == "limit_hit", models.ApiKeyEvent.at >= now - timedelta(hours=1))).scalar()
+    return {"active": int(active or 0), "revoked": int(revoked or 0), "rate_limited_last_hour": int(limited or 0)}
 
 
 def collect(db) -> Dict[str, Any]:
@@ -110,6 +120,7 @@ def collect(db) -> Dict[str, Any]:
                  "due_backlog": int(backlog or 0), "due_leased": int(leased or 0),
                  "oldest_due_age_seconds": (now - oldest_due).total_seconds() if oldest_due is not None else 0.0,
                  "pending_total": int(pending_total or 0), "failed_closed": int(failed_closed or 0)},
+        "api_keys": _api_key_stats(db, now),
         "db_pool": _pool_status(db.get_bind()),
         "instance": {"hostname": socket.gethostname(), "pid": os.getpid(),
                      "revision": os.environ.get("K_REVISION"), "instance_id": os.environ.get("CLOUD_RUN_INSTANCE_ID")},

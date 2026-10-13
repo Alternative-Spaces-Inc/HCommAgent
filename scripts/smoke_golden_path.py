@@ -76,6 +76,68 @@ def http(method: str, url: str, body=None, headers=None, raw: bytes = None):
             return e.code, text
 
 
+def http_h(method: str, url: str, body=None, headers=None):
+    """Like http but also returns the response headers (HCA-P21b limit proofs)."""
+    data = None if body is None else json.dumps(body, separators=(",", ":")).encode()
+    req = urllib.request.Request(url, data=data, method=method)
+    for k, v in (headers or {}).items():
+        req.add_header(k, v)
+    if data is not None:
+        req.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            text = r.read().decode()
+            return r.status, (json.loads(text) if text else None), {k.lower(): v for k, v in r.headers.items()}
+    except urllib.error.HTTPError as e:
+        text = e.read().decode()
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = text
+        return e.code, parsed, {k.lower(): v for k, v in e.headers.items()}
+
+
+def prove_scopes_and_limits(base: str, admin: str, caller: str):
+    """HCA-P21b: a second key with two scopes and asks_per_minute 2 proves the
+    403 scope refusal, the 429 asks ceiling with Retry-After and the
+    X-RateLimit headers, then cancels its asks and revokes itself."""
+    admin_h = {"Authorization": f"Bearer {admin}"}
+    code, body = http("POST", f"{base}/v1/api-keys",
+                      {"caller": caller + "-limits", "scopes": ["asks:create", "asks:cancel"], "asks_per_minute": 2}, admin_h)
+    check("POST /v1/api-keys scoped with asks_per_minute 2",
+          code == 201 and body.get("scopes") == ["asks:create", "asks:cancel"] and body.get("asks_per_minute") == 2,
+          f"{code} scopes={body.get('scopes')} asks_per_minute={body.get('asks_per_minute')}")  # never echo the key
+    agent = {"Authorization": f"Bearer {body['api_key']}"}
+    prefix = body["prefix"]
+    code, body, headers = http_h("GET", f"{base}/v1/webhooks", None, agent)
+    check("key lacking webhooks:manage gets 403 naming the scope",
+          code == 403 and body.get("detail") == "api key lacks scope webhooks:manage" and 'scope="webhooks:manage"' in headers.get("www-authenticate", ""), f"{code} {body}")
+    rids = []
+    for n in (1, 2):
+        code, body, headers = http_h("POST", f"{base}/v1/requests", ask_body(caller + "-limits", {"mode": "poll"}), agent)
+        check(f"ask {n} of 2 accepted with X-RateLimit headers",
+              code == 201 and headers.get("x-ratelimit-limit") and headers.get("x-ratelimit-remaining") is not None,
+              f"{code} limit={headers.get('x-ratelimit-limit')} remaining={headers.get('x-ratelimit-remaining')}")
+        if code == 201:
+            rids.append(body["request_id"])
+    code, body, headers = http_h("POST", f"{base}/v1/requests", ask_body(caller + "-limits", {"mode": "poll"}), agent)
+    check("ask 3 of 2 is 429 with Retry-After",
+          code == 429 and body.get("detail") == "api key asks per minute limit exceeded"
+          and 1 <= int(headers.get("retry-after", "0")) <= 60 and headers.get("x-ratelimit-remaining") == "0",
+          f"{code} {body} retry_after={headers.get('retry-after')} remaining={headers.get('x-ratelimit-remaining')}")
+    for rid in rids:
+        code, body = http("POST", f"{base}/v1/requests/{rid}/cancel", {"reason": "smoke test cleanup"}, agent)
+        check("cancel limits ask", code == 200 and body.get("state") == "cancelled", f"{code}")
+    code, body = http("GET", f"{base}/v1/api-keys/{prefix}/events", headers=admin_h)
+    actions = [e.get("action") for e in body] if isinstance(body, list) else []
+    # Newest first; only the events since this run's issuance count (a rerun
+    # inside the same second reuses the caller row and its older events).
+    since_issue = actions[:actions.index("issued")] if "issued" in actions else []
+    check("events show issued and one limit_hit", code == 200 and since_issue.count("limit_hit") == 1, f"{code} {actions}")
+    code, body = http("POST", f"{base}/v1/api-keys/{prefix}/revoke", {}, admin_h)
+    check("revoke limits key", code == 200 and body.get("revoked_at"), f"{code}")
+
+
 # ---- signed human calls (mirrors extension/background.js and tests/deviceauth.py)
 
 def make_device():
@@ -203,6 +265,7 @@ def main():
         check("POST /v1/requests/{id}/cancel", code == 200 and body.get("state") == "cancelled", f"{code}")
         code, body = http("GET", f"{base}/v1/requests/{rid}", headers=agent)
         check("GET after cancel", code == 200 and body.get("state") == "cancelled" and (body.get("answer") or {}).get("value", {}).get("decision") == "cancel", f"{code}")
+        prove_scopes_and_limits(base, admin, caller)
         revoke_key()
         print(f"[{elapsed()}] OK agent path, request {rid}", flush=True)
         return
@@ -268,6 +331,7 @@ def main():
     check("revoke smoke device", code == 200 and body.get("revoked_at"), f"{code}")
     code, body = http("DELETE", f"{base}/v1/webhooks/{destination_id}", None, agent)
     check("revoke smoke webhook destination", code == 200 and body.get("revoked_at"), f"{code}")
+    prove_scopes_and_limits(base, admin, caller)
     revoke_key()
     print(f"[{elapsed()}] OK golden path, request {rid}, device {device_id}", flush=True)
 

@@ -29,6 +29,8 @@ class Tenant(Base):
     name = Column(String, nullable=False)
     created_at = Column(DateTime, nullable=False)
     disabled_at = Column(DateTime, nullable=True)
+    # HCA-P21b: asks accepted per UTC day across the tenant's keys; 0 means unlimited.
+    asks_per_day = Column(Integer, nullable=False, server_default="0", default=0)
 
 
 def ensure_default_tenant(db) -> "Tenant":
@@ -129,6 +131,10 @@ class ApiKey(Base):
     # the server default backfills pre-P21b rows with every scope so existing
     # callers keep working.
     scopes = Column(Text, nullable=False, server_default=ALL_SCOPES_JSON, default=ALL_SCOPES_JSON)
+    # HCA-P21b: per key ceilings; NULL means the deployment default
+    # (HCA_KEY_RATE_PER_MINUTE 600, HCA_KEY_ASKS_PER_MINUTE 60, see app/limits.py).
+    rate_per_minute = Column(Integer, nullable=True)
+    asks_per_minute = Column(Integer, nullable=True)
 
     @property
     def scope_list(self) -> list:
