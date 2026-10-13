@@ -120,7 +120,8 @@ def _legacy_hash_secret(secret: str) -> str:
     return hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
 
-def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENANT_ID, scopes=None) -> dict:
+def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENANT_ID, scopes=None,
+                  rate_per_minute=None, asks_per_minute=None) -> dict:
     """Mints a new key for caller inside tenant_id, replacing any existing one
     (the api_keys.caller column is unique: one live key per caller, matching
     a single-integration-per-caller model; the caller name is global, the
@@ -153,17 +154,21 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
         existing.created_at = now
         existing.revoked_at = None
         existing.scopes = scopes_json
+        existing.rate_per_minute = rate_per_minute
+        existing.asks_per_minute = asks_per_minute
         row = existing
     else:
         row = models.ApiKey(tenant_id=tenant_id, caller=caller, key_prefix=prefix, key_hash=_hash_secret(secret),
-                            created_at=now, scopes=scopes_json)
+                            created_at=now, scopes=scopes_json, rate_per_minute=rate_per_minute, asks_per_minute=asks_per_minute)
         db.add(row)
         db.flush()
-    record_key_event(db, row, "issued", "admin", {"scopes": scope_list, "prefix": prefix}, at=now)
+    from .limits import key_asks_ceiling, key_rate_ceiling
+    record_key_event(db, row, "issued", "admin", {"scopes": scope_list, "prefix": prefix,
+                                                  "rate_per_minute": key_rate_ceiling(row), "asks_per_minute": key_asks_ceiling(row)}, at=now)
     db.commit()
 
     return {"api_key": plaintext, "prefix": prefix, "caller": caller, "tenant_id": row.tenant_id, "created_at": row.created_at,
-            "scopes": scope_list}
+            "scopes": scope_list, "rate_per_minute": key_rate_ceiling(row), "asks_per_minute": key_asks_ceiling(row)}
 
 
 def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:

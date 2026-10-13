@@ -38,6 +38,18 @@ paths:
                 type: string
                 enum:
                 - 'true'
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -51,6 +63,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -61,9 +85,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -81,6 +119,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -94,6 +144,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -107,6 +169,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -121,6 +195,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -134,6 +220,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -176,6 +274,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/RequestView'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -189,6 +299,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -199,9 +321,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -219,6 +355,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -232,6 +380,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -246,6 +406,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -259,6 +431,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -494,6 +678,18 @@ paths:
                 type: string
                 enum:
                 - 'true'
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -507,6 +703,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -517,9 +725,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -537,6 +759,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -550,6 +784,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -564,6 +810,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -577,6 +835,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -590,6 +860,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -1437,16 +1719,16 @@ paths:
     patch:
       tags:
       - api-keys
-      summary: Patch Key Scopes
-      description: 'HCA-P21b: replace the scope list of a live key. The change and
-        its
+      summary: Patch Key
+      description: 'HCA-P21b: replace the scope list and/or the per key ceilings of
+        a live
 
-        scopes_changed event commit together; a revoked key is refused with 409
+        key. Each change and its event (scopes_changed, limits_changed) commit
 
-        because its scopes no longer matter and silently editing it would hide
+        together; a revoked key is refused with 409 because its settings no
 
-        the revocation.'
-      operationId: patch_key_scopes_v1_api_keys__prefix__patch
+        longer matter and silently editing it would hide the revocation.'
+      operationId: patch_key_v1_api_keys__prefix__patch
       security:
       - AdminToken: []
       parameters:
@@ -1461,7 +1743,7 @@ paths:
         content:
           application/json:
             schema:
-              $ref: '#/components/schemas/ApiKeyScopesPatch'
+              $ref: '#/components/schemas/ApiKeyPatch'
       responses:
         '200':
           description: Successful Response
@@ -3126,6 +3408,140 @@ paths:
               schema:
                 type: string
                 pattern: ^[0-9a-f]{32}$
+    patch:
+      tags:
+      - tenants
+      summary: Patch Tenant Limits
+      description: 'HCA-P21b: set the tenant''s daily ask cap (0 means unlimited).
+        Takes
+
+        effect on the next POST /v1/requests; the current day''s count is kept.'
+      operationId: patch_tenant_limits_v1_tenants__tenant_id__patch
+      security:
+      - AdminToken: []
+      parameters:
+      - name: tenant_id
+        in: path
+        required: true
+        schema:
+          type: string
+          title: Tenant Id
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/TenantLimitsPatch'
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TenantView'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '404':
+          description: Resource not found within the authenticated caller or tenant
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '409':
+          description: Conflicting resource state or incomplete idempotent operation
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
   /v1/tenants/{tenant_id}/disable:
     post:
       tags:
@@ -3763,6 +4179,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/WebhookSecretResponse'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3776,6 +4204,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3786,9 +4226,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3806,6 +4260,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3819,6 +4285,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3832,6 +4310,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3846,6 +4336,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3899,6 +4401,18 @@ paths:
               description: Pass as after for the next page
               schema:
                 type: string
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3912,6 +4426,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3922,9 +4448,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3942,6 +4482,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3955,6 +4507,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3969,6 +4533,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -3998,6 +4574,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/WebhookSecretResponse'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4011,6 +4599,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4021,9 +4621,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4042,6 +4656,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4055,6 +4681,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4068,6 +4706,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4082,6 +4732,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4095,6 +4757,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4124,6 +4798,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/WebhookDestinationView'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4137,6 +4823,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4147,9 +4845,23 @@ paths:
           description: Shared rate limit or tenant quota reached
           headers:
             Retry-After:
-              description: Seconds until retry
+              description: Seconds until the exceeded window ends (minute, or the
+                UTC day for asks_per_day)
               schema:
-                type: string
+                type: integer
+                minimum: 1
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4167,6 +4879,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4180,6 +4904,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4194,6 +4930,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4207,6 +4955,18 @@ paths:
               schema:
                 $ref: '#/components/schemas/HTTPError'
           headers:
+            X-RateLimit-Limit:
+              description: The key's rate_per_minute ceiling (or the limit that was
+                hit on 429)
+              schema:
+                type: integer
+                minimum: 1
+            X-RateLimit-Remaining:
+              description: Calls left in the current minute window for this key; 0
+                on 429
+              schema:
+                type: integer
+                minimum: 0
             X-Request-ID:
               description: Server-generated correlation identifier; excludes request
                 content
@@ -4604,6 +5364,24 @@ components:
           title: Scopes
           description: Subset of asks:create, asks:read, asks:cancel, webhooks:manage;
             omitted means all four
+        rate_per_minute:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rate Per Minute
+          description: Authenticated calls per minute for this key; omitted means
+            the deployment default (600)
+        asks_per_minute:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Asks Per Minute
+          description: POST /v1/requests calls per minute for this key; omitted means
+            the deployment default (60)
       type: object
       required:
       - caller
@@ -4631,6 +5409,12 @@ components:
             type: string
           type: array
           title: Scopes
+        rate_per_minute:
+          type: integer
+          title: Rate Per Minute
+        asks_per_minute:
+          type: integer
+          title: Asks Per Minute
       type: object
       required:
       - api_key
@@ -4639,22 +5423,42 @@ components:
       - tenant_id
       - created_at
       - scopes
+      - rate_per_minute
+      - asks_per_minute
       title: ApiKeyIssueResponse
-    ApiKeyScopesPatch:
+    ApiKeyPatch:
       properties:
         scopes:
-          items:
-            type: string
-          type: array
-          maxItems: 4
-          minItems: 1
+          anyOf:
+          - items:
+              type: string
+            type: array
+            maxItems: 4
+            minItems: 1
+          - type: 'null'
           title: Scopes
           description: Replacement scope list, a non-empty subset of the four known
             scopes
+        rate_per_minute:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Rate Per Minute
+        asks_per_minute:
+          anyOf:
+          - type: integer
+            maximum: 100000.0
+            minimum: 1.0
+          - type: 'null'
+          title: Asks Per Minute
       type: object
-      required:
-      - scopes
-      title: ApiKeyScopesPatch
+      title: ApiKeyPatch
+      description: 'At least one field; a field left out is unchanged. Ceilings set
+        to
+
+        null return the key to the deployment default.'
     ApiKeyView:
       properties:
         prefix:
@@ -4681,6 +5485,12 @@ components:
             type: string
           type: array
           title: Scopes
+        rate_per_minute:
+          type: integer
+          title: Rate Per Minute
+        asks_per_minute:
+          type: integer
+          title: Asks Per Minute
       type: object
       required:
       - prefix
@@ -4688,6 +5498,8 @@ components:
       - tenant_id
       - created_at
       - scopes
+      - rate_per_minute
+      - asks_per_minute
       title: ApiKeyView
       description: 'One key row without any secret material: the prefix is the lookup
 
@@ -5416,6 +6228,19 @@ components:
       - slug
       - name
       title: TenantCreate
+    TenantLimitsPatch:
+      properties:
+        asks_per_day:
+          type: integer
+          maximum: 10000000.0
+          minimum: 0.0
+          title: Asks Per Day
+          description: Asks accepted per UTC day across the tenant's keys; 0 means
+            unlimited
+      type: object
+      required:
+      - asks_per_day
+      title: TenantLimitsPatch
     TenantView:
       properties:
         tenant_id:
@@ -5443,6 +6268,10 @@ components:
           type: array
           title: Owner Emails
           default: []
+        asks_per_day:
+          type: integer
+          title: Asks Per Day
+          default: 0
       type: object
       required:
       - tenant_id
@@ -5695,7 +6524,10 @@ components:
         and webhooks:manage (every /v1/webhooks route); omitted at issuance means
         all four. A key lacking the route''s scope gets 403 with detail ''api key
         lacks scope <name>'' and a WWW-Authenticate: Bearer scope="<name>" challenge.
-        Credentials are never accepted in a query string.'
+        Credentials are never accepted in a query string. Every key carries rate_per_minute
+        (default 600, every authenticated call) and asks_per_minute (default 60, POST
+        /v1/requests); the tenant may add asks_per_day. Over a ceiling answers 429
+        with Retry-After; successful calls carry X-RateLimit-Limit and X-RateLimit-Remaining.'
     DeviceSignature:
       type: apiKey
       in: header

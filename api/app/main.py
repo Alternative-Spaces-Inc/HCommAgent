@@ -16,7 +16,7 @@ from .webhooks_api import router as webhooks_router
 from .tenancy import router as tenants_router
 from .data_api import router as data_router
 from . import limits  # noqa: F401 -- register persistent counters before metadata creation
-from .middleware import RequestBounds, QueryCredentialGuard
+from .middleware import RequestBounds, QueryCredentialGuard, RateLimitHeaders
 
 
 @asynccontextmanager
@@ -42,6 +42,7 @@ app = FastAPI(title="Human Collections Agent (HCA) API", version="0.3.0", lifesp
         429: {"description": "Shared rate limit or tenant quota reached", "headers": {
             "Retry-After": {"description": "Seconds until retry", "schema": {"type": "string"}}}},
     })
+app.add_middleware(RateLimitHeaders)
 app.add_middleware(RequestBounds)
 app.add_middleware(QueryCredentialGuard)
 

@@ -44,6 +44,34 @@ class QueryCredentialGuard:
         return await self.app(scope, receive, send)
 
 
+class RateLimitHeaders:
+    """HCA-P21b: copies request.state.rate_limit (ceiling, remaining), set by
+    require_agent_key, onto the response as X-RateLimit-Limit and
+    X-RateLimit-Remaining. Pure ASGI, touches only the response start."""
+
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        state = scope.setdefault("state", {})
+
+        async def send_with_headers(message):
+            if message["type"] == "http.response.start":
+                limit = state.get("rate_limit")
+                if limit is not None:
+                    headers = list(message.get("headers", []))
+                    names = {name.lower() for name, _ in headers}
+                    if b"x-ratelimit-limit" not in names:
+                        headers.append((b"x-ratelimit-limit", str(limit[0]).encode()))
+                        headers.append((b"x-ratelimit-remaining", str(max(0, limit[1])).encode()))
+                    message = {**message, "headers": headers}
+            await send(message)
+
+        return await self.app(scope, receive, send_with_headers)
+
+
 class RequestBounds:
     def __init__(self, app):
         self.app = app

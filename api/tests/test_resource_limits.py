@@ -122,10 +122,14 @@ def test_shared_rate_limit_is_atomic_across_sessions():
 def test_agent_budget_returns_retry_after_and_correlation(monkeypatch):
     auth, body = fixture_request()
     monkeypatch.setattr(limits, "time", SimpleNamespace(time=lambda: 100))
-    monkeypatch.setenv("HCA_ACTOR_RATE_PER_MINUTE", "1")
-    assert client.get("/v1/webhooks", headers=auth).status_code == 200
+    # HCA-P21b: agent keys are budgeted by their own rate_per_minute (deployment
+    # default HCA_KEY_RATE_PER_MINUTE); HCA_ACTOR_RATE_PER_MINUTE still bounds devices.
+    monkeypatch.setenv("HCA_KEY_RATE_PER_MINUTE", "1")
+    first = client.get("/v1/webhooks", headers=auth)
+    assert first.status_code == 200 and first.headers["x-ratelimit-limit"] == "1" and first.headers["x-ratelimit-remaining"] == "0"
     limited = client.get("/v1/webhooks", headers=auth)
     assert limited.status_code == 429 and 1 <= int(limited.headers["retry-after"]) <= 60
+    assert limited.headers["x-ratelimit-remaining"] == "0" and limited.json()["detail"] == "api key rate limit exceeded"
     assert limited.headers["x-request-id"]
 
 

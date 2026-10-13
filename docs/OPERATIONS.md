@@ -89,6 +89,18 @@ instances, verify the old bearer is refused and investigate issuance, owner/devi
 changes, exports/purges and sweep activity. A compromised administrator/database can
 change trusted state; client signatures do not restore that trust.
 
+Every agent key carries two ceilings, `rate_per_minute` (every authenticated call,
+default 600) and `asks_per_minute` (POST /v1/requests, default 60), set at issuance or
+by `PATCH /v1/api-keys/{prefix}`; a null returns the key to the deployment default
+(`HCA_KEY_RATE_PER_MINUTE`, `HCA_KEY_ASKS_PER_MINUTE`). `PATCH /v1/tenants/{tenant_id}`
+with `asks_per_day` caps a whole tenant per UTC day (0 means unlimited). Counting is one
+shared database upsert per call, so every instance sees the same count; a 429 carries
+`Retry-After` to the window end and successful calls carry `X-RateLimit-Limit` and
+`X-RateLimit-Remaining`. The first refusal in a window writes one `limit_hit` event
+(`GET /v1/api-keys/{prefix}/events`) and `/v1/internal/metrics` reports
+`api_keys.rate_limited_last_hour`; a key that keeps hitting its ceiling is either an
+automation loop or a leaked key, so read its events before raising the ceiling.
+
 Receiver signing-secret rotation uses `POST /v1/webhooks/{id}/rotate` with a 24-hour
 old/new signing overlap. The receiver must install the new secret and continue
 accepting verified overlap signatures. A second rotation returns 409 while the
