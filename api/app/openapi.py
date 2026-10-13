@@ -30,7 +30,7 @@ ERRORS = {
     "409": "Conflicting resource state or incomplete idempotent operation",
     "413": "Request body exceeds 1 MiB",
     "422": "Invalid input, control value, deadline or idempotency key reuse",
-    "429": "Shared request budget or tenant quota reached",
+    "429": "Shared request budget, api key ceiling or tenant quota reached",
     "503": "Required database or Google verification configuration unavailable",
 }
 OPERATION_ERRORS = {
@@ -45,6 +45,7 @@ OPERATION_ERRORS = {
     ("/v1/tenants", "post"): {"409", "422"},
     ("/v1/tenants/{tenant_id}", "get"): {"404"},
     ("/v1/tenants/{tenant_id}/disable", "post"): {"404", "409"},
+    ("/v1/tenants/{tenant_id}", "patch"): {"404", "409", "422"},
     ("/v1/tenants/{tenant_id}/owners", "post"): {"404", "422"},
     ("/v1/tenants/{tenant_id}/owners/{email}", "delete"): {"404"},
     ("/v1/tenants/{tenant_id}/records", "get"): {"404"},
@@ -110,7 +111,10 @@ def enrich_schema(generated):
         "fixed scopes asks:create (POST /v1/requests), asks:read (GET /v1/requests/{request_id}), asks:cancel "
         "(POST /v1/requests/{request_id}/cancel) and webhooks:manage (every /v1/webhooks route); omitted at issuance "
         "means all four. A key lacking the route's scope gets 403 with detail 'api key lacks scope <name>' and a "
-        "WWW-Authenticate: Bearer scope=\"<name>\" challenge. Credentials are never accepted in a query string."
+        "WWW-Authenticate: Bearer scope=\"<name>\" challenge. Credentials are never accepted in a query string. Every key "
+        "carries rate_per_minute (default 600, every authenticated call) and asks_per_minute (default 60, POST /v1/requests); "
+        "the tenant may add asks_per_day. Over a ceiling answers 429 with Retry-After; successful calls carry X-RateLimit-Limit "
+        "and X-RateLimit-Remaining."
     )
     security["SweepBearer"] = {"type": "http", "scheme": "bearer",
         "description": "SWEEP_TRIGGER_TOKEN used only by the internal scheduler; missing server configuration fails closed."}
@@ -203,6 +207,21 @@ def enrich_schema(generated):
             if "422" in operation["responses"]:
                 operation["responses"]["422"]["content"] = {
                     "application/json": {"schema": {"$ref": "#/components/schemas/HTTPError"}}}
+            # HCA-P21b: agent key responses carry the key's per minute budget;
+            # 429 adds Retry-After (seconds to the window end).
+            if any("AgentKey" in requirement for requirement in operation.get("security", [])):
+                for status, response in operation["responses"].items():
+                    headers = response.setdefault("headers", {})
+                    headers["X-RateLimit-Limit"] = {
+                        "description": "The key's rate_per_minute ceiling (or the limit that was hit on 429)",
+                        "schema": {"type": "integer", "minimum": 1}}
+                    headers["X-RateLimit-Remaining"] = {
+                        "description": "Calls left in the current minute window for this key; 0 on 429",
+                        "schema": {"type": "integer", "minimum": 0}}
+                    if status == "429":
+                        headers["Retry-After"] = {
+                            "description": "Seconds until the exceeded window ends (minute, or the UTC day for asks_per_day)",
+                            "schema": {"type": "integer", "minimum": 1}}
             for response in operation["responses"].values():
                 response.setdefault("headers", {})["X-Request-ID"] = {
                     "description": "Server-generated correlation identifier; excludes request content",

@@ -55,7 +55,7 @@ from . import models
 from .apikeys import verify_api_key, SCOPES
 from .db import get_db
 from . import devicesig, nonces
-from .limits import authorize_budget, consume
+from .limits import authorize_budget, authorize_key_budget, consume
 
 
 # auto_error=False so a missing header is our own 401 (with WWW-Authenticate)
@@ -77,6 +77,7 @@ def _token(creds: Optional[HTTPAuthorizationCredentials]) -> str:
 
 
 def require_agent_key(
+    request: Request,
     creds: Optional[HTTPAuthorizationCredentials] = Depends(_agent_bearer),
     db: Session = Depends(get_db),
 ) -> models.ApiKey:
@@ -87,7 +88,11 @@ def require_agent_key(
     tenant = db.get(models.Tenant, key.tenant_id)
     if tenant is None or tenant.disabled_at is not None:
         raise HTTPException(status_code=403, detail="tenant disabled")
-    authorize_budget(db, key.tenant_id, "agent:" + key.key_prefix)
+    # HCA-P21b: the key's own rate_per_minute replaces the generic actor
+    # ceiling for agent keys; the remaining budget reaches the response
+    # headers through RateLimitHeaders (app/middleware.py).
+    ceiling, remaining = authorize_key_budget(db, key)
+    request.state.rate_limit = (ceiling, remaining)
     db.expire_on_commit = False
     db.commit()
     return key

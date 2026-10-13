@@ -165,10 +165,17 @@ def test_migration_backfills_existing_rows_with_every_scope(tmp_path):
     assert con.execute("SELECT count(*) FROM api_key_events").fetchone()[0] == 0
     indexes = [r[1] for r in con.execute("PRAGMA index_list(api_key_events)")]
     assert "ix_api_key_events_key_at" in indexes
+
+    # Day 2 (d1e2f3a4b5c6): per key ceilings are NULL (deployment default) and the
+    # tenant daily cap is 0 (unlimited) on pre-existing rows.
+    assert con.execute("SELECT rate_per_minute, asks_per_minute FROM api_keys WHERE id = 'legacy-1'").fetchone() == (None, None)
+    assert con.execute("SELECT asks_per_day FROM tenants WHERE id = 'default'").fetchone() == (0,)
     con.close()
 
-    alembic("downgrade", "-1")
+    alembic("downgrade", "20261012_rate_limits")
     con = sqlite3.connect(db_path)
     assert "scopes" not in [c[1] for c in con.execute("PRAGMA table_info(api_keys)")]
+    assert "rate_per_minute" not in [c[1] for c in con.execute("PRAGMA table_info(api_keys)")]
+    assert "asks_per_day" not in [c[1] for c in con.execute("PRAGMA table_info(tenants)")]
     assert con.execute("SELECT name FROM sqlite_master WHERE name = 'api_key_events'").fetchone() is None
     con.close()

@@ -59,6 +59,10 @@ class TenantCreate(BaseModel):
     name: str = Field(min_length=1, max_length=200)
 
 
+class TenantLimitsPatch(BaseModel):
+    asks_per_day: int = Field(ge=0, le=10_000_000, description="Asks accepted per UTC day across the tenant's keys; 0 means unlimited")
+
+
 class OwnerAdd(BaseModel):
     email: str = Field(min_length=3, max_length=320)
 
@@ -70,6 +74,8 @@ class TenantView(UTCJSONModel):
     created_at: datetime
     disabled_at: Optional[datetime] = None
     owner_emails: list[str] = []
+    # HCA-P21b: asks accepted per UTC day across the tenant's keys; 0 means unlimited.
+    asks_per_day: int = 0
 
 
 def owner_emails_for(db: Session, tenant_id: str) -> Optional[set]:
@@ -88,7 +94,8 @@ def owner_emails_for(db: Session, tenant_id: str) -> Optional[set]:
 
 def _view(db: Session, t: models.Tenant) -> TenantView:
     emails = sorted(owner_emails_for(db, t.id) or set())
-    return TenantView(tenant_id=t.id, slug=t.slug, name=t.name, created_at=t.created_at, disabled_at=t.disabled_at, owner_emails=emails)
+    return TenantView(tenant_id=t.id, slug=t.slug, name=t.name, created_at=t.created_at, disabled_at=t.disabled_at, owner_emails=emails,
+                      asks_per_day=int(t.asks_per_day or 0))
 
 
 def _get(db: Session, tenant_id: str) -> models.Tenant:
@@ -140,6 +147,18 @@ def disable_tenant(tenant_id: str, db: Session = Depends(get_db), _admin=Depends
         for d in db.execute(select(models.Device).where(models.Device.tenant_id == t.id, models.Device.revoked_at.is_(None))).scalars():
             d.revoked_at = now
         db.commit()
+    return _view(db, t)
+
+
+@router.patch("/{tenant_id}", response_model=TenantView)
+def patch_tenant_limits(tenant_id: str, body: TenantLimitsPatch, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    """HCA-P21b: set the tenant's daily ask cap (0 means unlimited). Takes
+    effect on the next POST /v1/requests; the current day's count is kept."""
+    t = _get(db, tenant_id)
+    if t.disabled_at is not None:
+        raise HTTPException(status_code=409, detail="tenant is disabled")
+    t.asks_per_day = body.asks_per_day
+    db.commit()
     return _view(db, t)
 
 

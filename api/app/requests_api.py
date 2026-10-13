@@ -14,6 +14,7 @@ from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, Answer
 from . import events
 from . import webhooks
 from . import webhook_destinations
+from .limits import authorize_ask_budget
 from .auth import require_scope, require_linked_device, google_link_required, require_current_device
 from . import routing, jobs
 from . import controls
@@ -150,6 +151,9 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
         if dest is None:
             raise HTTPException(status_code=400, detail="deliver_to.url is not a registered webhook destination; POST /v1/webhooks first")
         deliver_to["destination_id"] = dest.id
+    # HCA-P21b: the key's asks_per_minute and the tenant's asks_per_day,
+    # counted once per accepted shape (replays above never reach here).
+    authorize_ask_budget(db, key, db.get(models.Tenant, key.tenant_id))
     now = datetime.now(timezone.utc)
     expires_at = _expires_at(now, body.deadline_at)
     _lock_tenant_for_quota(db, key.tenant_id)

@@ -10,10 +10,12 @@ from sqlalchemy.orm import Session
 from . import models
 from .db import get_db
 from .apikeys import issue_api_key, normalize_scopes, record_key_event, SCOPES
+from .limits import key_asks_ceiling, key_rate_ceiling
 from .auth import require_admin_bearer
 from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
+MAX_CEILING = 100000
 
 
 class ApiKeyIssueRequest(BaseModel):
@@ -24,11 +26,20 @@ class ApiKeyIssueRequest(BaseModel):
     # HCA-P21b: subset of apikeys.SCOPES; omitted means every scope.
     scopes: Optional[list[str]] = Field(default=None, min_length=1, max_length=len(SCOPES),
                                         description="Subset of asks:create, asks:read, asks:cancel, webhooks:manage; omitted means all four")
+    # HCA-P21b Day 2: per key ceilings; omitted means the deployment default (600 and 60).
+    rate_per_minute: Optional[int] = Field(default=None, ge=1, le=MAX_CEILING,
+                                           description="Authenticated calls per minute for this key; omitted means the deployment default (600)")
+    asks_per_minute: Optional[int] = Field(default=None, ge=1, le=MAX_CEILING,
+                                           description="POST /v1/requests calls per minute for this key; omitted means the deployment default (60)")
 
 
-class ApiKeyScopesPatch(BaseModel):
-    scopes: list[str] = Field(min_length=1, max_length=len(SCOPES),
-                              description="Replacement scope list, a non-empty subset of the four known scopes")
+class ApiKeyPatch(BaseModel):
+    """At least one field; a field left out is unchanged. Ceilings set to
+    null return the key to the deployment default."""
+    scopes: Optional[list[str]] = Field(default=None, min_length=1, max_length=len(SCOPES),
+                                        description="Replacement scope list, a non-empty subset of the four known scopes")
+    rate_per_minute: Optional[int] = Field(default=None, ge=1, le=MAX_CEILING)
+    asks_per_minute: Optional[int] = Field(default=None, ge=1, le=MAX_CEILING)
 
 
 class ApiKeyIssueResponse(UTCJSONModel):
@@ -38,6 +49,8 @@ class ApiKeyIssueResponse(UTCJSONModel):
     tenant_id: str
     created_at: datetime
     scopes: list[str]
+    rate_per_minute: int
+    asks_per_minute: int
 
 
 class ApiKeyEventView(UTCJSONModel):
@@ -58,11 +71,15 @@ class ApiKeyView(UTCJSONModel):
     created_at: datetime
     revoked_at: Optional[datetime] = None
     scopes: list[str]
+    # Effective ceilings (the key's own value or the deployment default).
+    rate_per_minute: int
+    asks_per_minute: int
 
 
 def _view(row: models.ApiKey) -> ApiKeyView:
     return ApiKeyView(prefix=row.key_prefix, caller=row.caller, tenant_id=row.tenant_id, created_at=row.created_at,
-                      revoked_at=row.revoked_at, scopes=row.scope_list)
+                      revoked_at=row.revoked_at, scopes=row.scope_list,
+                      rate_per_minute=key_rate_ceiling(row), asks_per_minute=key_asks_ceiling(row))
 
 
 def _event_view(e: models.ApiKeyEvent) -> ApiKeyEventView:
@@ -85,7 +102,8 @@ def _row_by_prefix(db: Session, prefix: str) -> models.ApiKey:
 @router.post("", response_model=ApiKeyIssueResponse, status_code=201)
 def issue_key(body: ApiKeyIssueRequest, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
     try:
-        return issue_api_key(db, body.caller, body.tenant_id, body.scopes)
+        return issue_api_key(db, body.caller, body.tenant_id, body.scopes,
+                             rate_per_minute=body.rate_per_minute, asks_per_minute=body.asks_per_minute)
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e)) from None
 
@@ -118,23 +136,38 @@ def revoke_key(prefix: str, db: Session = Depends(get_db), _admin=Depends(requir
 
 
 @router.patch("/{prefix}", response_model=ApiKeyView)
-def patch_key_scopes(prefix: str, body: ApiKeyScopesPatch, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
-    """HCA-P21b: replace the scope list of a live key. The change and its
-    scopes_changed event commit together; a revoked key is refused with 409
-    because its scopes no longer matter and silently editing it would hide
-    the revocation."""
+def patch_key(prefix: str, body: ApiKeyPatch, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    """HCA-P21b: replace the scope list and/or the per key ceilings of a live
+    key. Each change and its event (scopes_changed, limits_changed) commit
+    together; a revoked key is refused with 409 because its settings no
+    longer matter and silently editing it would hide the revocation."""
     row = _row_by_prefix(db, prefix)
     if row.revoked_at is not None:
         raise HTTPException(status_code=409, detail="api key is revoked")
-    try:
-        after = normalize_scopes(body.scopes)
-    except ValueError as e:
-        raise HTTPException(status_code=422, detail=str(e)) from None
-    before = row.scope_list
-    if after != before:
-        now = datetime.now(timezone.utc)
-        row.scopes = json.dumps(after)
-        record_key_event(db, row, "scopes_changed", "admin", {"before": before, "after": after}, at=now)
+    fields = body.model_dump(exclude_unset=True)
+    if not fields:
+        raise HTTPException(status_code=422, detail="nothing to change")
+    now = datetime.now(timezone.utc)
+    changed = False
+    if "scopes" in fields:
+        try:
+            after = normalize_scopes(body.scopes)
+        except ValueError as e:
+            raise HTTPException(status_code=422, detail=str(e)) from None
+        before = row.scope_list
+        if after != before:
+            row.scopes = json.dumps(after)
+            record_key_event(db, row, "scopes_changed", "admin", {"before": before, "after": after}, at=now)
+            changed = True
+    limits_before = {"rate_per_minute": row.rate_per_minute, "asks_per_minute": row.asks_per_minute}
+    for name in ("rate_per_minute", "asks_per_minute"):
+        if name in fields:
+            setattr(row, name, fields[name])
+    limits_after = {"rate_per_minute": row.rate_per_minute, "asks_per_minute": row.asks_per_minute}
+    if limits_after != limits_before:
+        record_key_event(db, row, "limits_changed", "admin", {"before": limits_before, "after": limits_after}, at=now)
+        changed = True
+    if changed:
         db.commit()
     return _view(row)
 
