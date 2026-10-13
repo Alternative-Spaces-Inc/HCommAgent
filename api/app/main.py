@@ -16,7 +16,7 @@ from .webhooks_api import router as webhooks_router
 from .tenancy import router as tenants_router
 from .data_api import router as data_router
 from . import limits  # noqa: F401 -- register persistent counters before metadata creation
-from .middleware import RequestBounds
+from .middleware import RequestBounds, QueryCredentialGuard
 
 
 @asynccontextmanager
@@ -43,6 +43,7 @@ app = FastAPI(title="Human Collections Agent (HCA) API", version="0.3.0", lifesp
             "Retry-After": {"description": "Seconds until retry", "schema": {"type": "string"}}}},
     })
 app.add_middleware(RequestBounds)
+app.add_middleware(QueryCredentialGuard)
 
 
 @app.exception_handler(RequestValidationError)

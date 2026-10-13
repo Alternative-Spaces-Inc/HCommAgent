@@ -6,10 +6,10 @@ device-signed call, to POST /v1/devices/self/google-link. This module
 turns that token into a verified Google identity or a reason to refuse.
 
 Verification goes to Google's tokeninfo endpoint
-(https://oauth2.googleapis.com/tokeninfo?access_token=...), which answers
-with the client the token was minted for (aud / azp), the account (sub,
-email, email_verified) and the remaining lifetime. The token is accepted
-only when
+(https://oauth2.googleapis.com/tokeninfo via POST with form body
+access_token), which answers with the client the token was minted for (aud / azp),
+the account (sub, email, email_verified) and the remaining lifetime. The token is
+accepted only when
 
   - aud or azp is one of the configured client ids: HCA_GOOGLE_CLIENT_ID
     (the Chrome Extension OAuth client, kept as an alias) plus every id in
@@ -51,7 +51,7 @@ class GoogleAuthError(Exception):
 
 def _default_fetch(access_token: str) -> tuple[int, dict]:
     with httpx.Client(timeout=10.0) as client:
-        r = client.get(TOKENINFO_URL, params={"access_token": access_token})
+        r = client.post(TOKENINFO_URL, data={"access_token": access_token})
     try:
         body = r.json()
     except Exception:
