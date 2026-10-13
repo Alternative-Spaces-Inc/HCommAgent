@@ -203,7 +203,6 @@ def test_nonce_prune_removes_only_rows_older_than_the_window():
 def test_replayed_signed_request_is_refused_by_the_table_when_memory_is_reset():
     """End to end through require_device: same signed request twice, with the
     in-memory guard reset between, as if the replay hit a second instance."""
-    os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_local.db")
     from fastapi.testclient import TestClient
     from app.main import app
     from deviceauth import ensure_registered, human_headers

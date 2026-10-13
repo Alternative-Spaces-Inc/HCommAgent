@@ -52,7 +52,7 @@ from sqlalchemy import select
 from sqlalchemy.orm import Session
 
 from . import models
-from .apikeys import verify_api_key
+from .apikeys import verify_api_key, SCOPES
 from .db import get_db
 from . import devicesig, nonces
 from .limits import authorize_budget, consume
@@ -91,6 +91,24 @@ def require_agent_key(
     db.expire_on_commit = False
     db.commit()
     return key
+
+
+def require_scope(name: str):
+    """HCA-P21b: a dependency that authenticates the agent key exactly like
+    require_agent_key and then requires the named scope on it. A key that
+    lacks the scope gets 403 with the scope named in the detail and in a
+    WWW-Authenticate challenge, so a caller can see which scope to request."""
+    if name not in SCOPES:
+        raise ValueError(f"unknown scope {name!r}")
+
+    def _dependency(key: models.ApiKey = Depends(require_agent_key)) -> models.ApiKey:
+        if name not in key.scope_list:
+            raise HTTPException(status_code=403, detail=f"api key lacks scope {name}",
+                                headers={"WWW-Authenticate": f'Bearer scope="{name}"'})
+        return key
+
+    _dependency.__name__ = f"require_scope_{name.replace(':', '_')}"
+    return _dependency
 
 
 def require_admin_bearer(creds: Optional[HTTPAuthorizationCredentials] = Depends(_admin_bearer),

@@ -2,10 +2,46 @@
 import json
 import logging
 import time
+import urllib.parse
 import uuid
 
 log = logging.getLogger("hca.http")
 MAX_BODY_BYTES = 1024 * 1024
+
+FORBIDDEN_QUERY_PARAMS = {
+    "access_token",
+    "api_key",
+    "apikey",
+    "token",
+    "key",
+    "secret",
+}
+
+
+class QueryCredentialGuard:
+    def __init__(self, app):
+        self.app = app
+
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            return await self.app(scope, receive, send)
+        query_bytes = scope.get("query_string", b"")
+        if query_bytes:
+            query_str = query_bytes.decode("latin-1")
+            params = urllib.parse.parse_qsl(query_str, keep_blank_values=True)
+            for name, _ in params:
+                if name.lower() in FORBIDDEN_QUERY_PARAMS:
+                    await send({
+                        "type": "http.response.start",
+                        "status": 400,
+                        "headers": [(b"content-type", b"application/json")],
+                    })
+                    await send({
+                        "type": "http.response.body",
+                        "body": json.dumps({"detail": "credentials are not accepted in the query string"}).encode("utf-8"),
+                    })
+                    return None
+        return await self.app(scope, receive, send)
 
 
 class RequestBounds:

@@ -9,17 +9,19 @@ Use Python 3.12, Node 22 or 24 and macOS 14+ with Swift 5.9 or later. From the r
 ```sh
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --require-hashes -r api/requirements-dev.lock
+python -m pip install --require-hashes -r api/requirements-dev.lock.txt
 python scripts/demo_workflow.py
 ```
 
-Runtime dependencies are in `api/requirements.txt` and `api/requirements.lock`; development inputs and their compiled dependencies are in `api/requirements-dev.in` and `api/requirements-dev.lock`. Update source inputs and regenerate both hashed locks together. Use `npm ci` with `extension/package-lock.json`. Changes to locks, action pins or image digests need review and the relevant checks.
+Runtime dependencies are in `api/requirements.txt` and `api/requirements.lock.txt`; development inputs and their compiled dependencies are in `api/requirements-dev.in` and `api/requirements-dev.lock.txt`. Update source inputs and regenerate both hashed locks together. Use `npm ci` with `extension/package-lock.json`. Changes to locks, action pins or image digests need review and the relevant checks.
+
+The `.lock.txt` suffix allows Dependabot to discover the compiled files and the nested include in `requirements-dev.txt`. Keep that compatibility file as a wrapper. Dependency update proposals still require reviewed regeneration of both hash locks and the recorded direct-input digests; the updater does not maintain this custom dual-lock workflow automatically.
 
 The current locks were generated with uv 0.11.14 for Python 3.12 across supported platforms. After changing direct pins, extras or markers:
 
 ```sh
-uv pip compile api/requirements.txt --universal --python-version 3.12 --generate-hashes --output-file api/requirements.lock
-uv pip compile api/requirements-dev.in --universal --python-version 3.12 --generate-hashes --output-file api/requirements-dev.lock
+uv pip compile api/requirements.txt --universal --python-version 3.12 --generate-hashes --output-file api/requirements.lock.txt
+uv pip compile api/requirements-dev.in --universal --python-version 3.12 --generate-hashes --output-file api/requirements-dev.lock.txt
 python .github/gates/update_dependency_inputs.py
 python .github/gates/check_dependency_locks.py
 ```
@@ -43,7 +45,7 @@ Stop the API before removing `.env.development` and `api/hca_development.db` for
 | Python lint | `.venv/bin/ruff check api .github/gates scripts` | Declared repository profile |
 | API contract | `.venv/bin/python .github/gates/check_openapi_parity.py` | Complete saved-versus-served contract |
 | OpenAPI syntax | `.venv/bin/openapi-spec-validator api/openapi.yaml` | Document validity |
-| Dependencies | `.venv/bin/pip-audit -r api/requirements-dev.lock --disable-pip --no-deps --progress-spinner off` | Known vulnerabilities at run time |
+| Dependencies | `.venv/bin/pip-audit -r api/requirements-dev.lock.txt --disable-pip --no-deps --progress-spinner off` | Known vulnerabilities at run time |
 | Credentials/history | `.venv/bin/python .github/gates/check_secrets.py --scanner /tmp/hca-tools/gitleaks` | Current source and complete fetched history; exact reviewed exceptions |
 | Client-data hygiene | `.venv/bin/python .github/gates/check_client_data.py` | Tracked text against the maintained public-safe denylist |
 | Product isolation | `.venv/bin/python .github/gates/check_manifest.py` | Privileged personal operations excluded from product source |

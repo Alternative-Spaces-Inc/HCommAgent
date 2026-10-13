@@ -38,14 +38,14 @@ def main():
     for name in ("api/requirements.txt", "api/requirements-dev.in"):
         if inputs.get(name) != hashlib.sha256((ROOT / name).read_bytes()).hexdigest():
             raise SystemExit("FAIL: lock input changed, including extras/markers; regenerate both locks and input digests")
-    for source, lock in (("requirements.txt", "requirements.lock"),
-                         ("requirements-dev.in", "requirements-dev.lock")):
+    for source, lock in (("requirements.txt", "requirements.lock.txt"),
+                         ("requirements-dev.in", "requirements-dev.lock.txt")):
         direct = requirements(ROOT / "api" / source)
         resolved = requirements(ROOT / "api" / lock, locked=True)
         if any(resolved.get(name) != versions for name, versions in direct.items()):
             raise SystemExit(f"FAIL: {source} changed; regenerate and review {lock}")
-    runtime = requirements(ROOT / "api/requirements.lock", locked=True)
-    development = requirements(ROOT / "api/requirements-dev.lock", locked=True)
+    runtime = requirements(ROOT / "api/requirements.lock.txt", locked=True)
+    development = requirements(ROOT / "api/requirements-dev.lock.txt", locked=True)
     if any(development.get(name) != versions for name, versions in runtime.items()):
         raise SystemExit("FAIL: runtime and development transitive versions differ")
     print("OK: direct pins match complete hashed locks; runtime/dev versions agree")

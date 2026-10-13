@@ -75,7 +75,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install openapi-spec-validator
-        run: pip install --require-hashes -r api/requirements-dev.lock
+        run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Validate OpenAPI spec
         run: openapi-spec-validator api/openapi.yaml
 
@@ -112,7 +112,7 @@ jobs:
           python-version: '3.12'
       - name: Install dependencies
         working-directory: api
-        run: pip install --require-hashes -r requirements-dev.lock
+        run: pip install --require-hashes -r requirements-dev.lock.txt
       - name: Install checksum-pinned credential scanner for regressions
         run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
       - name: Run migrations
@@ -191,7 +191,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install ruff
-        run: pip install --require-hashes -r api/requirements-dev.lock
+        run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Lint api, gate scripts and scripts (profile in ruff.toml)
         run: ruff check api .github/gates scripts
 
@@ -209,10 +209,10 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install pip-audit
-        run: pip install --require-hashes -r api/requirements-dev.lock
+        run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Audit the pinned API requirements
         working-directory: api
-        run: pip-audit -r requirements-dev.lock --disable-pip --no-deps --progress-spinner off
+        run: pip-audit -r requirements-dev.lock.txt --disable-pip --no-deps --progress-spinner off
 
   sqlite-http:
     name: API Tests (SQLite and HTTP)
@@ -228,7 +228,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Install checksum-pinned credential scanner for regressions
         run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
       - name: Upgrade from previous schema and run isolated regressions
@@ -253,7 +253,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Install checksum-pinned credential scanner
         run: python .github/gates/install_gitleaks.py --output /tmp/hca-tools/gitleaks
       - name: Scan current source and every fetched ref
@@ -274,7 +274,7 @@ jobs:
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97
         with:
           python-version: '3.12'
-      - run: pip install --require-hashes -r api/requirements-dev.lock
+      - run: pip install --require-hashes -r api/requirements-dev.lock.txt
       - name: Check lock inputs, current document links and failure propagation
         run: |
           python .github/gates/check_dependency_locks.py

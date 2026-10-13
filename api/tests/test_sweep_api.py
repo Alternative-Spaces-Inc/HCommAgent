@@ -3,7 +3,6 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-os.environ.setdefault("DATABASE_URL", "sqlite:///./hca_test_sweep_api.db")
 os.environ["SWEEP_TRIGGER_TOKEN"] = "test-sweep-token"
 
 from datetime import datetime, timedelta, timezone

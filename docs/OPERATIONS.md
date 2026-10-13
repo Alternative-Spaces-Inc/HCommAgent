@@ -56,7 +56,7 @@ not a data-migration plan.
 4. Deploy a build-specific candidate with no production traffic. Persist its exact
    revision, URL, image and source/build identity. Check effective configuration
    and smoke that same revision; promotion must use the validated revision.
-   The build-specific tag is `candidate-${BUILD_ID}` and the shared snapshot is
+   The build-specific tag is `candidate-<first 8 hex characters of BUILD_ID>` (Cloud Run limits the combined tag and service name length; the full build id stays on the revision label) and the shared snapshot is
    `/workspace/hca-candidate.json`. Its source/build/image/revision and config/smoke
    evidence must agree. Migration jobs also use a build-specific identity.
 5. Verify actual owner authorization, signed receiver deduplication, stream reconnect

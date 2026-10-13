@@ -14,7 +14,7 @@ from .schemas import CollectionRequest, RequestReceipt, AnswerSubmission, Answer
 from . import events
 from . import webhooks
 from . import webhook_destinations
-from .auth import require_agent_key, require_linked_device, google_link_required, require_current_device
+from .auth import require_scope, require_linked_device, google_link_required, require_current_device
 from . import routing, jobs
 from . import controls
 from . import idempotency
@@ -127,7 +127,7 @@ def _audit_to_answer_record(row: models.AuditRow) -> dict:
 
 
 @router.post("", status_code=201, response_model=RequestReceipt)
-def create_request(body: CollectionRequest, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def create_request(body: CollectionRequest, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("asks:create"))):
     if body.caller != key.caller:
         raise HTTPException(status_code=403, detail="caller does not match the api key")
     # Keep fingerprints of legacy naive datetime inputs stable while response
@@ -207,7 +207,7 @@ def create_request(body: CollectionRequest, request: Request, db: Session = Depe
 
 
 @router.get("/{request_id}", response_model=RequestView)
-def get_request(request_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def get_request(request_id: str, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("asks:read"))):
     ask = _own_ask(db, request_id, key)
 
     answer = None
@@ -316,7 +316,7 @@ def _outcome_of(value) -> Optional[str]:
 
 
 @router.post("/{request_id}/cancel", response_model=RequestReceipt)
-def cancel_request(request_id: str, body: CancelRequestBody, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+def cancel_request(request_id: str, body: CancelRequestBody, request: Request, db: Session = Depends(get_db), key: models.ApiKey = Depends(require_scope("asks:cancel"))):
     payload = body.model_dump(mode="json")
     idem_key = idempotency.key_from(request)
     replayed = idempotency.reserve(db, key.tenant_id, key.caller, "cancel", idem_key, payload, f"/v1/requests/{request_id}/cancel")

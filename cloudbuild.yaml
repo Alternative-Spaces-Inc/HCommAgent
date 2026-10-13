@@ -119,7 +119,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock.txt
         export DATABASE_URL=sqlite:////tmp/hca_cloudbuild.db
         alembic upgrade head
         pytest -q
@@ -142,7 +142,7 @@ steps:
       - |
         set -euo pipefail
         cd api
-        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock
+        pip install --no-cache-dir -q --require-hashes -r requirements-dev.lock.txt
         alembic upgrade head
         uvicorn app.main:app --host 127.0.0.1 --port 8080 --log-level warning &
         echo $$! > /tmp/uvicorn.pid
@@ -252,6 +252,7 @@ steps:
         set -euo pipefail
         python3 scripts/candidate_revision.py lease-check --lease /workspace/hca-deployment-lease.json
         IMAGE="$$(cat /workspace/hca-image.txt)"
+        CANDIDATE_TAG="candidate-$$(printf '%s' '${BUILD_ID}' | cut -c1-8)"
         gcloud run deploy ${_SERVICE} \
           --image="$$IMAGE" \
           --region=${_REGION} \
@@ -269,7 +270,7 @@ steps:
           --allow-unauthenticated \
           --labels=commit=${COMMIT_SHA},build=${BUILD_ID} \
           --no-traffic \
-          --tag=candidate-${BUILD_ID} \
+          --tag="$$CANDIDATE_TAG" \
           --quiet
 
   - id: check-config
@@ -283,7 +284,8 @@ steps:
         RESOURCE="projects/${PROJECT_ID}/locations/${_REGION}/services/${_SERVICE}"
         IMAGE="$$(cat /workspace/hca-image.txt)"
         gcloud run services describe ${_SERVICE} --region=${_REGION} --format=json > /workspace/hca-service-v1.json
-        REV="$$(python3 scripts/candidate_revision.py --name --tag candidate-${BUILD_ID} < /workspace/hca-service-v1.json)"
+        CANDIDATE_TAG="candidate-$$(printf '%s' '${BUILD_ID}' | cut -c1-8)"
+        REV="$$(python3 scripts/candidate_revision.py --name --tag "$$CANDIDATE_TAG" < /workspace/hca-service-v1.json)"
         gcloud run revisions describe "$$REV" --region=${_REGION} --format=json > /workspace/hca-revision.json
         python3 scripts/candidate_revision.py service --resource "$$RESOURCE" > /workspace/hca-service-v2.json
         python3 scripts/candidate_revision.py capture \

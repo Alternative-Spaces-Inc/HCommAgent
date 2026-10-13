@@ -1,6 +1,6 @@
 # Current status and evidence
 
-This page describes the supported source behavior for the 0.3.0 developer-release candidate. It separates implementation, executable checks, owner-reported validation and production/operator evidence. It does not claim formal certification or that publishing source updated a live deployment.
+This page describes the supported source behavior for the 0.3.0 developer release. It separates implementation, executable checks, owner-reported validation and production/operator evidence. It does not claim formal certification or that publishing source updated a live deployment.
 
 ## Supported behavior
 
@@ -46,10 +46,9 @@ The published PR9 source at `9213d9a6b0439c1997606daaacbf08d2013525ce` passed 31
   image has no findings of any severity. Scan, provenance and runtime evidence have
   their documented export/digest boundaries.
 
-CodeQL Swift analysis is still in progress at this update; see [PR15 analyses](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15/checks).
-Do not interpret passing quality checks as completed security analysis or zero
-open alerts. Subsequent documentation/image/tool changes need their own exact-head
-validation before a final tag or artifact publication.
+The final published head subsequently passed all four CodeQL analyses, including
+Swift; see the dated publication addendum below. The earlier candidate run does
+not establish validation for later source/image/tool changes.
 
 Main at `a392399` now requires the 13 quality checks from GitHub Actions app 15368,
 with strict up-to-date checks. Administrator enforcement, force-push/deletion
@@ -75,3 +74,34 @@ Production still requires verified current configuration, migration/runtime priv
 The synthetic demo uses a temporary local database and a simulated signer. It does not exercise production Google authorization. The owner-approved client validation is recorded above and need not be repeated merely because documentation changed. Public notarized Mac distribution, automatic updates, enterprise connectors and formal compliance programs are outside the declared developer scope.
 
 Read [Operations](OPERATIONS.md) and [deployment/rollback](runbooks/HCA_DEPLOY_ROLLBACK.md) before merging or promoting. A main merge can start a build, but `_APPROVED_COMMIT` defaults empty and the first guard refuses cloud mutation unless it matches the exact tested full source commit. No production rollout or key rotation is established by these checks.
+
+## Publication addendum, October 12, 2026
+
+[PR15](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/15) merged as
+`402c27f` at `2026-10-12T21:37:07Z`. Its final head
+`fc4add0571187bbca3ddb2008e7339f238275bc3` passed all **13 quality checks** in
+[run 38309676048](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38309676048) and all **four CodeQL analyses** in
+[run 38309671632](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/runs/38309671632), superseding the earlier pending Swift status.
+Postgres recorded 428 passes, one SQLite-specific skip and 93.41 percent coverage;
+SQLite recorded 425 passes, four Postgres-only skips and 92.13 percent coverage.
+The final image SBOM contains 70 components and zero reported vulnerabilities
+in the final Trivy results; the separate runtime smoke also passed. These are
+exact-revision scan results, not a guarantee about future findings or deployments.
+
+The [v0.3.0 developer prerelease](https://github.com/Alternative-Spaces-Inc/HCommAgent/releases/tag/v0.3.0) was published from tag
+`v0.3.0` at that final head, with 14 assets whose checksums matched. The Mac
+artifact is arm64, locally signed and not notarized. Public Mac distribution
+and automatic updates remain outside the declared developer scope. Post-merge
+verification found zero open CodeQL, secret-scanning and Dependabot alerts
+at that time.
+
+Cloud Build `85da85c3-7cd8-49c4-9152-aa35e216c060` stopped at the first
+exact-commit approval guard; every later step remained `QUEUED`. That build
+performed no production rollout. The owner-reported manual validation remains
+approved, with no repeat requested. Personal-contribution details and a dedicated
+confidential conduct contact still require the owner's factual input.
+
+[PR17](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/17) is a separate
+lock-filename maintenance change. Follow its [checks](https://github.com/Alternative-Spaces-Inc/HCommAgent/pull/17/checks)
+for maintenance validation and [dependency update runs](https://github.com/Alternative-Spaces-Inc/HCommAgent/actions/workflows/dependabot/dependabot-updates)
+for hosted updater results. It does not alter the frozen v0.3.0 release.

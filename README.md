@@ -13,7 +13,7 @@ Use Python 3.12 from the repository root:
 ```sh
 python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --require-hashes -r api/requirements-dev.lock
+python -m pip install --require-hashes -r api/requirements-dev.lock.txt
 python scripts/demo_workflow.py
 ```
 
@@ -69,7 +69,7 @@ Personal privileged operations are outside the product scope. [Current status](d
 
 ## Validation and operation
 
-The supported development tools are Python 3.12, Node 22 or 24 (CI: 24) and Swift 5.9 or later on macOS 14+. CI covers Postgres migrations/tests, Node/Chromium, strict Swift, lint, dependency audit, complete API contract parity and security gates. Exact results belong to the reviewed commit. Scan results, outstanding alerts and repository settings are described separately in [status](docs/STATUS.md).
+The supported development tools are Python 3.12, Node 22 or 24 (CI: 24) and Swift 5.9 or later on macOS 14+. CI covers Postgres migrations/tests, Node/Chromium, strict Swift, lint, dependency audit, complete API contract parity and security gates. Exact results belong to the reviewed commit. [Testing](docs/TESTING.md) lists every suite, what it needs and what it proves. Scan results, outstanding alerts and repository settings are described separately in [status](docs/STATUS.md).
 
 The pipeline validates a candidate before traffic promotion. Production needs verified credentials, current permitted owners, separate migration privileges and compatible schema changes. Real IAM/grants, key migration, restored backups, rollout/rollback and load limits require operator evidence. See [Operations](docs/OPERATIONS.md) and the [deployment runbook](docs/runbooks/HCA_DEPLOY_ROLLBACK.md) before merging because main can trigger deployment.
 

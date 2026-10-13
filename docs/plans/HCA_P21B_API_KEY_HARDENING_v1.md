@@ -51,6 +51,8 @@ Each day ships as its own PR to main, merged by the owner, with the Cloud Build 
 
 Plan v1 drafted 2026-10-12 against main c79821a8. All three selections taken 2026-10-12 08:3x PT (four fixed scopes; shared database rate counters; admin and self rotate with a 24 h overlap), decision 9 in docs/decisions/DECISIONS_20261012.md. Day 1 in progress on p21b/day1-scopes.
 
+2026-10-13: Day 1 was rebuilt on the hardened main (9da56a88) and split in two pull requests: part A on p21b/day1-scopes (migration c9d0e1f2a3b4 after 20261012_rate_limits, scopes column with the all four server default, api_key_events, require_scope on the seven agent routes, scoped issuance, PATCH /v1/api-keys/{prefix}, GET /v1/api-keys/{prefix}/events) and part B on p21b/day1-transport (query string credential guard, tokeninfo over POST). Reconciliation: main already carries a shared database rate limiter (api/app/limits.py, table rate_limit_buckets, one upsert per call, per actor and per tenant ceilings from the environment), so Day 2 extends that limiter with the per key rate_per_minute and asks_per_minute columns and the tenant asks_per_day cap instead of adding a second rate_counters table. Rotation columns (superseded_by, previous_valid_until, partial unique index) move to the Day 3 migration.
+
 ## 6 Owner selections
 
 1. Taken 2026-10-12 08:0x PT: fixed four scopes with all four as the default at issuance. Declined: no scopes in v1, free form scope strings.
