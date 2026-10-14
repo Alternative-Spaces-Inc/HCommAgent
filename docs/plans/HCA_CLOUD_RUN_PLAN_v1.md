@@ -2,7 +2,7 @@
 
 ## 1. Executive Summary and Context Assumptions
 
-This document establishes the architecture, deployment design, and 10-working-day roadmap for the Human Collections Agent (HCA) in repo Alternative-Spaces-Inc/human-collections-agent (PR 1 open: charter and OpenAPI skeleton). Acting for Andy, factory administrator of the Migration Factory (GitHub org Alternative-Spaces-Inc), this plan enables a fresh engineering agent to execute a rapid build, test, and enhance loop.
+This document establishes the architecture, deployment design, and 10-working-day roadmap for the Human Collections Agent (HCA) in repo Alternative-Spaces-Inc/human-collections-agent (PR 1 open: charter and OpenAPI skeleton). Written for the owner (GitHub org Alternative-Spaces-Inc), this plan enables a fresh engineering agent to execute a rapid build, test, and enhance loop.
 
 ### Purpose and Core Paradigm
 HCA is a universal human interface for background automations operating in the owner's automation estate. When an automated workflow requires human input or approval, it submits an asynchronous ask to HCA. HCA routes the ask to an active human surface, starting with a Manifest V3 Chrome browser extension. The user selects an answer, and HCA signs and returns the decision so the automation can resume.
