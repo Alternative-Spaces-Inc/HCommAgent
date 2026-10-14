@@ -77,8 +77,7 @@ operator responsibilities even when pipeline tests pass.
 
 ## Credentials and rotation
 
-For caller-key compromise, revoke the affected key, investigate its requests and
-receivers and issue a replacement. For device compromise, revoke the server device,
+For caller-key compromise, use `POST /v1/api-keys/{prefix}/rotate` for an administrator or `POST /v1/api-keys/self/rotate` from the automation. Store the replacement secret securely, switch traffic, and verify lifecycle events with `GET /v1/api-keys` and `GET /v1/api-keys/{prefix}/events`. The old key remains valid only through `previous_valid_until`; revoke immediately when overlap is not acceptable. Investigate the key’s requests and receivers. See [Caller API keys](api-keys.md). For device compromise, revoke the server device,
 remove owner membership where appropriate, rotate/register the local key and link
 an authorized current owner. Chrome local rotation discards scoped offline answers
 but does not revoke the old server registration. Mac Keychain removal changes device
@@ -92,7 +91,8 @@ change trusted state; client signatures do not restore that trust.
 Every agent key carries two ceilings, `rate_per_minute` (every authenticated call,
 default 600) and `asks_per_minute` (POST /v1/requests, default 60), set at issuance or
 by `PATCH /v1/api-keys/{prefix}`; a null returns the key to the deployment default
-(`HCA_KEY_RATE_PER_MINUTE`, `HCA_KEY_ASKS_PER_MINUTE`). `PATCH /v1/tenants/{tenant_id}`
+(`HCA_KEY_RATE_PER_MINUTE`, `HCA_KEY_ASKS_PER_MINUTE`). Rotation overlap is
+controlled by `HCA_KEY_ROTATION_OVERLAP_HOURS` (default 24). `PATCH /v1/tenants/{tenant_id}`
 with `asks_per_day` caps a whole tenant per UTC day (0 means unlimited). Counting is one
 shared database upsert per call, so every instance sees the same count; a 429 carries
 `Retry-After` to the window end and successful calls carry `X-RateLimit-Limit` and

@@ -56,7 +56,7 @@ Requests begin pending (`queued`, with `shown` also recognized). Answered, cance
 
 ## Authorization and audit
 
-Agents use tenant/caller API keys stored as HMAC-SHA256 hashes. Humans register a P-256 public key, sign each protected call, and link a Google access token whose verified account and OAuth audience are permitted. Production startup requires that link gate. Current membership, device revocation and tenant disablement are checked on protected calls and periodically on streams, including when events arrive continuously.
+Agents use tenant/caller API keys stored as HMAC-SHA256 hashes. Keys have fixed scopes, shared rate ceilings, lifecycle audit events and an overlap-based rotation path; see [caller API keys](api-keys.md). Humans register a P-256 public key, sign each protected call, and link a Google access token whose verified account and OAuth audience are permitted. Production startup requires that link gate. Current membership, device revocation and tenant disablement are checked on protected calls and periodically on streams, including when events arrive continuously.
 
 Audit owner, role, device and surface come from verified server state. Client-reported path, duration, optional context and identity claims are retained only as untrusted metadata. This records the authenticated responder; it does not verify the truth of the agent's proposed command or that a webhook receiver performed the described action.
 

@@ -6,6 +6,7 @@ Start with [README](../README.md), [current status and evidence](STATUS.md), [ca
 
 - [Threat model](THREAT_MODEL.md): assets, trust boundaries, defenses and assurance limits.
 - [Operations](OPERATIONS.md): production prerequisites, rotation, retention, incident response and evidence requirements.
+- [Caller API keys](api-keys.md): scopes, limits, lifecycle events and automation rotation.
 - [Webhook receiver contract](webhooks.md): signing, authenticated deduplication, retry and rotation.
 - [Release instructions](RELEASES.md): developer versioning, packaging, checksums, installation and upgrades.
 - [Change log](../CHANGELOG.md): candidate source/API/client changes and compatibility.

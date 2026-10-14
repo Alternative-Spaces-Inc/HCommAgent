@@ -249,10 +249,37 @@ def main():
     agent = {"Authorization": f"Bearer {body['api_key']}"}
     key_prefix = body["prefix"]
 
+    extra_prefixes = []
+    revoked_agents = []
+
+    def prove_rotation():
+        nonlocal agent, key_prefix
+        old_agent, old_prefix = agent, key_prefix
+        code, rotated = http("POST", f"{base}/v1/api-keys/self/rotate", {}, old_agent)
+        check("self rotate smoke key", code == 201 and rotated.get("api_key", "").startswith("hca_"), f"{code}")
+        new_agent, new_prefix = {"Authorization": f"Bearer {rotated['api_key']}"}, rotated.get("prefix")
+        extra_prefixes.append(old_prefix)
+        revoked_agents.append(old_agent)
+        code, old_ask = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "poll"}), old_agent)
+        check("old key works during rotation overlap", code == 201, f"{code}")
+        code, new_ask = http("POST", f"{base}/v1/requests", ask_body(caller, {"mode": "poll"}), new_agent)
+        check("new key creates ask", code == 201, f"{code}")
+        code, again = http("POST", f"{base}/v1/api-keys/self/rotate", {}, old_agent)
+        check("old key cannot rotate twice", code == 409, f"{code}")
+        code, listed = http("GET", f"{base}/v1/api-keys", headers={"Authorization": f"Bearer {admin}"})
+        items = listed if isinstance(listed, list) else listed.get("items", []) if isinstance(listed, dict) else []
+        old = next((item for item in items if item.get("prefix") == old_prefix), {})
+        check("key listing shows rotation relationship", code == 200 and old.get("state") == "rotating" and old.get("superseded_by") == new_prefix and old.get("previous_valid_until"), f"{code}")
+        for response in (old_ask, new_ask):
+            if isinstance(response, dict) and response.get("request_id"):
+                http("POST", f"{base}/v1/requests/{response['request_id']}/cancel", {"reason": "smoke test cleanup"}, new_agent)
+        agent, key_prefix = new_agent, new_prefix
+
     def revoke_key():
-        code, body = http("POST", f"{base}/v1/api-keys/{key_prefix}/revoke", {}, {"Authorization": f"Bearer {admin}"})
-        check("revoke smoke key", code == 200 and body.get("revoked_at"), f"{code}")
-        code, body = http("GET", f"{base}/v1/requests/{rid}", headers=agent)
+        for prefix in dict.fromkeys([key_prefix, *extra_prefixes]):
+            code, body = http("POST", f"{base}/v1/api-keys/{prefix}/revoke", {}, {"Authorization": f"Bearer {admin}"})
+            check("revoke smoke key", code == 200 and body.get("revoked_at"), f"{code}")
+        code, body = http("GET", f"{base}/v1/requests/{rid}", headers=revoked_agents[0] if revoked_agents else agent)
         check("revoked key refused", code == 403, f"{code}")
 
     if not args.human:
@@ -266,6 +293,7 @@ def main():
         code, body = http("GET", f"{base}/v1/requests/{rid}", headers=agent)
         check("GET after cancel", code == 200 and body.get("state") == "cancelled" and (body.get("answer") or {}).get("value", {}).get("decision") == "cancel", f"{code}")
         prove_scopes_and_limits(base, admin, caller)
+        prove_rotation()
         revoke_key()
         print(f"[{elapsed()}] OK agent path, request {rid}", flush=True)
         return
@@ -332,6 +360,7 @@ def main():
     code, body = http("DELETE", f"{base}/v1/webhooks/{destination_id}", None, agent)
     check("revoke smoke webhook destination", code == 200 and body.get("revoked_at"), f"{code}")
     prove_scopes_and_limits(base, admin, caller)
+    prove_rotation()
     revoke_key()
     print(f"[{elapsed()}] OK golden path, request {rid}, device {device_id}", flush=True)
 

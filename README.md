@@ -4,7 +4,7 @@ HCA lets an agent pause for a human decision, present its context, record an aut
 
 The supported authorization model is **current tenant owners**. Caller keys belong to a tenant and caller; production human devices must be registered and linked to a permitted Google account. The `audience` field describes a request and does not grant department or role permissions.
 
-Start with the synthetic demonstration and [case study](docs/CASE_STUDY.md), then read [current status](docs/STATUS.md) for implemented behavior, exact evidence and remaining deployment requirements. Source changes and green checks do not establish production rollout or formal compliance certification.
+Caller-key scopes, limits and rotation are documented in [API keys](docs/api-keys.md). Start with the synthetic demonstration and [case study](docs/CASE_STUDY.md), then read [current status](docs/STATUS.md) for implemented behavior, exact evidence and remaining deployment requirements. Source changes and green checks do not establish production rollout or formal compliance certification.
 
 ## Run the demonstration
 
