@@ -55,7 +55,7 @@ Custom decision widgets and popups often fail keyboard navigation, screen reader
 Adhere strictly to WAI-ARIA Authoring Practices for Radio Groups, Buttons, and Disclosure panels, ensuring full keyboard focus management, ARIA roles, and unambiguous visually distinct selection states.
 
 #### How HCA Applies It
-All HCA UI controls (radio, checkbox, approve_deny, dropdown) use native semantic HTML elements augmented with WAI-ARIA attributes (role="radiogroup", role="radio", aria-checked, aria-describedby). Button styling matches the factory cockpit design tokens with high-contrast active states. Keyboard focus is trapped inside modal decision cards, and Space/Enter keys trigger actions predictably.
+All HCA UI controls (radio, checkbox, approve_deny, dropdown) use native semantic HTML elements augmented with WAI-ARIA attributes (role="radiogroup", role="radio", aria-checked, aria-describedby). Button styling matches the host console design tokens with high-contrast active states. Keyboard focus is trapped inside modal decision cards, and Space/Enter keys trigger actions predictably.
 
 #### Anti-Pattern to Avoid
 Non-semantic div elements with custom click listeners that lack keyboard focus handlers, ARIA states, or screen reader descriptions.
@@ -112,8 +112,8 @@ Every decision widget rendered by HCA follows a strict structural grammar design
     - Rollback: Exact rollback plan or command.
   - Path Hint Breadcrumb: Displayed prominently at top of card.
   - Controls:
-    - Primary Action Button: "Approve" (styled in standard factory cockpit primary blue/green token).
-    - Secondary Action Button: "Deny" (styled in standard factory cockpit outline/secondary token).
+    - Primary Action Button: "Approve" (styled in standard host console primary token).
+    - Secondary Action Button: "Deny" (styled in standard host console outline/secondary token).
   - Recommendation Card: Highlighted box showing suggested choice and why.
 
 #### 2. Single Choice Widget (`radio` or `dropdown`)
@@ -186,7 +186,7 @@ To ensure background tasks are never blocked indefinitely by unmonitored request
 
 ## Audit record shape
 
-Every completed, denied, or expired collection request generates a structured audit record dispatched immediately to the factory UI/UX usage log (`handoff:uiux-usage-log`) and security audit stream.
+Every completed, denied, or expired collection request generates a structured audit record dispatched immediately to the owner's UI/UX usage log and security audit stream.
 
 ### Exact JSON Audit Record Schema
 
