@@ -5,7 +5,7 @@
 This document establishes the architecture, deployment design, and 10-working-day roadmap for the Human Collections Agent (HCA) in repo Alternative-Spaces-Inc/human-collections-agent (PR 1 open: charter and OpenAPI skeleton). Acting for Andy, factory administrator of the Migration Factory (GitHub org Alternative-Spaces-Inc), this plan enables a fresh engineering agent to execute a rapid build, test, and enhance loop.
 
 ### Purpose and Core Paradigm
-HCA is a universal human interface for background automations operating in the factory GCP project. When an automated workflow requires human input or approval, it submits an asynchronous ask to HCA. HCA routes the ask to an active human surface, starting with a Manifest V3 Chrome browser extension. The user selects an answer, and HCA signs and returns the decision so the automation can resume.
+HCA is a universal human interface for background automations operating in the owner's automation estate. When an automated workflow requires human input or approval, it submits an asynchronous ask to HCA. HCA routes the ask to an active human surface, starting with a Manifest V3 Chrome browser extension. The user selects an answer, and HCA signs and returns the decision so the automation can resume.
 
 ### Owner Principles for Interaction
 1. **Selection First UI**: Easy UI choices (Approve/Deny, option cards, radio/checkbox lists). Open text input is forbidden where a discrete selection can be provided.
@@ -53,13 +53,13 @@ The draft plan was reconciled against repo canon (docs/HCA_CHARTER_v1.md and api
 
 1. **HCA API Service (Cloud Run)**:
    - Built with Python 3.12 and FastAPI.
-   - Containerized service deployed to Google Cloud Run in the factory GCP project in the factory region.
+   - Containerized service deployed to Google Cloud Run in the dedicated GCP project and region.
    - Exposes REST endpoints for creating asks, retrieving status, and querying audit logs.
    - Provides long-lived Server-Sent Events (SSE) channels for real-time push delivery to human surfaces.
    - Dispatches webhook notifications when asks are answered, expired, or cancelled.
 
 2. **HCA Datastore (Cloud SQL PostgreSQL)**:
-   - Managed PostgreSQL database in the factory GCP project.
+   - Managed PostgreSQL database in the dedicated GCP project.
    - Stores tenant integrations, API key hashes, human user profiles, device public keys, active asks, and audit logs.
    - Connected via Cloud SQL Auth Proxy using IAM database authentication.
 
@@ -162,7 +162,7 @@ The API contract enforces strict typing, explicit recommendation contexts, and s
 
 ### Runtime Selection
 - **Choice**: Python 3.12 with FastAPI.
-- **Justification**: FastAPI preferred for parity with the factory's other services. Python 3.12 provides high performance async execution and native Pydantic schema validation.
+- **Justification**: FastAPI preferred for parity with the owner's other services. Python 3.12 provides high performance async execution and native Pydantic schema validation.
 
 ### Datastore Selection
 - **Choice**: Cloud SQL PostgreSQL.
@@ -221,9 +221,9 @@ CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--worker
 ```
 
 ### Infrastructure and Deployment Settings
-- **Artifact Registry**: Repository `hca-services` in the factory region.
+- **Artifact Registry**: Repository `hca-services` in the dedicated region.
 - **Cloud Build Trigger**: Triggered on GitHub `main` branch PR merges only.
-- **Service Configuration**: Name `hca-api-service`, region set to the factory region, min instances set to 1 (maintains active SSE handlers and eliminates cold-start delay), max instances 10, concurrency 80, CPU always allocated enabled (required for SSE), request timeout 3600 seconds.
+- **Service Configuration**: Name `hca-api-service`, region set to the dedicated region, min instances set to 1 (maintains active SSE handlers and eliminates cold-start delay), max instances 10, concurrency 80, CPU always allocated enabled (required for SSE), request timeout 3600 seconds.
 - **Cloud SQL Connector**: Connected via Unix socket `/cloudsql/<PROJECT_ID>:<REGION>:<INSTANCE_NAME>`.
 - **IAM Account & Roles**: Account `sa-hca-api@<PROJECT_ID>.iam.gserviceaccount.com` granted `roles/cloudsql.client`, `roles/secretmanager.secretAccessor`, `roles/logging.logWriter`, and `roles/monitoring.metricWriter`.
 - **Custom Domain & Armor**: Custom domain mapping with managed TLS certificate; optional Cloud Armor security policy for IP rate limiting.
@@ -280,7 +280,7 @@ All logs emitted to Cloud Logging follow structured JSON format:
   "component": "hca-api",
   "event": "ask.answered",
   "ask_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
-  "integration_id": "int_migration_factory",
+  "integration_id": "int_example_automation",
   "user_id": "usr_andy_admin",
   "surface_type": "chrome_extension",
   "device_id": "dev_macbook_pro_01",
