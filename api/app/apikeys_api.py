@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 
 from . import models
 from .db import get_db
-from .apikeys import issue_api_key, normalize_scopes, record_key_event, SCOPES
+from .apikeys import issue_api_key, normalize_scopes, record_key_event, rotate_api_key, SCOPES
 from .limits import key_asks_ceiling, key_rate_ceiling
-from .auth import require_admin_bearer
+from .auth import require_admin_bearer, require_agent_key
 from .json_dates import UTCJSONModel
 
 router = APIRouter(prefix="/v1/api-keys", tags=["api-keys"])
@@ -53,8 +53,16 @@ class ApiKeyIssueResponse(UTCJSONModel):
     asks_per_minute: int
 
 
+class ApiKeyRotateResponse(ApiKeyIssueResponse):
+    """HCA-P21b Day 3: the replacement key (returned once) plus the prefix of
+    the key it replaces and the instant that old key stops verifying."""
+    previous_prefix: str
+    previous_valid_until: datetime
+
+
 class ApiKeyEventView(UTCJSONModel):
-    """One lifecycle event of a key: issued, scopes_changed or revoked."""
+    """One lifecycle event of a key: issued, scopes_changed, limits_changed,
+    rotated, expired or revoked."""
     id: str
     action: str
     actor: str
@@ -74,12 +82,21 @@ class ApiKeyView(UTCJSONModel):
     # Effective ceilings (the key's own value or the deployment default).
     rate_per_minute: int
     asks_per_minute: int
+    # HCA-P21b Day 3 rotation state: active, rotating (replaced, old key still
+    # valid until previous_valid_until), expired or revoked.
+    state: str
+    superseded_by: Optional[str] = Field(default=None, description="Prefix of the key that replaced this one")
+    previous_valid_until: Optional[datetime] = None
 
 
-def _view(row: models.ApiKey) -> ApiKeyView:
+def _view(row: models.ApiKey, db: Optional[Session] = None) -> ApiKeyView:
+    successor = None
+    if row.superseded_by and db is not None:
+        successor = db.execute(select(models.ApiKey.key_prefix).where(models.ApiKey.id == row.superseded_by)).scalar_one_or_none()
     return ApiKeyView(prefix=row.key_prefix, caller=row.caller, tenant_id=row.tenant_id, created_at=row.created_at,
                       revoked_at=row.revoked_at, scopes=row.scope_list,
-                      rate_per_minute=key_rate_ceiling(row), asks_per_minute=key_asks_ceiling(row))
+                      rate_per_minute=key_rate_ceiling(row), asks_per_minute=key_asks_ceiling(row),
+                      state=row.state, superseded_by=successor, previous_valid_until=row.previous_valid_until)
 
 
 def _event_view(e: models.ApiKeyEvent) -> ApiKeyEventView:
@@ -117,7 +134,27 @@ def list_keys(response: Response, limit: int = Query(default=200, ge=1, le=500),
     if len(rows) > limit:
         rows = rows[:limit]
         response.headers["X-HCA-Next-Cursor"] = rows[-1].key_prefix
-    return [_view(r) for r in rows]
+    return [_view(r, db) for r in rows]
+
+
+@router.post("/self/rotate", response_model=ApiKeyRotateResponse, status_code=201)
+def rotate_own_key(db: Session = Depends(get_db), key: models.ApiKey = Depends(require_agent_key)):
+    """HCA-P21b Day 3: an automation rotates its own credential under the key
+    itself (any scope, no admin token). The presented key keeps working for
+    the overlap window named in previous_valid_until; a key that has already
+    been rotated cannot rotate again (409), so a leaked old key cannot chain
+    itself into a fresh one."""
+    return rotate_api_key(db, key, actor=f"key:{key.key_prefix}")
+
+
+@router.post("/{prefix}/rotate", response_model=ApiKeyRotateResponse, status_code=201)
+def rotate_key(prefix: str, db: Session = Depends(get_db), _admin=Depends(require_admin_bearer)):
+    """HCA-P21b Day 3: admin rotation by the visible prefix. Same scopes and
+    ceilings on the new key; the old key verifies until previous_valid_until
+    (HCA_KEY_ROTATION_OVERLAP_HOURS, default 24) and then reads expired.
+    Revoked or already rotated keys answer 409."""
+    row = _row_by_prefix(db, prefix)
+    return rotate_api_key(db, row, actor="admin")
 
 
 @router.post("/{prefix}/revoke", response_model=ApiKeyView)
@@ -132,7 +169,7 @@ def revoke_key(prefix: str, db: Session = Depends(get_db), _admin=Depends(requir
         row.revoked_at = now
         record_key_event(db, row, "revoked", "admin", {"prefix": prefix}, at=now)
         db.commit()
-    return _view(row)
+    return _view(row, db)
 
 
 @router.patch("/{prefix}", response_model=ApiKeyView)
@@ -169,7 +206,7 @@ def patch_key(prefix: str, body: ApiKeyPatch, db: Session = Depends(get_db), _ad
         changed = True
     if changed:
         db.commit()
-    return _view(row)
+    return _view(row, db)
 
 
 @router.get("/{prefix}/events", response_model=list[ApiKeyEventView])

@@ -23,7 +23,7 @@ import json
 import os
 import re
 import secrets
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 from fastapi import HTTPException
@@ -137,18 +137,19 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
     secret = secrets.token_urlsafe(SECRET_BYTES)
     plaintext = f"{KEY_SCHEME}_{prefix}_{secret}"
 
-    existing = db.execute(select(models.ApiKey).where(models.ApiKey.caller == caller)).scalar_one_or_none()
-    if existing is None or existing.revoked_at is not None:
-        active = db.execute(select(func.count(models.ApiKey.id)).where(
-            models.ApiKey.tenant_id == tenant_id, models.ApiKey.revoked_at.is_(None))).scalar_one()
-        if active >= MAX_ACTIVE_API_KEYS:
-            raise HTTPException(status_code=429, detail="tenant active API key limit reached", headers={"Retry-After": "60"})
+    # HCA-P21b Day 3: a caller may own several rows (rotated and revoked
+    # history); the active one, if any, is replaced in place as before.
+    rows = db.execute(select(models.ApiKey).where(models.ApiKey.caller == caller)
+                      .order_by(models.ApiKey.created_at.desc())).scalars().all()
+    if any(r.tenant_id != tenant_id for r in rows):
+        raise ValueError("caller already belongs to another tenant")
+    existing = next((r for r in rows if r.revoked_at is None and r.superseded_by is None), None)
+    if existing is None:
+        _check_active_key_cap(db, tenant_id)
     scope_list = normalize_scopes(scopes)
     scopes_json = json.dumps(scope_list)
     now = datetime.now(timezone.utc)
     if existing:
-        if existing.tenant_id != tenant_id:
-            raise ValueError("caller already belongs to another tenant")
         existing.key_prefix = prefix
         existing.key_hash = _hash_secret(secret)
         existing.created_at = now
@@ -171,6 +172,91 @@ def issue_api_key(db: Session, caller: str, tenant_id: str = models.DEFAULT_TENA
             "scopes": scope_list, "rate_per_minute": key_rate_ceiling(row), "asks_per_minute": key_asks_ceiling(row)}
 
 
+def _check_active_key_cap(db: Session, tenant_id: str) -> None:
+    active = db.execute(select(func.count(models.ApiKey.id)).where(
+        models.ApiKey.tenant_id == tenant_id, models.ApiKey.revoked_at.is_(None))).scalar_one()
+    if active >= MAX_ACTIVE_API_KEYS:
+        raise HTTPException(status_code=429, detail="tenant active API key limit reached", headers={"Retry-After": "60"})
+
+
+def rotation_overlap_hours() -> int:
+    """HCA-P21b Day 3 (decision 9): how long the old key keeps verifying
+    after a rotation; default 24 h, the P21a webhook overlap."""
+    try:
+        return max(0, int(os.environ.get("HCA_KEY_ROTATION_OVERLAP_HOURS", "24")))
+    except ValueError:
+        return 24
+
+
+def rotate_api_key(db: Session, row: models.ApiKey, actor: str) -> dict:
+    """HCA-P21b Day 3: mints a replacement key for row's caller with the same
+    tenant, scopes and ceilings. The old row is marked superseded_by the new
+    row with previous_valid_until now + overlap and keeps verifying until
+    then (its state reads rotating), after which verify_api_key refuses it
+    and records an expired event. The claim on the old row is a conditional
+    update, so two concurrent rotations of the same key cannot both win:
+    the loser gets 409. Returns the plaintext of the new key once."""
+    if row.revoked_at is not None:
+        raise HTTPException(status_code=409, detail="api key is revoked")
+    if row.superseded_by is not None:
+        raise HTTPException(status_code=409, detail="api key already rotated")
+    from .requests_api import _lock_tenant_for_quota
+    _lock_tenant_for_quota(db, row.tenant_id)
+    now = datetime.now(timezone.utc)
+    until = now + timedelta(hours=rotation_overlap_hours())
+    prefix = secrets.token_hex(PREFIX_BYTES)
+    secret = secrets.token_urlsafe(SECRET_BYTES)
+    plaintext = f"{KEY_SCHEME}_{prefix}_{secret}"
+    new_row = models.ApiKey(id=models.gen_id(), tenant_id=row.tenant_id, caller=row.caller, key_prefix=prefix, key_hash=_hash_secret(secret),
+                            created_at=now, scopes=row.scopes, rate_per_minute=row.rate_per_minute,
+                            asks_per_minute=row.asks_per_minute)
+    claimed = db.execute(update(models.ApiKey).where(models.ApiKey.id == row.id, models.ApiKey.revoked_at.is_(None),
+                                                     models.ApiKey.superseded_by.is_(None))
+                         .values(superseded_by=new_row.id, previous_valid_until=until)
+                         .execution_options(synchronize_session=False)).rowcount
+    if claimed != 1:
+        db.rollback()
+        raise HTTPException(status_code=409, detail="api key already rotated")
+    db.add(new_row)
+    db.flush()
+    db.refresh(row)
+    from .limits import key_asks_ceiling, key_rate_ceiling
+    record_key_event(db, row, "rotated", actor, {"prefix": row.key_prefix, "new_prefix": prefix,
+                                                 "previous_valid_until": until.isoformat()}, at=now)
+    record_key_event(db, new_row, "issued", actor, {"scopes": new_row.scope_list, "prefix": prefix, "rotated_from": row.key_prefix,
+                                                    "rate_per_minute": key_rate_ceiling(new_row),
+                                                    "asks_per_minute": key_asks_ceiling(new_row)}, at=now)
+    db.commit()
+    return {"api_key": plaintext, "prefix": prefix, "caller": new_row.caller, "tenant_id": new_row.tenant_id,
+            "created_at": new_row.created_at, "scopes": new_row.scope_list,
+            "rate_per_minute": key_rate_ceiling(new_row), "asks_per_minute": key_asks_ceiling(new_row),
+            "previous_prefix": row.key_prefix, "previous_valid_until": until}
+
+
+def _expire_if_overlap_ended(db: Session, row: models.ApiKey) -> bool:
+    """HCA-P21b Day 3: a superseded row past previous_valid_until is marked
+    revoked with an expired event (once; a concurrent request may win)."""
+    if row.superseded_by is None or row.revoked_at is not None:
+        return False
+    until = row.previous_valid_until
+    if until is not None and until.tzinfo is None:
+        until = until.replace(tzinfo=timezone.utc)
+    now = datetime.now(timezone.utc)
+    if until is not None and until > now:
+        return False
+    # revoked_at takes the overlap end itself, so the state reads expired
+    # (a revocation during the overlap has revoked_at before that instant).
+    changed = db.execute(update(models.ApiKey).where(models.ApiKey.id == row.id, models.ApiKey.revoked_at.is_(None))
+                         .values(revoked_at=until or now).execution_options(synchronize_session=False)).rowcount
+    if changed == 1:
+        db.refresh(row)
+        record_key_event(db, row, "expired", "system", {"prefix": row.key_prefix, "superseded_by": row.superseded_by}, at=now)
+        db.commit()
+    else:
+        db.rollback()
+    return True
+
+
 def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:
     """Returns the matching, non-revoked ApiKey row, or None. Looked up by
     the visible prefix (fast, no full-table scan), then confirmed with a
@@ -185,6 +271,8 @@ def verify_api_key(db: Session, presented_key: str) -> Optional[models.ApiKey]:
 
     row = db.execute(select(models.ApiKey).where(models.ApiKey.key_prefix == prefix)).scalar_one_or_none()
     if row is None or row.revoked_at is not None:
+        return None
+    if _expire_if_overlap_ended(db, row):
         return None
     stored = row.key_hash
     current = _hash_secret(secret)
