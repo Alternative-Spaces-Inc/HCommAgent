@@ -191,7 +191,7 @@ Expected: `smoke can read the admin token`. Scope is that single secret; the dat
 
 ## Step 12: the first agent API key
 
-Mints a key for one automation caller through the guarded endpoint. The admin token is read from Secret Manager inside the block; the minted key is printed once, because you are the one who stores it where that agent reads its secrets. Replace `<CALLER>` with the agent id (for example `andy`).
+Mints a key for one automation caller through the guarded endpoint. The admin token is read from Secret Manager inside the block; the minted key is printed once, because you are the one who stores it where that agent reads its secrets. Replace `<CALLER>` with the agent id (for example `ops-agent`).
 
 ```bash
 P=<PROJECT_ID> && R=<REGION> && URL="$(gcloud run services describe hca-api-service --project="$P" --region="$R" --format='value(status.url)')" && T="$(gcloud secrets versions access latest --secret=hca-admin-token --project="$P")" && curl -sS -X POST "${URL}/v1/api-keys" -H "Authorization: Bearer ${T}" -H "Content-Type: application/json" -d '{"caller":"<CALLER>"}'

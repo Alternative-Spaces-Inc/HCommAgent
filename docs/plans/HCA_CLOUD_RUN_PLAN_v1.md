@@ -14,12 +14,12 @@ HCA is a universal human interface for background automations operating in the o
 4. **Immutable Auditability**: Every ask and answer generates a tamper-evident audit row recording who asked, which surface answered, exact timestamp, and cryptographic proof of the responding device.
 
 ### System Source of Truth Assumptions
-Repository content is the source of truth for existing systems, and reconciliation was completed against base commit 24c7ec2 on branch andy/charter-v1.
+Repository content is the source of truth for existing systems, and reconciliation was completed against base commit 24c7ec2 on the charter v1 branch.
 
 
 ## Reconciliation against PR 1 (base commit 24c7ec2)
 
-The draft plan was reconciled against repo canon (docs/HCA_CHARTER_v1.md and api/openapi.yaml) at base commit 24c7ec2 on branch `andy/charter-v1`.
+The draft plan was reconciled against repo canon (docs/HCA_CHARTER_v1.md and api/openapi.yaml) at base commit 24c7ec2 on the charter v1 branch.
 
 ### Reconciliation Summary
 - Total items reconciled: 14

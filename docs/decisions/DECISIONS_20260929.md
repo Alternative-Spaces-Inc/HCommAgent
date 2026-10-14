@@ -14,4 +14,4 @@
 - docs/plans/HCA_CLOUD_RUN_PLAN_v1.md: mark the four proposed endpoints as decided; add macOS notification client and macOS app as later build items.
 
 ## Creation shape (Al, 14:00 PT)
-The HCA agent is created by cloning the Andy Superagent in the Base44 editor, then re-fitted to the HCA seat (soul, About you, settings through the workspace API; vault rows by Al). Declined: fresh Superagent, Base44 builder app.
+The HCA agent is created by cloning the administrator Superagent in the Base44 editor, then re-fitted to the HCA seat (soul, About you, settings through the workspace API; vault rows by Al). Declined: fresh Superagent, Base44 builder app.
