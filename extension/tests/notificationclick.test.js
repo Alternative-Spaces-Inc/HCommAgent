@@ -18,7 +18,7 @@ function mockChrome({ popupRefused = true, initial = {} } = {}) {
   let nextTab = 100;
   const calls = { openPopup: 0, created: [], updated: [], focused: [] };
   return {
-    data, calls, tabs,
+    data, calls,
     storage: { onChanged, local: {
       async get(keys) { if (keys === null) return structuredClone(data); if (!Array.isArray(keys)) keys = [keys]; return Object.fromEntries(keys.map((key) => [key, structuredClone(data[key])])); },
       async set(value) { Object.assign(data, structuredClone(value)); onChanged.emit({}, "local"); },

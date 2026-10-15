@@ -12,7 +12,6 @@ const item = { request_id: "r1", title: "Retry the failed slice or roll back the
   options_or_fields: [{ id: "approve", label: "Approve" }, { id: "deny", label: "Deny" }], suggested: { option_id: "approve", why: "The two failures share a timestamp, which reads as flake." },
   expiry_policy: "hold", context: { evidence: lines.slice(0, 10) } };
 const snapshot = { ok: true, origin: "https://api.example", deviceId: "dev", cache: { r1: item }, queue: [], notice: "", focusId: "r1" };
-const fake = `window.chrome = { runtime: { sendMessage: async (m) => (m.type === "hca_snapshot" ? ${JSON.stringify(snapshot)} : { ok: true }) }, storage: { onChanged: { addListener() {} } } };`;
 const types = { ".html": "text/html", ".js": "text/javascript", ".png": "image/png" };
 const server = createServer(async (req, res) => {
   const path = resolve(ext, "." + new URL(req.url, "http://x").pathname);
@@ -25,7 +24,10 @@ const browser = await chromium.launch({ executablePath: process.env.CHROME || un
 const results = [];
 for (const [file, width, height, q] of [["popup.html", 360, 560, ""], ["decision.html", 375, 667, "?request=r1"]]) {
   const page = await browser.newPage({ viewport: { width, height } });
-  await page.addInitScript(fake);
+  // The snapshot is passed as an argument, never interpolated into script text.
+  await page.addInitScript((snap) => {
+    window.chrome = { runtime: { sendMessage: async (m) => (m.type === "hca_snapshot" ? snap : { ok: true }) }, storage: { onChanged: { addListener() {} } } };
+  }, snapshot);
   await page.goto(base + file + q);
   
   await page.waitForSelector(".card-actions button");
