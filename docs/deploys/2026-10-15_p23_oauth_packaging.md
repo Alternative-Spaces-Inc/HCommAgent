@@ -28,3 +28,10 @@ See the [package target instructions](../../extension/README.md#package-targets)
 A compatibility build ran both the previous and corrected packers with the same runtime files and revision argument `18f51c41cfe1e58a2a79593c4ed2b3e3487668b3`. Both store archives had 16 files and SHA256 `6fb0d0b833e6d1a2c26b874853a82710e2579fbd8116343818176798b7882cd1`. This proves store artifact compatibility for that input and toolchain, not a new store upload or live deployment.
 
 Local tests establish configuration consistency, not Google's future external client state. No new human sign-in test or installed-extension update is claimed for this packaging branch. CI results belong to the PR checks, not this local receipt.
+
+
+## CI follow-up: exact public-key source exception
+
+The first PR head `6be7663` failed the credential gate because the manifest's existing exact-file exception still held the old full-file checksum. Inspection confirmed that the only changed manifest value was the OAuth client, and the unchanged `key` decoded as an RSA 2048-bit public key. Only the existing `extension/manifest.json:generic-api-key:5` exception checksum and its review reason were refreshed; no scanner rule, pattern, fingerprint or broad allowlist was changed.
+
+With the checksum-verified Gitleaks 8.30.1 binary, the local source and all fetched history scans passed. All four real-scanner regression tests then passed with `HCA_GITLEAKS_BINARY` explicitly configured, including failure on newly introduced/deleted historical credentials, file changes, reused exception locations and shallow history. These local results do not replace the final PR check results.
