@@ -50,10 +50,14 @@ async function showGoogle() {
   if (!base) { setGoogleStatus("Save the API base URL first."); return; }
   try {
     const view = await fetchSelfDevice(base);
+    const state = document.getElementById("device-state");
+    if (state) state.textContent = view.state === "rotating" ? `Server state: rotating. Previous key valid until ${view.previous_valid_until}.` : `Server state: ${view.state || "active"}.`;
     setGoogleStatus(view.google_email
       ? `Linked to ${view.google_email} since ${view.google_linked_at}`
       : "Not linked to a Google account yet.");
   } catch (e) {
+    const state = document.getElementById("device-state");
+    if (state) state.textContent = `Server device state unavailable (${e.message}).`;
     setGoogleStatus(`Could not read this device from the server (${e.message}). Is it registered?`, true);
   }
 }
@@ -179,7 +183,7 @@ document.getElementById("google-signin").addEventListener("click", signInWithGoo
 document.getElementById("priority-save").addEventListener("click", savePriority);
 document.getElementById("notification-previews").addEventListener("change", (event) => chrome.storage.local.set({ hca_notification_previews: event.target.checked }));
 document.getElementById("rotate-key").addEventListener("click", async () => {
-  if (!confirm("Rotate this device key? Saved offline responses will be discarded. Revoke the old device on the server, then register the new public key and sign in again. Rotation here does not revoke the old server registration.")) return;
+  if (!confirm("Rotate this device key on the server? Saved offline responses will be discarded after the server confirms rotation. Both keys remain valid during the 24 hour overlap.")) return;
   const result = await chrome.runtime.sendMessage({ type: "hca_rotate_device" });
   if (!result?.ok) { setGoogleStatus(result?.error || "Key rotation failed", true); return; }
   // Reload clears keys and configuration cached in this page's module context.

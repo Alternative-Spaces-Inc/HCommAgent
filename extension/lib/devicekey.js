@@ -10,6 +10,7 @@
 
 export const STORAGE_KEY = "hca_device_key";
 export const PREFIX = "HCA1";
+export const STAGED_STORAGE_KEY = "hca_device_key_staged";
 
 const P256 = { name: "ECDSA", namedCurve: "P-256" };
 const SIGN_ALG = { name: "ECDSA", hash: { name: "SHA-256" } };
@@ -123,6 +124,8 @@ export function indexedDeviceStorage(indexedDBObj = globalThis.indexedDB, chrome
     }),
     async legacy() { return (await chromeObj.storage.local.get(STORAGE_KEY))[STORAGE_KEY]; },
     async clearLegacy() { await chromeObj.storage.local.remove(STORAGE_KEY); },
+    set: (key, value) => transaction("readwrite", (store) => store.put(value, key)),
+    removeKey: (key) => transaction("readwrite", (store) => store.delete(key)),
     remove: () => transaction("readwrite", (store) => store.delete(STORAGE_KEY)),
   };
 }
@@ -160,12 +163,32 @@ export function currentDevice() {
   return cachedPromise;
 }
 
-/** Rotation intentionally requires registering the new public key again. */
-export async function rotateDeviceKey() {
+/** Server-confirmed two-phase self rotation. The staged non-extractable key
+ * survives a failed local promotion; repeating the same request is idempotent. */
+export async function rotateDeviceKey(apiBase, fetchFn = (...args) => fetch(...args)) {
   deviceStorage ||= indexedDeviceStorage();
-  await deviceStorage.remove();
-  await deviceStorage.clearLegacy();
-  initializing.delete(deviceStorage);
+  const storage = deviceStorage;
+  let staged = await storage.get(STAGED_STORAGE_KEY);
+  if (!staged) {
+    const pair = await globalThis.crypto.subtle.generateKey(P256, false, ["sign", "verify"]);
+    staged = { ...pair, createdAt: new Date().toISOString() };
+    await storage.set(STAGED_STORAGE_KEY, staged);
+  }
+  const current = await currentDevice();
+  const spki = await globalThis.crypto.subtle.exportKey("spki", staged.publicKey);
+  const pem = spkiToPem(spki);
+  const body = JSON.stringify({ public_key_pem: pem });
+  const response = await createSignedFetch(async () => current, fetchFn)(`${apiBase}/v1/devices/self/rotate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body,
+  });
+  if (!response.ok) {
+    let detail = ""; try { detail = (await response.json()).detail || ""; } catch (_) { /* no body */ }
+    throw new Error(`device rotation ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
+  await storage.set(STORAGE_KEY, staged);
+  await storage.removeKey(STAGED_STORAGE_KEY);
+  await storage.clearLegacy();
+  initializing.delete(storage);
   cachedPromise = null;
   return currentDevice();
 }
