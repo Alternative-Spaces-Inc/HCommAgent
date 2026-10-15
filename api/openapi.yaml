@@ -2394,6 +2394,7 @@ paths:
             application/json:
               schema:
                 items:
+                  additionalProperties: true
                   type: object
                 type: array
                 title: Response List Controls V1 Controls Get
@@ -5600,12 +5601,12 @@ components:
       properties:
         request_id:
           type: string
-          title: Request Id
           maxLength: 4000
+          title: Request Id
         control:
           type: string
-          title: Control
           maxLength: 4000
+          title: Control
         value:
           title: Value
         answered_by:
@@ -5671,7 +5672,8 @@ components:
           title: Voice Used
         passthrough:
           anyOf:
-          - type: object
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Passthrough
           description: For human answers, verified_identity snapshots Google subject/email
@@ -5698,8 +5700,8 @@ components:
       properties:
         control:
           type: string
-          title: Control
           maxLength: 4000
+          title: Control
         value:
           title: Value
           description: 'radio/dropdown/approve_deny: one option ID; checkbox/confirm_rows:
@@ -5762,7 +5764,8 @@ components:
           title: Voice Used
         passthrough:
           anyOf:
-          - type: object
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Passthrough
       additionalProperties: false
@@ -5793,7 +5796,8 @@ components:
           title: Actor
         detail:
           anyOf:
-          - type: object
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Detail
         at:
@@ -6092,7 +6096,8 @@ components:
           - type: 'null'
         zoom:
           anyOf:
-          - type: object
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Zoom
         control:
@@ -6241,8 +6246,8 @@ components:
           title: Delivered At
         state:
           type: string
-          title: State
           maxLength: 4000
+          title: State
       additionalProperties: false
       type: object
       required:
@@ -6428,7 +6433,8 @@ components:
           - type: 'null'
         zoom:
           anyOf:
-          - type: object
+          - additionalProperties: true
+            type: object
           - type: 'null'
           title: Zoom
         control:
@@ -6485,8 +6491,8 @@ components:
           $ref: '#/components/schemas/DeliverTo'
         request_id:
           type: string
-          title: Request Id
           maxLength: 4000
+          title: Request Id
         expires_at:
           anyOf:
           - type: string
@@ -6672,8 +6678,8 @@ components:
       properties:
         request_id:
           type: string
-          title: Request Id
           maxLength: 4000
+          title: Request Id
         state:
           type: string
           enum:
@@ -6703,8 +6709,8 @@ components:
       properties:
         request_id:
           type: string
-          title: Request Id
           maxLength: 4000
+          title: Request Id
         state:
           type: string
           enum:
