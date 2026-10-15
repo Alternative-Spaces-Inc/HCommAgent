@@ -145,9 +145,13 @@ jobs:
         run: |
           npm ci
           npm test
+          npm audit
+      - name: Run the nine browser proofs (plan P23 section 4, every PR)
+        working-directory: extension
+        timeout-minutes: 6
+        run: |
           npx playwright install --with-deps chromium
           npm run test:browser
-          npm audit
 
   swift-tests:
     name: Swift Tests (macOS)
