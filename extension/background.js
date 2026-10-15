@@ -8,6 +8,7 @@ import { createScopedState, API_BASE_KEY } from "./lib/state.js";
 
 const POLL_ALARM_NAME = "hca-inbox-poll";
 const NOTICE_KEY = "hca_delivery_notice";
+export const DECISION_TAB_KEY = "hca_decision_tab";
 export function createBackground(chromeObj, dependencies = {}) {
   const services = { ...api, signedFetch, currentDevice, rotateDeviceKey, ...dependencies };
   const storage = chromeObj.storage.local;
@@ -259,16 +260,44 @@ export function createBackground(chromeObj, dependencies = {}) {
   chromeObj.runtime.onInstalled.addListener(wake);
   chromeObj.runtime.onStartup.addListener(wake);
   chromeObj.alarms.onAlarm.addListener((alarm) => { if (alarm.name === POLL_ALARM_NAME) wake(); });
-  chromeObj.notifications.onClicked.addListener(async (id) => {
-    if (!id.startsWith("hca-")) return;
+  // HCA-P23 Day 1: a notification click has one deterministic path. The popup is the primary
+  // surface, so it is tried first; Chrome rejects openPopup without a focused window or while
+  // another popup is open, and before P23 that rejection was silent. Now the fallback is a full
+  // tab decision page at phone width showing the one ask. A second click while that tab exists
+  // focuses it instead of opening another; the tab id is remembered in storage (tabs.get needs
+  // no permission, tabs.query by URL would need "tabs"). Nothing is cleared on notification
+  // close: the ask stays in the inbox until answered or expired.
+  async function openDecision(requestId) {
+    try { await chromeObj.action.openPopup(); return { surface: "popup" }; } catch { /* fall through to the tab */ }
+    const url = chromeObj.runtime.getURL(`decision.html?request=${encodeURIComponent(requestId)}`);
+    const saved = (await storage.get(DECISION_TAB_KEY))[DECISION_TAB_KEY];
+    if (saved !== undefined && saved !== null) {
+      try {
+        const tab = await chromeObj.tabs.get(saved);
+        await chromeObj.tabs.update(tab.id, { active: true, url });
+        if (tab.windowId !== undefined && chromeObj.windows?.update) await chromeObj.windows.update(tab.windowId, { focused: true });
+        return { surface: "tab", tabId: tab.id, reused: true };
+      } catch { await storage.remove(DECISION_TAB_KEY); }
+    }
+    const tab = await chromeObj.tabs.create({ url });
+    await storage.set({ [DECISION_TAB_KEY]: tab.id });
+    return { surface: "tab", tabId: tab.id, reused: false };
+  }
+  async function notificationClicked(id) {
+    if (typeof id !== "string" || !id.startsWith("hca-")) return null;
     const s = await scope();
-    if (!s) return;
+    if (!s) return null;
     const requestId = id.slice(4);
     await states.update(s, (state) => ({ ...state, focusId: state.cache[requestId] ? requestId : null }), () => isCurrent(s));
-    await chromeObj.action.openPopup().catch(() => {});
+    return openDecision(requestId);
+  }
+  chromeObj.notifications.onClicked.addListener((id) => { void notificationClicked(id).catch(() => {}); });
+  chromeObj.tabs?.onRemoved?.addListener(async (tabId) => {
+    const saved = (await storage.get(DECISION_TAB_KEY))[DECISION_TAB_KEY];
+    if (saved === tabId) await storage.remove(DECISION_TAB_KEY);
   });
   // Ensure a missing alarm is restored whenever Chrome starts the worker.
   void chromeObj.alarms.create(POLL_ALARM_NAME, { periodInMinutes: 1 });
-  return { wake, pollInbox, connectStream, message, configChanged, handleStreamEvent, scope };
+  return { wake, pollInbox, connectStream, message, configChanged, handleStreamEvent, scope, notificationClicked, openDecision };
 }
 if (globalThis.chrome?.runtime) createBackground(globalThis.chrome).wake();

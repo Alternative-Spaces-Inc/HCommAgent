@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Human Collections Agent",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEA1EhU74erDyvCZiUcO7fkKaTCHcrfl9zBJY97mnMtGrdl+5ULZaGTQO68lWs80oktW+8l52TpLX6HtzpUQc3sQs1F6/mBSAX+lICKxNsJOrn4I/jP7HohttTyeXkt0zaYNQ/dbEJlJ+c2uB04XRfwvwU2DcKdmA8dTmbIf1XIfdW3l4RL1W96c1YaFPqzCySCGj6yQKTrJ9uT4nWGfjlu+YD6949YZ63uMSrO8m0jpeGfWu0OKChya0kja1FqvF5n800WdFurKA/eM/xlnzZTXdlM6RgoOF0VAaXl3EkSZuOubryOSwFKmJuQM6sfw34KMU/NP+kdM65j928HZsn9eQIDAQAB",
   "description": "Browser overlay surface for HCA: SSE inbox stream with a Chrome alarm fallback, accessible radio, checkbox, approve/deny, dropdown, chat, and row confirmation controls.",
   "icons": {
@@ -19,6 +19,9 @@
   "optional_host_permissions": [
     "https://*/*"
   ],
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'self'; connect-src https:"
+  },
   "oauth2": {
     "client_id": "529822100897-taeem2o8rr3av3s1v1tv7oj9eaf3efrr.apps.googleusercontent.com",
     "scopes": [

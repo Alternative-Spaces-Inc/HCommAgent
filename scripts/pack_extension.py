@@ -4,7 +4,7 @@
 Usage:
   python3 scripts/pack_extension.py --out dist [--commit <sha>]
 
-What goes in: manifest.json, background.js, popup.html, popup.js,
+What goes in: manifest.json, background.js, popup.html, popup.js, decision.html,
 options.html, options.js, lib/*.js, icons/*.png. What stays out: tests/,
 package.json, package-lock.json, anything dotfile. The manifest is copied
 unchanged except for "version_name", set to "<version>+<commit7>" when a
@@ -33,7 +33,7 @@ import zipfile
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 EXT = os.path.join(ROOT, "extension")
-REQUIRED = ["manifest.json", "background.js", "popup.html", "popup.js", "options.html", "options.js"]
+REQUIRED = ["manifest.json", "background.js", "popup.html", "popup.js", "decision.html", "options.html", "options.js"]
 
 
 def collect():
