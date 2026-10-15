@@ -396,6 +396,9 @@ class Device(Base):
     created_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     last_seen_at = Column(DateTime, nullable=True)
+    # HCA-P23 Day 3: old key remains valid through the rotation overlap.
+    superseded_by = Column(String, ForeignKey("devices.id"), nullable=True)
+    previous_valid_until = Column(DateTime, nullable=True)
     # HCA-P7: the Google account linked to this device through
     # POST /v1/devices/self/google-link (app/googleauth.py). Null until the
     # owner signs in from the options page.

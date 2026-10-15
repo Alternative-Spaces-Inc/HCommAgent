@@ -2394,7 +2394,6 @@ paths:
             application/json:
               schema:
                 items:
-                  additionalProperties: true
                   type: object
                 type: array
                 title: Response List Controls V1 Controls Get
@@ -2509,6 +2508,169 @@ paths:
                 pattern: ^[0-9a-f]{32}$
       security:
       - AdminToken: []
+  /v1/devices/self/rotate:
+    post:
+      tags:
+      - devices
+      summary: Rotate Self Device
+      description: 'HCA-P23 Day 3 (selection 1, docs/decisions/DECISIONS_20261015.md):
+        the
+
+        calling device registers its successor key itself. The successor carries
+
+        tenant, label, surface, priority and Google link; the old row is marked
+
+        superseded_by with previous_valid_until = now + HCA_DEVICE_ROTATION_OVERLAP_HOURS
+
+        (default 24) and keeps verifying until then. Idempotent: the same PEM again
+
+        returns the same successor (the client may retry after a failed local
+
+        write). 409 once rotated with a different key, or when revoked. Declared
+
+        before the admin /{device_id} routes so the literal path wins.'
+      operationId: rotate_self_device_v1_devices_self_rotate_post
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DeviceRotate'
+        required: true
+      responses:
+        '200':
+          description: Successful Response
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DeviceView'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '413':
+          description: Request body exceeds 1 MiB
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '429':
+          description: Shared rate limit or tenant quota reached
+          headers:
+            Retry-After:
+              description: Seconds until retry
+              schema:
+                type: string
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+        '409':
+          description: Device already rotated or revoked
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '422':
+          description: Validation Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '401':
+          description: Missing, invalid, stale or replayed authentication
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+        '403':
+          description: Credential, owner membership, tenant or configured authorization
+            refused
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/HTTPError'
+          headers:
+            X-Request-ID:
+              description: Server-generated correlation identifier; excludes request
+                content
+              schema:
+                type: string
+                pattern: ^[0-9a-f]{32}$
+      security:
+      - DeviceSignature: []
+        DeviceID: []
+        DeviceTimestamp: []
+        DeviceNonce: []
+      parameters:
+      - in: header
+        name: X-HCA-Device
+        required: true
+        description: Registered device ID
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
+      - in: header
+        name: X-HCA-Timestamp
+        required: true
+        description: Unix seconds within 300 seconds of server time
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 16
+      - in: header
+        name: X-HCA-Nonce
+        required: true
+        description: Fresh random nonce; replayed nonces are refused
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 128
+      - in: header
+        name: X-HCA-Signature
+        required: true
+        description: Base64url raw P-256 ECDSA signature over the canonical HCA1 request
+        schema:
+          type: string
+          minLength: 1
+          maxLength: 100
   /v1/devices:
     post:
       tags:
@@ -5438,12 +5600,12 @@ components:
       properties:
         request_id:
           type: string
-          maxLength: 4000
           title: Request Id
+          maxLength: 4000
         control:
           type: string
-          maxLength: 4000
           title: Control
+          maxLength: 4000
         value:
           title: Value
         answered_by:
@@ -5509,8 +5671,7 @@ components:
           title: Voice Used
         passthrough:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: object
           - type: 'null'
           title: Passthrough
           description: For human answers, verified_identity snapshots Google subject/email
@@ -5537,8 +5698,8 @@ components:
       properties:
         control:
           type: string
-          maxLength: 4000
           title: Control
+          maxLength: 4000
         value:
           title: Value
           description: 'radio/dropdown/approve_deny: one option ID; checkbox/confirm_rows:
@@ -5601,8 +5762,7 @@ components:
           title: Voice Used
         passthrough:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: object
           - type: 'null'
           title: Passthrough
       additionalProperties: false
@@ -5633,8 +5793,7 @@ components:
           title: Actor
         detail:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: object
           - type: 'null'
           title: Detail
         at:
@@ -5933,8 +6092,7 @@ components:
           - type: 'null'
         zoom:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: object
           - type: 'null'
           title: Zoom
         control:
@@ -6083,8 +6241,8 @@ components:
           title: Delivered At
         state:
           type: string
-          maxLength: 4000
           title: State
+          maxLength: 4000
       additionalProperties: false
       type: object
       required:
@@ -6142,6 +6300,17 @@ components:
       - label
       - public_key_pem
       title: DeviceRegistration
+    DeviceRotate:
+      properties:
+        public_key_pem:
+          type: string
+          maxLength: 2000
+          minLength: 100
+          title: Public Key Pem
+      type: object
+      required:
+      - public_key_pem
+      title: DeviceRotate
     DeviceView:
       properties:
         device_id:
@@ -6187,6 +6356,21 @@ components:
             format: date-time
           - type: 'null'
           title: Google Linked At
+        state:
+          type: string
+          title: State
+          default: active
+        superseded_by:
+          anyOf:
+          - type: string
+          - type: 'null'
+          title: Superseded By
+        previous_valid_until:
+          anyOf:
+          - type: string
+            format: date-time
+          - type: 'null'
+          title: Previous Valid Until
       type: object
       required:
       - device_id
@@ -6244,8 +6428,7 @@ components:
           - type: 'null'
         zoom:
           anyOf:
-          - additionalProperties: true
-            type: object
+          - type: object
           - type: 'null'
           title: Zoom
         control:
@@ -6302,8 +6485,8 @@ components:
           $ref: '#/components/schemas/DeliverTo'
         request_id:
           type: string
-          maxLength: 4000
           title: Request Id
+          maxLength: 4000
         expires_at:
           anyOf:
           - type: string
@@ -6489,8 +6672,8 @@ components:
       properties:
         request_id:
           type: string
-          maxLength: 4000
           title: Request Id
+          maxLength: 4000
         state:
           type: string
           enum:
@@ -6520,8 +6703,8 @@ components:
       properties:
         request_id:
           type: string
-          maxLength: 4000
           title: Request Id
+          maxLength: 4000
         state:
           type: string
           enum:
