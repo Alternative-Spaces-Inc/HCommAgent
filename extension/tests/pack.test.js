@@ -64,3 +64,25 @@ test("pack leaves tests and package files out and ships the runtime files", () =
 test("manifest version is a dotted number the store accepts as a release counter", () => {
   assert.match(manifest.version, /^\d+(\.\d+){1,3}$/);
 });
+
+// HCA-P23 Day 1: the manifest's security surface is pinned. A widened permission list, a
+// non empty host_permissions, a looser optional pattern or a weaker CSP fails here before
+// it reaches a store upload or an unpacked load.
+test("manifest permissions, host access and CSP are exactly the pinned set", () => {
+  assert.deepEqual(manifest.permissions, ["storage", "notifications", "alarms", "identity"]);
+  assert.deepEqual(manifest.host_permissions, []);
+  assert.deepEqual(manifest.optional_host_permissions, ["https://*/*"]);
+  assert.deepEqual(manifest.content_security_policy, { extension_pages: "script-src 'self'; object-src 'self'; connect-src https:" });
+  assert.equal(manifest.manifest_version, 3);
+  assert.equal(manifest.version, "0.4.0");
+  const pkg = JSON.parse(readFileSync(join(here, "..", "package.json"), "utf8"));
+  assert.equal(pkg.version, manifest.version);
+});
+
+test("the packed zip carries the CSP and the decision page", () => {
+  const r = pack("abcdef0123456789");
+  assert.deepEqual(zipManifest(r.zip).content_security_policy, manifest.content_security_policy);
+  const names = zipNames(r.zip);
+  assert.ok(names.includes("decision.html"), `decision.html missing from ${names.join(", ")}`);
+  assert.ok(names.includes("popup.html"));
+});

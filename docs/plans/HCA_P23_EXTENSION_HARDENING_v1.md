@@ -93,6 +93,6 @@ None. No credential, IAM, DNS or spend change. The Chrome Web Store upload of 0.
 | Day | Branch | State |
 |---|---|---|
 | Plan | p23/plan | this document |
-| 1 | p23/day1-client | not started |
+| 1 | p23/day1-client | PR open: layout, decision page, click path, CSP pin, 0.4.0; selection 2 taken (docs/decisions/DECISIONS_20261015.md) |
 | 2 | p23/day2-proofs | not started |
 | 3 | p23/day3-rotation | not started |
