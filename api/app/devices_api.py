@@ -133,6 +133,9 @@ def rotate_self_device(body: DeviceRotate, db: Session = Depends(get_db), device
         priority=device.priority, public_key_pem=body.public_key_pem.strip() + "\n", created_at=now,
         google_sub=device.google_sub, google_email=device.google_email, google_linked_at=device.google_linked_at)
     db.add(successor)
+    # The self-referential FK must point at a persisted successor before the
+    # old device row is updated, including on PostgreSQL.
+    db.flush()
     device.superseded_by = new_id
     device.previous_valid_until = until
     db.add(models.DeviceEvent(tenant_id=device.tenant_id, device_id=device.id, action="device_rotated",
