@@ -26,7 +26,7 @@ await new Promise((done) => server.listen(0, "127.0.0.1", done));
 const base = `http://127.0.0.1:${server.address().port}`;
 let browser;
 try {
-  browser = await chromium.launch({ headless: true });
+  browser = await chromium.launch({ headless: true, executablePath: process.env.HCA_CHROMIUM_PATH || undefined });
   const context = await browser.newContext();
   const first = await context.newPage(), second = await context.newPage();
   await Promise.all([first.goto(`${base}/options.html`), second.goto(`${base}/options.html`)]);

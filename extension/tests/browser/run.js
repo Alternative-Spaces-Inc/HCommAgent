@@ -3,7 +3,7 @@
 const { chromium } = await import(process.env.HCA_PLAYWRIGHT_MODULE || "playwright");
 import { serveExtension } from "./harness.js";
 const scenarios = [];
-for (const file of ["./offline_queue.js"]) scenarios.push(...Object.entries(await import(file)));
+for (const file of ["./offline_queue.js", "./stream_and_notify.js", "./pages.js"]) scenarios.push(...Object.entries(await import(file)));
 const server = await serveExtension();
 let browser; let failed = 0;
 try {
