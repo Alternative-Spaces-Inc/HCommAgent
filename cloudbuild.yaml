@@ -170,7 +170,7 @@ steps:
       - -c
       - |
         set -euo pipefail
-        python3 scripts/pack_extension.py --out dist --commit "$$COMMIT" | tee dist-pack.json
+        python3 scripts/pack_extension.py --target store --out dist --commit "$$COMMIT" | tee dist-pack.json
         ls -l dist
 
   - id: build

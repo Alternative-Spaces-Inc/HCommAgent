@@ -96,3 +96,7 @@ None. No credential, IAM, DNS or spend change. The Chrome Web Store upload of 0.
 | 1 | p23/day1-client | merged as PR 26 (main 31f19882): layout, decision page, click path, CSP pin, 0.4.0; selection 2 in docs/decisions/DECISIONS_20261015.md |
 | 2 | p23/day2-proofs | merged as PR 27 (main b6fb8ba2): nine browser proofs on every PR |
 | 3 | p23/day3-rotation | merged as PR 28 (main 2a6db249); live rotation and active/linked human check recorded in [Day 3 evidence](../deploys/2026-10-15_p23_day3_device_rotation.md); live old/new audit identifiers still unverified |
+
+## 9 Packaging follow-up (2026-10-15)
+
+After the live rotation proof and PR 29, the owner selected a durable unpacked/store OAuth packaging correction. Branch `p23/oauth-packaging` separates the public mappings, validates source pairing and explicitly selects the store target in Cloud Build. See [scope and local verification](../deploys/2026-10-15_p23_oauth_packaging.md). This follow-up does not close the outstanding live old/new audit-identifier requirement in section 5 and does not authorize a deploy or store upload.
