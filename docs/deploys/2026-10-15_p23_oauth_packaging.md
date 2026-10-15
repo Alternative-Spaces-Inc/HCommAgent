@@ -35,3 +35,8 @@ Local tests establish configuration consistency, not Google's future external cl
 The first PR head `6be7663` failed the credential gate because the manifest's existing exact-file exception still held the old full-file checksum. Inspection confirmed that the only changed manifest value was the OAuth client, and the unchanged `key` decoded as an RSA 2048-bit public key. Only the existing `extension/manifest.json:generic-api-key:5` exception checksum and its review reason were refreshed; no scanner rule, pattern, fingerprint or broad allowlist was changed.
 
 With the checksum-verified Gitleaks 8.30.1 binary, the local source and all fetched history scans passed. All four real-scanner regression tests then passed with `HCA_GITLEAKS_BINARY` explicitly configured, including failure on newly introduced/deleted historical credentials, file changes, reused exception locations and shallow history. These local results do not replace the final PR check results.
+
+
+## CodeQL follow-up: keep OAuth identifiers out of build logs
+
+CodeQL flagged the JSON status print for the public extension ID and OAuth client ID as clear-text sensitive logging. Although these values are public configuration, the packer does not need to emit them. The status JSON now omits both identifiers, and pack tests assert they remain absent while verifying the selected client in the generated archive. Updated the README to match. All 22 pack tests pass.

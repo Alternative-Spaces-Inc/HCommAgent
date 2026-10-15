@@ -144,8 +144,6 @@ def main():
         "checksum": checksum_path,
         "source_revision": args.commit or "local",
         "target": target,
-        "extension_id": extension_id,
-        "oauth_client_id": manifest["oauth2"]["client_id"],
     }))
     return 0
 

@@ -43,8 +43,8 @@ test("default store pack drops the key, selects the store OAuth client and repor
   assert.equal(m.version_name, `${manifest.version}+abcdef0`);
   assert.deepEqual(m.permissions, manifest.permissions);
   assert.equal(r.target, "store");
-  assert.equal(r.extension_id, clients.store.extension_id);
-  assert.equal(r.oauth_client_id, clients.store.client_id);
+  assert.equal(Object.hasOwn(r, "extension_id"), false);
+  assert.equal(Object.hasOwn(r, "oauth_client_id"), false);
   assert.deepEqual(m.oauth2, { ...manifest.oauth2, client_id: clients.store.client_id });
 });
 
@@ -53,7 +53,7 @@ test("pack --keep-key keeps the repo key for an unpacked load", () => {
   assert.equal(r.key_present, true);
   assert.equal(zipManifest(r.zip).key, manifest.key);
   assert.equal(r.target, "unpacked");
-  assert.equal(r.oauth_client_id, clients.unpacked.client_id);
+  assert.equal(Object.hasOwn(r, "oauth_client_id"), false);
   assert.equal(zipManifest(r.zip).oauth2.client_id, clients.unpacked.client_id);
   assert.ok(r.zip.endsWith("-unpacked.zip"));
 });
@@ -113,7 +113,7 @@ test("explicit targets retain stable store output and give unpacked output a dis
   const unpacked = pack("abcdef0123456789", ["--target", "unpacked"]);
   assert.equal(implicit.sha256, store.sha256);
   assert.notEqual(store.sha256, unpacked.sha256);
-  assert.equal(unpacked.extension_id, clients.unpacked.extension_id);
+  assert.equal(Object.hasOwn(unpacked, "extension_id"), false);
   assert.equal(zipManifest(unpacked.zip).key, manifest.key);
   assert.deepEqual(zipManifest(unpacked.zip).oauth2, manifest.oauth2);
   assert.notEqual(store.zip.split("/").pop(), unpacked.zip.split("/").pop());
