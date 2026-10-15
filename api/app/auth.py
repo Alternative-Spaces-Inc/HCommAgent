@@ -40,6 +40,7 @@ Two guards:
 """
 
 import asyncio
+import json
 import hmac
 import os
 from typing import Optional
@@ -159,6 +160,16 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
     canonical = devicesig.canonical_string(timestamp, nonce, request.method, path_and_query, body)
     if not devicesig.verify_signature(device.public_key_pem, canonical, signature):
         raise _device_401("device signature does not verify")
+    if device.superseded_by is not None and device.revoked_at is None:
+        until = device.previous_valid_until
+        if until is not None and until.tzinfo is None:
+            until = until.replace(tzinfo=timezone.utc)
+        if until is not None and until <= datetime.now(timezone.utc):
+            device.revoked_at = until
+            db.add(models.DeviceEvent(tenant_id=device.tenant_id, device_id=device.id, action="device_expired",
+                actor="system", detail=json.dumps({"superseded_by": device.superseded_by}), at=datetime.now(timezone.utc)))
+            db.commit()
+            raise HTTPException(status_code=403, detail="device rotation overlap expired")
     if not devicesig.replay_guard.check_and_record(device_id, nonce):
         raise _device_401("device signature replayed")
     # HCA-P20 Day 2: the same check against the nonces table, which every

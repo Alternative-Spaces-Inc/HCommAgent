@@ -37,7 +37,7 @@
     with a non-extractable P-256 key generated here and kept in IndexedDB. The
     server accepts it only after the owner registers the public key below
     (POST /v1/devices with the admin token). Clearing extension storage
-    makes a new key, which must be registered again.
+    rotates the server registration; both keys verify during the 24 hour overlap.
   </p>
   <label>Device id</label>
   <p><code id="device-id"></code> <span class="note">created <span id="device-created"></span></span></p>
@@ -47,7 +47,8 @@
   <span id="copied" class="saved" hidden>Copied</span>
 
   <p><button id="rotate-key">Rotate device key</button></p>
-  <p class="note">Rotation deletes the local private key and saved responses. Ask the administrator to revoke the old device registration on the server, then register this new public key and sign in again.</p>
+  <p id="device-state" class="note">Server device state unavailable until connected.</p>
+  <p class="note">Rotation requires a successful server response before the durable key changes. Saved offline responses are cleared after success.</p>
   <h2>Notification privacy</h2>
   <label><input id="notification-previews" type="checkbox" style="width:auto" /> Show decision titles and descriptions in system notifications</label>
   <p class="note">Notifications hide decision content by default. Enabling previews may expose it on your lock screen.</p>

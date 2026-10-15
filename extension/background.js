@@ -215,14 +215,16 @@ export function createBackground(chromeObj, dependencies = {}) {
       return { deviceId, publicKeyPem, createdAt };
     }
     if (msg.type === "hca_rotate_device") {
+      const configured = (await storage.get(API_BASE_KEY))[API_BASE_KEY];
+      if (!configured) throw new Error("Set the API server before rotating the device key");
+      const device = await services.rotateDeviceKey(normalizeApiOrigin(configured));
       invalidateNetwork();
       await queue.clear(() => true);
       const all = await storage.get(null);
       await storage.remove(Object.keys(all).filter((key) => key.startsWith("hca_state_v2:") || ["hca_inbox_cache", "hca_last_event_id", "hca_focus_request_id", "hca_answer_queue"].includes(key)));
       await clearNotifications(); await badge(null);
-      const device = await services.rotateDeviceKey();
       await storage.set({ hca_device_generation: globalThis.crypto.randomUUID() });
-      await notice("Device key rotated. Revoke the old server registration, register the new public key and sign in again before answering.");
+      await notice("Device key rotated. The previous key remains valid during the server overlap.");
       return { deviceId: device.deviceId, publicKeyPem: device.publicKeyPem, createdAt: device.createdAt };
     }
     const s = await scope();

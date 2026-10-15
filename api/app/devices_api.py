@@ -25,8 +25,9 @@ browser profiles). Each decision snapshots the verified Google subject/email and
 client descriptions are stored separately as untrusted metadata.
 """
 
+import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -37,6 +38,7 @@ from sqlalchemy.orm import Session
 from . import models
 from .auth import require_admin_bearer, require_device, require_linked_device, require_current_device
 from . import googleauth
+from . import events
 from . import tenancy
 from .db import get_db
 from .devicesig import device_id_for_public_key_pem
@@ -75,12 +77,81 @@ class DeviceView(UTCJSONModel):
     last_seen_at: Optional[datetime] = None
     google_email: Optional[str] = None
     google_linked_at: Optional[datetime] = None
+    state: str = "active"
+    superseded_by: Optional[str] = None
+    previous_valid_until: Optional[datetime] = None
 
 
 def _view(d: models.Device) -> DeviceView:
     return DeviceView(device_id=d.id, tenant_id=d.tenant_id, label=d.label, surface=d.surface, priority=d.priority if d.priority is not None else 100, created_at=d.created_at,
                       revoked_at=d.revoked_at, last_seen_at=d.last_seen_at,
-                      google_email=d.google_email, google_linked_at=d.google_linked_at)
+                      google_email=d.google_email, google_linked_at=d.google_linked_at,
+                      state=("revoked" if d.revoked_at is not None and d.superseded_by is None else "expired" if d.revoked_at is not None else "rotating" if d.superseded_by else "active"),
+                      superseded_by=d.superseded_by, previous_valid_until=d.previous_valid_until)
+
+
+class DeviceRotate(BaseModel):
+    public_key_pem: str = Field(min_length=100, max_length=2000)
+
+
+def device_rotation_overlap_hours() -> int:
+    try:
+        return max(0, int(os.environ.get("HCA_DEVICE_ROTATION_OVERLAP_HOURS", "24")))
+    except ValueError:
+        return 24
+
+
+@router.post("/self/rotate", response_model=DeviceView, responses={409: {"description": "Device already rotated or revoked"}})
+def rotate_self_device(body: DeviceRotate, db: Session = Depends(get_db), device: models.Device = Depends(require_device)):
+    """HCA-P23 Day 3 (selection 1, docs/decisions/DECISIONS_20261015.md): the
+    calling device registers its successor key itself. The successor carries
+    tenant, label, surface, priority and Google link; the old row is marked
+    superseded_by with previous_valid_until = now + HCA_DEVICE_ROTATION_OVERLAP_HOURS
+    (default 24) and keeps verifying until then. Idempotent: the same PEM again
+    returns the same successor (the client may retry after a failed local
+    write). 409 once rotated with a different key, or when revoked. Declared
+    before the admin /{device_id} routes so the literal path wins."""
+    try:
+        new_id = device_id_for_public_key_pem(body.public_key_pem)
+    except Exception as exc:
+        raise HTTPException(status_code=422, detail="public_key_pem must be an ECDSA P-256 public key in SPKI PEM form") from exc
+    if device.superseded_by:
+        successor = db.get(models.Device, device.superseded_by)
+        if successor and successor.public_key_pem.strip() == body.public_key_pem.strip():
+            return _view(successor)
+        raise HTTPException(status_code=409, detail="device already rotated")
+    if device.revoked_at is not None:
+        raise HTTPException(status_code=409, detail="device is revoked")
+    if new_id == device.id:
+        raise HTTPException(status_code=409, detail="new key must differ from current key")
+    existing = db.get(models.Device, new_id)
+    if existing is not None:
+        raise HTTPException(status_code=409, detail="successor key is already registered")
+    now = datetime.now(timezone.utc)
+    until = now + timedelta(hours=device_rotation_overlap_hours())
+    successor = models.Device(id=new_id, tenant_id=device.tenant_id, label=device.label, surface=device.surface,
+        priority=device.priority, public_key_pem=body.public_key_pem.strip() + "\n", created_at=now,
+        google_sub=device.google_sub, google_email=device.google_email, google_linked_at=device.google_linked_at)
+    db.add(successor)
+    # The self-referential FK must point at a persisted successor before the
+    # old device row is updated, including on PostgreSQL.
+    db.flush()
+    device.superseded_by = new_id
+    device.previous_valid_until = until
+    db.add(models.DeviceEvent(tenant_id=device.tenant_id, device_id=device.id, action="device_rotated",
+        actor=device.id, detail=json.dumps({"successor_device_id": new_id, "previous_valid_until": until.isoformat()}), at=now))
+    db.commit()
+    # Durable trace of the rotation on the tenant's event log (both devices
+    # receive it; the stream handler ignores unknown event names). The old
+    # device keeps verifying until previous_valid_until, then require_device
+    # revokes it on its next signed call (mirrors api key rotation, P21b).
+    try:
+        events.publish("device.rotated", {"device_id": device.id, "successor_id": new_id,
+                                          "previous_valid_until": until.isoformat()},
+                       tenant_id=device.tenant_id, device_ids=[device.id, new_id])
+    except Exception:  # noqa: BLE001  the rotation itself is already committed
+        pass
+    return _view(successor)
 
 
 @router.post("", response_model=DeviceView, status_code=201)

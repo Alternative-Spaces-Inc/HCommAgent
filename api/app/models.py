@@ -189,6 +189,19 @@ class ApiKeyEvent(Base):
     at = Column(DateTime, nullable=False)
 
 
+class DeviceEvent(Base):
+    """HCA-P23 device lifecycle audit records, committed with device state changes."""
+    __tablename__ = "device_events"
+    __table_args__ = (Index("ix_device_events_device_at", "device_id", "at"),)
+    id = Column(String, primary_key=True, default=gen_id)
+    tenant_id = Column(String, ForeignKey("tenants.id"), nullable=False)
+    device_id = Column(String, ForeignKey("devices.id"), nullable=False)
+    action = Column(String, nullable=False)
+    actor = Column(String, nullable=False)
+    detail = Column(Text, nullable=True)
+    at = Column(DateTime, nullable=False)
+
+
 class AuditRow(Base):
     """An AnswerRecord, one per answered ask, plus the audit fields GET /v1/audit needs."""
     __tablename__ = "audit_rows"
@@ -396,6 +409,9 @@ class Device(Base):
     created_at = Column(DateTime, nullable=False)
     revoked_at = Column(DateTime, nullable=True)
     last_seen_at = Column(DateTime, nullable=True)
+    # HCA-P23 Day 3: old key remains valid through the rotation overlap.
+    superseded_by = Column(String, ForeignKey("devices.id"), nullable=True)
+    previous_valid_until = Column(DateTime, nullable=True)
     # HCA-P7: the Google account linked to this device through
     # POST /v1/devices/self/google-link (app/googleauth.py). Null until the
     # owner signs in from the options page.

@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { webcrypto } from "node:crypto";
 import {
   b64url, canonicalString, deviceIdFromSpki, loadOrCreateDeviceKey, pathAndQueryOf,
-  sha256hex, signRequest, spkiToPem, STORAGE_KEY, createSignedFetch,
+  sha256hex, signRequest, spkiToPem, STORAGE_KEY, STAGED_STORAGE_KEY, createSignedFetch, rotateDeviceKey,
 } from "../lib/devicekey.js";
 
 const subtle = webcrypto.subtle;
@@ -118,4 +118,26 @@ test("signed fetch preserves idempotency headers and forcibly rejects redirects 
   assert.equal(call[1].headers.get("Idempotency-Key"), "stable");
   assert.equal(call[1].headers.get("X-HCA-Device"), device.deviceId);
   for (const url of ["http://api.example/answer", "https://name:pw@api.example/answer", "https://api.example/answer#x"]) await assert.rejects(run(url));
+});
+
+test("rotateDeviceKey keeps the current key on failure, reuses the staged PEM, and promotes only after a 2xx", async () => {
+  const storage = memoryStorage();
+  storage.removeKey = async (k) => { storage.map.delete(k); };
+  const before = await loadOrCreateDeviceKey(storage, subtle);
+  const seen = [];
+  const failing = async (url, init) => { seen.push({ url: String(url), body: JSON.parse(init.body), device: init.headers["X-HCA-Device-Id"] || init.headers.get?.("X-HCA-Device-Id") }); return new Response(JSON.stringify({ detail: "down" }), { status: 503 }); };
+  await assert.rejects(rotateDeviceKey("https://api.example", failing, { storage, subtle }), /device rotation 503: down/);
+  const afterFailure = await loadOrCreateDeviceKey(storage, subtle);
+  assert.equal(afterFailure.deviceId, before.deviceId, "current key unchanged after a failed rotation");
+  assert.ok(storage.map.get(STAGED_STORAGE_KEY)?.privateKey, "staged key survives the failure");
+  assert.equal(seen[0].url, "https://api.example/v1/devices/self/rotate");
+  assert.match(seen[0].body.public_key_pem, /^-----BEGIN PUBLIC KEY-----/);
+  assert.notEqual(seen[0].body.public_key_pem, before.publicKeyPem);
+  const ok = async (url, init) => { seen.push({ body: JSON.parse(init.body) }); return new Response(JSON.stringify({ device_id: "dev_x", state: "active" }), { status: 200 }); };
+  const after = await rotateDeviceKey("https://api.example", ok, { storage, subtle });
+  assert.equal(seen[1].body.public_key_pem, seen[0].body.public_key_pem, "the retry sends the same staged PEM (server idempotent)");
+  assert.equal(after.publicKeyPem, seen[1].body.public_key_pem, "the promoted key is the one the server accepted");
+  assert.notEqual(after.deviceId, before.deviceId);
+  assert.equal(storage.map.get(STAGED_STORAGE_KEY), undefined, "staged slot cleared after promotion");
+  assert.equal(storage.map.get(STORAGE_KEY).privateKey.extractable, false);
 });

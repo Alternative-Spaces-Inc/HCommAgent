@@ -41,6 +41,7 @@ OPERATION_ERRORS = {
     ("/v1/devices", "post"): {"409", "422"},
     ("/v1/devices/{device_id}/revoke", "post"): {"404"},
     ("/v1/devices/{device_id}", "patch"): {"404", "422"},
+    ("/v1/devices/self/rotate", "post"): {"409", "422"},
     ("/v1/devices/self/google-link", "post"): {"422", "503"},
     ("/v1/tenants", "post"): {"409", "422"},
     ("/v1/tenants/{tenant_id}", "get"): {"404"},

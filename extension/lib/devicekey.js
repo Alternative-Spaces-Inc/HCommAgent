@@ -10,6 +10,7 @@
 
 export const STORAGE_KEY = "hca_device_key";
 export const PREFIX = "HCA1";
+export const STAGED_STORAGE_KEY = "hca_device_key_staged";
 
 const P256 = { name: "ECDSA", namedCurve: "P-256" };
 const SIGN_ALG = { name: "ECDSA", hash: { name: "SHA-256" } };
@@ -123,6 +124,8 @@ export function indexedDeviceStorage(indexedDBObj = globalThis.indexedDB, chrome
     }),
     async legacy() { return (await chromeObj.storage.local.get(STORAGE_KEY))[STORAGE_KEY]; },
     async clearLegacy() { await chromeObj.storage.local.remove(STORAGE_KEY); },
+    set: (key, value) => transaction("readwrite", (store) => store.put(value, key)),
+    removeKey: (key) => transaction("readwrite", (store) => store.delete(key)),
     remove: () => transaction("readwrite", (store) => store.delete(STORAGE_KEY)),
   };
 }
@@ -160,14 +163,38 @@ export function currentDevice() {
   return cachedPromise;
 }
 
-/** Rotation intentionally requires registering the new public key again. */
-export async function rotateDeviceKey() {
-  deviceStorage ||= indexedDeviceStorage();
-  await deviceStorage.remove();
-  await deviceStorage.clearLegacy();
-  initializing.delete(deviceStorage);
-  cachedPromise = null;
-  return currentDevice();
+/** Server confirmed two phase self rotation (P23 Day 3, selection 1). Phase 1
+ * stages a non extractable successor key; phase 2 calls POST
+ * /v1/devices/self/rotate signed with the current key and promotes the staged
+ * key only after a 2xx. On any failure the current key stays and the staged key
+ * survives, so a retry sends the same PEM, which the server treats as
+ * idempotent (same successor). opts.storage and opts.subtle exist for tests. */
+export async function rotateDeviceKey(apiBase, fetchFn = (...args) => fetch(...args), opts = {}) {
+  const subtle = opts.subtle || globalThis.crypto.subtle;
+  const storage = opts.storage || (deviceStorage ||= indexedDeviceStorage());
+  let staged = await storage.get(STAGED_STORAGE_KEY);
+  if (!staged?.privateKey || !staged?.publicKey) {
+    const pair = await subtle.generateKey(P256, false, ["sign", "verify"]);
+    staged = { ...pair, createdAt: new Date().toISOString() };
+    await storage.set(STAGED_STORAGE_KEY, staged);
+  }
+  const current = opts.storage ? await loadOrCreateDeviceKey(storage, subtle) : await currentDevice();
+  const spki = await subtle.exportKey("spki", staged.publicKey);
+  const pem = spkiToPem(spki);
+  const body = JSON.stringify({ public_key_pem: pem });
+  const response = await createSignedFetch(async () => current, fetchFn)(`${apiBase}/v1/devices/self/rotate`, {
+    method: "POST", headers: { "Content-Type": "application/json" }, body,
+  });
+  if (!response.ok) {
+    let detail = ""; try { detail = (await response.json()).detail || ""; } catch (_) { /* no body */ }
+    throw new Error(`device rotation ${response.status}${detail ? `: ${detail}` : ""}`);
+  }
+  await storage.set(STORAGE_KEY, staged);
+  await (storage.removeKey ? storage.removeKey(STAGED_STORAGE_KEY) : storage.set(STAGED_STORAGE_KEY, undefined));
+  await storage.clearLegacy?.();
+  initializing.delete(storage);
+  if (!opts.storage) { cachedPromise = null; return currentDevice(); }
+  return loadOrCreateDeviceKey(storage, subtle);
 }
 
 /** Refuse redirects so signatures and credentials stay at the chosen host. */
