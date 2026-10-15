@@ -93,3 +93,18 @@ def test_rotate_rejects_bad_pem_and_same_key():
     body = json.dumps({'public_key_pem': old_pem}, separators=(',', ':')).encode()
     same = client.post('/v1/devices/self/rotate', content=body, headers={'Content-Type': 'application/json', **human_headers('POST', '/v1/devices/self/rotate', body, private_key=old_key, device_id=old_id)})
     assert same.status_code == 409
+
+
+def test_rotation_writes_device_events():
+    from app import models
+    from app.db import SessionLocal
+    old_key, old_pem = keypair()
+    _, new_pem = keypair()
+    old_id = device_id_for_public_key_pem(old_pem)
+    assert client.post('/v1/devices', json={'label': 'events', 'public_key_pem': old_pem, 'surface': 'browser_overlay'}, headers=ADMIN_AUTH).status_code == 201
+    body = json.dumps({'public_key_pem': new_pem}, separators=(',', ':')).encode()
+    assert client.post('/v1/devices/self/rotate', content=body, headers={'Content-Type': 'application/json', **human_headers('POST', '/v1/devices/self/rotate', body, private_key=old_key, device_id=old_id)}).status_code == 200
+    with SessionLocal() as db:
+        rows = db.query(models.DeviceEvent).filter(models.DeviceEvent.device_id == old_id).all()
+        assert [r.action for r in rows] == ['device_rotated']
+        assert json.loads(rows[0].detail)['successor_device_id'] == device_id_for_public_key_pem(new_pem)

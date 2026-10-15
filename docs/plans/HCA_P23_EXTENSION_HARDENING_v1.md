@@ -95,4 +95,4 @@ None. No credential, IAM, DNS or spend change. The Chrome Web Store upload of 0.
 | Plan | p23/plan | this document |
 | 1 | p23/day1-client | merged as PR 26 (main 31f19882): layout, decision page, click path, CSP pin, 0.4.0; selection 2 in docs/decisions/DECISIONS_20261015.md |
 | 2 | p23/day2-proofs | merged as PR 27 (main b6fb8ba2): nine browser proofs on every PR |
-| 3 | p23/day3-rotation | implementation in progress: server rotation route, overlap migration, staged client key promotion; PR pending |
+| 3 | p23/day3-rotation | PR open: signed self rotate with 24 h overlap (selection 1), two phase client swap, device_events audit, docs |

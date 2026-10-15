@@ -25,6 +25,7 @@ browser profiles). Each decision snapshots the verified Google subject/email and
 client descriptions are stored separately as untrusted metadata.
 """
 
+import json
 import os
 from datetime import datetime, timezone, timedelta
 from typing import Optional
@@ -134,6 +135,8 @@ def rotate_self_device(body: DeviceRotate, db: Session = Depends(get_db), device
     db.add(successor)
     device.superseded_by = new_id
     device.previous_valid_until = until
+    db.add(models.DeviceEvent(tenant_id=device.tenant_id, device_id=device.id, action="device_rotated",
+        actor=device.id, detail=json.dumps({"successor_device_id": new_id, "previous_valid_until": until.isoformat()}), at=now))
     db.commit()
     # Durable trace of the rotation on the tenant's event log (both devices
     # receive it; the stream handler ignores unknown event names). The old

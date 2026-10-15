@@ -40,6 +40,7 @@ Two guards:
 """
 
 import asyncio
+import json
 import hmac
 import os
 from typing import Optional
@@ -165,6 +166,8 @@ async def require_device(request: Request, db: Session = Depends(get_db), _sig: 
             until = until.replace(tzinfo=timezone.utc)
         if until is not None and until <= datetime.now(timezone.utc):
             device.revoked_at = until
+            db.add(models.DeviceEvent(tenant_id=device.tenant_id, device_id=device.id, action="device_expired",
+                actor="system", detail=json.dumps({"superseded_by": device.superseded_by}), at=datetime.now(timezone.utc)))
             db.commit()
             raise HTTPException(status_code=403, detail="device rotation overlap expired")
     if not devicesig.replay_guard.check_and_record(device_id, nonce):

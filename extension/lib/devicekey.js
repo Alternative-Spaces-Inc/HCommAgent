@@ -163,19 +163,23 @@ export function currentDevice() {
   return cachedPromise;
 }
 
-/** Server-confirmed two-phase self rotation. The staged non-extractable key
- * survives a failed local promotion; repeating the same request is idempotent. */
-export async function rotateDeviceKey(apiBase, fetchFn = (...args) => fetch(...args)) {
-  deviceStorage ||= indexedDeviceStorage();
-  const storage = deviceStorage;
+/** Server confirmed two phase self rotation (P23 Day 3, selection 1). Phase 1
+ * stages a non extractable successor key; phase 2 calls POST
+ * /v1/devices/self/rotate signed with the current key and promotes the staged
+ * key only after a 2xx. On any failure the current key stays and the staged key
+ * survives, so a retry sends the same PEM, which the server treats as
+ * idempotent (same successor). opts.storage and opts.subtle exist for tests. */
+export async function rotateDeviceKey(apiBase, fetchFn = (...args) => fetch(...args), opts = {}) {
+  const subtle = opts.subtle || globalThis.crypto.subtle;
+  const storage = opts.storage || (deviceStorage ||= indexedDeviceStorage());
   let staged = await storage.get(STAGED_STORAGE_KEY);
-  if (!staged) {
-    const pair = await globalThis.crypto.subtle.generateKey(P256, false, ["sign", "verify"]);
+  if (!staged?.privateKey || !staged?.publicKey) {
+    const pair = await subtle.generateKey(P256, false, ["sign", "verify"]);
     staged = { ...pair, createdAt: new Date().toISOString() };
     await storage.set(STAGED_STORAGE_KEY, staged);
   }
-  const current = await currentDevice();
-  const spki = await globalThis.crypto.subtle.exportKey("spki", staged.publicKey);
+  const current = opts.storage ? await loadOrCreateDeviceKey(storage, subtle) : await currentDevice();
+  const spki = await subtle.exportKey("spki", staged.publicKey);
   const pem = spkiToPem(spki);
   const body = JSON.stringify({ public_key_pem: pem });
   const response = await createSignedFetch(async () => current, fetchFn)(`${apiBase}/v1/devices/self/rotate`, {
@@ -186,11 +190,11 @@ export async function rotateDeviceKey(apiBase, fetchFn = (...args) => fetch(...a
     throw new Error(`device rotation ${response.status}${detail ? `: ${detail}` : ""}`);
   }
   await storage.set(STORAGE_KEY, staged);
-  await storage.removeKey(STAGED_STORAGE_KEY);
-  await storage.clearLegacy();
+  await (storage.removeKey ? storage.removeKey(STAGED_STORAGE_KEY) : storage.set(STAGED_STORAGE_KEY, undefined));
+  await storage.clearLegacy?.();
   initializing.delete(storage);
-  cachedPromise = null;
-  return currentDevice();
+  if (!opts.storage) { cachedPromise = null; return currentDevice(); }
+  return loadOrCreateDeviceKey(storage, subtle);
 }
 
 /** Refuse redirects so signatures and credentials stay at the chosen host. */
