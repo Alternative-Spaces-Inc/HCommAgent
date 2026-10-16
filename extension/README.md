@@ -1,6 +1,6 @@
 # Browser decision surface
 
-This developer build targets Chrome 122 or later. Load `extension/` as an unpacked extension in Chrome's extension settings. The public manifest key stabilizes its development ID; it is not a credential. The Google OAuth client must authorize that extension ID for sign-in. Store packaging removes the development key; configure the published ID before distributing a store build.
+This developer build targets Chrome 122 or later. Load `extension/` as an unpacked extension in Chrome's extension settings. The checked-in manifest pairs its public development key with the existing unpacked OAuth client, so copying the repository folder does not restore the store client. The key and OAuth client IDs are public configuration, not credentials. Store packaging selects a different existing client and removes the development key. See [Package targets](#package-targets) before distributing an artifact.
 
 Open Options, save a trusted **HTTPS origin** without a path, query, fragment or credentials, and grant access to that origin. The administrator must register the displayed public key, configure the permitted owner account and OAuth audience, and then you must sign in through Options. This extension intentionally refuses HTTP origins, including local HTTP; use a local HTTPS service for development.
 
@@ -39,3 +39,23 @@ The developer release candidate is 0.3.0. [Release instructions](../docs/RELEASE
 ## Decision page
 
 When a notification click cannot open the popup (`chrome.action.openPopup()` rejects), the extension opens `decision.html?request=<id>` in a tab at phone width with that one ask and the action bar pinned; a second click focuses the existing tab. The ask stays in the inbox until answered or expired. Proven by the `notifications` and `mobileFirstLayout` browser scenarios on every PR.
+
+
+## Package targets
+
+The build-only [OAuth mappings](oauth-clients.json) bind each existing extension ID to its public OAuth client ID. They do not grant access or create credentials. The server must separately accept the chosen client audience. These existing mappings are recorded in the [store setup runbook](../docs/runbooks/HCA_CHROME_WEB_STORE.md).
+
+| Installation | Extension ID | Manifest key | OAuth mapping |
+|---|---|---|---|
+| Raw `extension/` folder or unpacked archive | `jmpjjfhgggjmbebejaapchodjacmbmpm` | Retained | `unpacked` |
+| Chrome Web Store archive | `icaocojldacopllkkjdhghkeoeghccfe` | Removed | `store` |
+
+From the repository root, `python3 scripts/pack_extension.py --target store --out dist` builds the store archive. This remains the default target and keeps the existing `extension-<version>-<revision>.zip` filename. Cloud Build explicitly selects `--target store`.
+
+For an unpacked archive, use `python3 scripts/pack_extension.py --target unpacked --out dist`. Its filename ends in `-unpacked.zip`, so building both targets into the same directory cannot overwrite the store archive. Extract this archive before selecting its folder in Chrome. The legacy `--keep-key` flag is an alias for the unpacked target; combining it with `--target store` fails.
+
+Each successful build prints target, key presence, source revision and archive checksum as JSON. It deliberately omits extension and OAuth client identifiers from stdout; the selected mapping is validated and applied only to the archive. The manifest is rewritten only inside the archive. Packaging rejects a raw manifest whose public key hashes to a different unpacked extension ID or whose OAuth client disagrees with the unpacked mapping. It also rejects malformed, incomplete or duplicate target mappings before creating output. The mappings file is excluded from both runtime archives.
+
+To update an existing unpacked installation, keep its current Chrome installation and replace its runtime files with this corrected folder or an unpacked artifact, then reload the existing extension. Do not remove/reinstall it or copy a store archive over it: removing the installation can erase the registered device key. No new key registration or Google sign-in is required merely to correct public packaging metadata on an already linked device. Do not carry a manual store-client override forward into `extension/manifest.json`.
+
+The tests validate the configured pairing and archive contents locally. They cannot establish that Google has not subsequently deleted or reconfigured an external OAuth client; sign-in against Google remains a separate live check.

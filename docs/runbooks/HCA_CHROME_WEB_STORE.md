@@ -2,6 +2,12 @@
 
 > Historical setup record. For the 0.3.0 candidate, use [current release instructions](../RELEASES.md) and the [served privacy disclosure](../../api/app/privacy.py). Listing text must describe Google access-token verification, agent/webhook recipients and hosting, local storage/notification previews, and actual export/deletion/retention limits. Do not reuse older token or sharing claims. Source changes alone do not update the live privacy URL or Web Store listing; the operator must verify the deployed policy and configured extension/OAuth IDs before publication.
 
+## Current package target correction (2026-10-15)
+
+The raw repository `extension/manifest.json` now uses the existing unpacked client matching its development key. `scripts/pack_extension.py --target store` explicitly substitutes the existing store client and removes that key. `--target unpacked` (or legacy `--keep-key`) retains the matching unpacked identity. The build-only registry is [oauth-clients.json](../../extension/oauth-clients.json); [package target instructions](../../extension/README.md#package-targets) describe artifact names and validation.
+
+The historical Day 2 statement below that the store client becomes the repository manifest client is superseded. Leaving it there broke fresh Google linking for unpacked reinstalls. No client creation, credential rotation or server allowlist edit is part of this correction. Keep the existing Chrome installation when copying corrected unpacked files, then reload it; do not remove it merely to change packaging metadata.
+
 Plan: docs/plans/HCA_P17_CHROME_WEB_STORE_v1.md. Every owner step below
 is a dashboard click because the Chrome Web Store has no Terminal
 equivalent for registration, upload or review. The agent fetches the zip,
@@ -16,7 +22,7 @@ HCA Terminal session (gcloud signed in):
 
 Copy the newest extension-<version>-<sha7>.zip to ~/Downloads with
 gsutil cp. The build log step pack-extension prints the same JSON line the
-test asserts (version, version_name, key_present true, files 13, sha256);
+test asserts (version, version_name, target store, key_present false, sha256);
 compare the sha256 of the downloaded file with it before upload.
 
 Locally, without Cloud Build:

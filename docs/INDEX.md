@@ -42,3 +42,4 @@ Files under `plans/`, `deploys/`, `decisions/`, `dispatches/`, `research/` and o
 The project moved from `human-collections-agent` to `Alternative-Spaces-Inc/HCommAgent` on October 11, 2026. Earlier PR numbers in dated records refer to the previous repository; HCommAgent numbering starts again at 1. Use the source commit and dated evidence when comparing those records.
 
 - [P23 live device rotation evidence](deploys/2026-10-15_p23_day3_device_rotation.md): verified request receipts, signed-in owner observation, unpacked OAuth workaround and explicit remaining audit evidence.
+- [P23 OAuth package target correction](deploys/2026-10-15_p23_oauth_packaging.md): unpacked/store pairing separation, compatibility receipt and local regression results.

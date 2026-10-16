@@ -1,29 +1,18 @@
 #!/usr/bin/env python3
-"""pack_extension.py (HCA-P17): build the Chrome Web Store zip of extension/.
+"""Build a target-specific extension archive without reading any private key.
 
-Usage:
-  python3 scripts/pack_extension.py --out dist [--commit <sha>]
-
-What goes in: manifest.json, background.js, popup.html, popup.js, decision.html,
-options.html, options.js, lib/*.js, icons/*.png. What stays out: tests/,
-package.json, package-lock.json, anything dotfile. The manifest is copied
-unchanged except for "version_name", set to "<version>+<commit7>" when a
-commit is given, so a store listing shows which main commit built it.
-The "key" field is removed from the zipped manifest: the Chrome Web Store
-refuses an upload whose manifest carries one ("key field is not allowed in
-manifest", verified on the first draft upload, 2026-10-07). The repo
-manifest keeps the key so an unpacked load on the owner's Mac keeps its
-development ID; the store assigns its own ID to the published item (plan,
-Path B). Pass --keep-key only for a zip meant for an unpacked load.
-Nothing here reads a private key.
-
-Output: dist/extension-<version>-<commit7|local>.zip, a SHA256 sidecar and one JSON line on
-stdout: {"zip": ..., "version": ..., "version_name": ..., "key_present":
-false, "files": N, "sha256": ...}. Exit 1 if a required file is missing or
-the manifest version is not a plain dotted number.
+Default / --target store: remove the public development key and use the
+store OAuth client. --target unpacked (or legacy --keep-key): retain the
+public key and use its matching development client. The source manifest
+must always be a valid unpacked pairing, so copying extension/ remains safe.
+Public client/extension mappings live in extension/oauth-clients.json and
+are build inputs only, never runtime assets. Store archive names stay stable;
+unpacked archives have an -unpacked suffix to avoid target collisions.
 """
 
 import argparse
+import base64
+import binascii
 import hashlib
 import json
 import os
@@ -53,12 +42,54 @@ def collect():
     return sorted(files)
 
 
+def target_manifest(manifest, target):
+    """Validate both public mappings and the raw folder before making a copy."""
+    with open(os.path.join(EXT, "oauth-clients.json"), encoding="utf-8") as source:
+        clients = json.load(source)
+    if not isinstance(clients, dict) or set(clients) != {"unpacked", "store"}:
+        raise ValueError("OAuth mappings must contain exactly unpacked and store")
+    for entry in clients.values():
+        if not isinstance(entry, dict) or set(entry) != {"extension_id", "client_id"}:
+            raise ValueError("OAuth mapping needs extension_id and client_id")
+        if not isinstance(entry["extension_id"], str) or not re.fullmatch(r"[a-p]{32}", entry["extension_id"]):
+            raise ValueError("OAuth mapping has an invalid extension ID")
+        if not isinstance(entry["client_id"], str) or not re.fullmatch(
+            r"[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com", entry["client_id"]
+        ):
+            raise ValueError("OAuth mapping has an invalid client ID")
+    if any(clients["unpacked"][field] == clients["store"][field] for field in ("extension_id", "client_id")):
+        raise ValueError("Unpacked and store OAuth mappings must be distinct")
+    key = manifest.get("key")
+    if not isinstance(key, str) or not key:
+        raise ValueError("Source manifest must retain its public unpacked key")
+    try:
+        public_key = base64.b64decode(key, validate=True)
+    except (ValueError, binascii.Error) as exc:
+        raise ValueError("Source manifest key is not valid base64") from exc
+    key_hash = hashlib.sha256(public_key).hexdigest()[:32]
+    extension_id = "".join(chr(ord("a") + int(nibble, 16)) for nibble in key_hash)
+    if extension_id != clients["unpacked"]["extension_id"]:
+        raise ValueError("Source manifest key does not match unpacked extension ID")
+    oauth = manifest.get("oauth2")
+    if not isinstance(oauth, dict) or oauth.get("client_id") != clients["unpacked"]["client_id"]:
+        raise ValueError("Source manifest OAuth client does not match unpacked mapping")
+    result = dict(manifest)
+    result["oauth2"] = dict(oauth, client_id=clients[target]["client_id"])
+    if target == "store":
+        result.pop("key", None)
+    return result, clients[target]["extension_id"]
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--out", default="dist")
     ap.add_argument("--commit", default="")
-    ap.add_argument("--keep-key", action="store_true", help="keep the manifest key (unpacked loads only)")
+    ap.add_argument("--target", choices=("store", "unpacked"), help="archive target (default: store)")
+    ap.add_argument("--keep-key", action="store_true", help="legacy alias for --target unpacked")
     args = ap.parse_args()
+    if args.keep_key and args.target == "store":
+        ap.error("--keep-key conflicts with --target store")
+    target = args.target or ("unpacked" if args.keep_key else "store")
     if args.commit and not re.fullmatch(r"[0-9a-fA-F]{7,40}", args.commit):
         print("pack: commit must be a hexadecimal source revision", file=sys.stderr)
         return 1
@@ -73,13 +104,17 @@ def main():
     if not re.fullmatch(r"\d+(\.\d+){1,3}", version):
         print(f"pack: manifest version {version!r} is not a dotted number", file=sys.stderr)
         return 1
+    try:
+        manifest, extension_id = target_manifest(manifest, target)
+    except (OSError, ValueError) as exc:
+        print(f"pack: {exc}", file=sys.stderr)
+        return 1
     short = args.commit[:7] if args.commit else "local"
     manifest["version_name"] = f"{version}+{short}"
-    if not args.keep_key:
-        manifest.pop("key", None)
 
     os.makedirs(args.out, exist_ok=True)
-    zip_path = os.path.join(args.out, f"extension-{version}-{short}.zip")
+    suffix = "-unpacked" if target == "unpacked" else ""
+    zip_path = os.path.join(args.out, f"extension-{version}-{short}{suffix}.zip")
     files = collect()
     with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         for rel in files:
@@ -108,6 +143,7 @@ def main():
         "sha256": digest,
         "checksum": checksum_path,
         "source_revision": args.commit or "local",
+        "target": target,
     }))
     return 0
 
