@@ -1,6 +1,6 @@
 # Minimal musl runtime pinned by digest (Python 3.12, Alpine 3.24) so a rebuild cannot
 # silently pick up a different image; the digest is refreshed by a reviewed PR.
-FROM python:3.12-alpine3.24@sha256:1b668429b3511ab407d8e00648891631b0b1a4d7e15e3ca70f38ab5b91ad4ab4
+FROM python:3.12-alpine3.24@sha256:b658b05ce9c4eb97ec6fc19424818a1f31993659c2b505a532f470e83807815d
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
