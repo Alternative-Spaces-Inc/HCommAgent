@@ -3,7 +3,7 @@ pytest==9.1.1
 pytest-timeout==2.4.0
 pytest-cov==7.1.0
 jsonschema==4.26.0
-ruff==0.17.0
+ruff==0.17.2
 PyYAML==6.0.3
 openapi-spec-validator==0.9.0
 pip-audit==2.10.1
